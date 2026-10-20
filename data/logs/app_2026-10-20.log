@@ -1,0 +1,36 @@
+2026-10-20 15:02:33,523 | ERROR   | smartengage.monitor | فشل جلب تغريدات المدير (account acc_001): Page.goto: Timeout 60000ms exceeded.
+Call log:
+  - navigating to "https://x.com/home", waiting until "load"
+
+2026-10-20 15:02:33,890 | WARNING | smartengage.monitor | فشل جلب تغريدات المدير (error:Page.goto: Timeout 60000ms exceeded.
+Call log:
+  - navigating to "https://x.com/home", waiting) - إعادة المحاولة (2/3) بعد 5.4 ثانية
+2026-10-20 15:05:26,940 | INFO    | smartengage.monitor | جدولة تفاعل للتغريدة 2112515434163703879: 1 حساب | أول عملية بعد 24 دقيقة
+2026-10-20 15:11:51,817 | INFO    | smartengage.main | فحص المدير: ok | جديد: 5
+2026-10-20 15:11:51,826 | INFO    | smartengage.routine | acc_001 | خطة اليوم: 16 لايك / 2 ريتويت / 1 تعليق / 3 متابعة | جلسات: ['12:09', '14:50', '16:56'] | إحماء: 09:02
+2026-10-20 15:11:51,832 | INFO    | smartengage.routine | ===== بدء جلسة acc_001 (account1) =====
+2026-10-20 15:12:11,157 | INFO    | smartengage.routine | acc_001 | ريتويت عشوائي #1
+2026-10-20 15:12:31,739 | INFO    | smartengage.routine | acc_001 | لايك عشوائي #1
+2026-10-20 15:12:59,258 | INFO    | smartengage.routine | acc_001 | ريتويت عشوائي #2
+2026-10-20 15:14:21,343 | INFO    | smartengage.routine | acc_001 | تعليق عشوائي #1
+2026-10-20 15:14:42,828 | INFO    | smartengage.routine | acc_001 | لايك عشوائي #2
+2026-10-20 15:15:13,638 | INFO    | smartengage.routine | acc_001 | لايك عشوائي #3
+2026-10-20 15:15:25,630 | INFO    | smartengage.routine | acc_001 | لايك عشوائي #4
+2026-10-20 15:15:36,960 | INFO    | smartengage.routine | acc_001 | لايك عشوائي #5
+2026-10-20 15:16:45,881 | INFO    | smartengage.routine | acc_001 | لايك عشوائي #6
+2026-10-20 15:16:57,545 | INFO    | smartengage.routine | acc_001 | لايك عشوائي #7
+2026-10-20 15:18:25,496 | INFO    | smartengage.routine | acc_001 | لايك عشوائي #8
+2026-10-20 15:18:54,787 | INFO    | smartengage.routine | acc_001 | لايك عشوائي #9
+2026-10-20 15:19:18,797 | INFO    | smartengage.routine | acc_001 | لايك عشوائي #10
+2026-10-20 15:20:33,147 | INFO    | smartengage.routine | acc_001 | لايك عشوائي #11
+2026-10-20 15:21:03,348 | INFO    | smartengage.routine | acc_001 | لايك عشوائي #12
+2026-10-20 15:21:27,609 | INFO    | smartengage.routine | acc_001 | لايك عشوائي #13
+2026-10-20 15:21:49,556 | INFO    | smartengage.routine | acc_001 | لايك عشوائي #14
+2026-10-20 15:22:27,371 | INFO    | smartengage.routine | acc_001 | لايك عشوائي #15
+2026-10-20 15:22:48,544 | INFO    | smartengage.routine | acc_001 | لايك عشوائي #16
+2026-10-20 15:26:35,711 | INFO    | smartengage.grow | acc_001 | بحث كريبتو للمتابعة: "ethereum" (متبقي اليوم: 3)
+2026-10-20 15:27:04,881 | INFO    | smartengage.grow | acc_001 | تخطي @ethereumfndn: غير مؤهل (verified)
+2026-10-20 15:33:22,079 | INFO    | smartengage.grow | acc_001 | تخطي @elethereum: غير مؤهل (verified)
+2026-10-20 15:39:41,405 | INFO    | smartengage.grow | acc_001 | تخطي @MetaMask: غير مؤهل (verified)
+2026-10-20 15:45:58,566 | INFO    | smartengage.grow | acc_001 | زيارة فقط لـ @ETH_Daily (بدون متابعة)
+2026-10-20 15:52:13,474 | INFO    | smartengage.grow | acc_001 | تخطي @ethereum: غير مؤهل (verified)

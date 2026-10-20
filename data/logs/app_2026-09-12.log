@@ -1,0 +1,57 @@
+2026-09-12 13:03:28,713 | INFO    | smartengage.main | فحص المدير: ok | جديد: 6
+2026-09-12 13:03:28,723 | INFO    | smartengage.monitor | جدولة تفاعل للتغريدة 2000107022315139577: 1 حساب | أول عملية بعد 158 دقيقة
+2026-09-12 13:03:28,730 | INFO    | smartengage.routine | acc_001 | خطة اليوم: 12 لايك / 2 ريتويت / 1 تعليق / 3 متابعة | جلسات: ['09:22', '14:07'] | إحماء: 15:50
+2026-09-12 13:03:28,743 | INFO    | smartengage.routine | ===== بدء جلسة acc_001 (account1) =====
+2026-09-12 13:04:08,039 | INFO    | smartengage.routine | acc_001 | لايك عشوائي #1
+2026-09-12 13:04:23,028 | INFO    | smartengage.routine | acc_001 | لايك عشوائي #2
+2026-09-12 13:04:37,288 | INFO    | smartengage.routine | acc_001 | لايك عشوائي #3
+2026-09-12 13:04:51,935 | INFO    | smartengage.routine | acc_001 | لايك عشوائي #4
+2026-09-12 13:05:06,608 | INFO    | smartengage.routine | acc_001 | لايك عشوائي #5
+2026-09-12 13:05:34,094 | INFO    | smartengage.routine | acc_001 | لايك عشوائي #6
+2026-09-12 13:05:52,372 | INFO    | smartengage.routine | acc_001 | لايك عشوائي #7
+2026-09-12 13:06:09,180 | INFO    | smartengage.routine | acc_001 | ريتويت عشوائي #1
+2026-09-12 13:06:50,064 | INFO    | smartengage.routine | acc_001 | لايك عشوائي #8
+2026-09-12 13:07:10,051 | INFO    | smartengage.routine | acc_001 | لايك عشوائي #9
+2026-09-12 13:07:37,854 | INFO    | smartengage.routine | acc_001 | لايك عشوائي #10
+2026-09-12 13:07:52,524 | INFO    | smartengage.routine | acc_001 | لايك عشوائي #11
+2026-09-12 13:08:08,114 | INFO    | smartengage.routine | acc_001 | لايك عشوائي #12
+2026-09-12 13:11:07,389 | INFO    | smartengage.routine | acc_001 | ريتويت عشوائي #2
+2026-09-12 13:13:07,902 | ERROR   | smartengage.routine | acc_001 | خطأ في الجلسة: Page.wait_for_timeout: Target page, context or browser has been closed
+2026-09-12 13:13:08,459 | INFO    | smartengage.main | جلسات منفذة: 1
+2026-09-12 13:14:08,469 | INFO    | smartengage.routine | ===== بدء جلسة acc_001 (account1) =====
+2026-09-12 13:14:08,470 | ERROR   | smartengage.routine | acc_001 | خطأ في الجلسة: It looks like you are using Playwright Sync API inside the asyncio loop.
+Please use the Async API instead.
+2026-09-12 13:14:08,470 | INFO    | smartengage.main | جلسات منفذة: 1
+2026-09-12 13:15:08,471 | ERROR   | smartengage.main | خطأ في دورة المراقبة: It looks like you are using Playwright Sync API inside the asyncio loop.
+Please use the Async API instead.
+2026-09-12 13:25:08,593 | WARNING | smartengage.proxies | acc_001 | البروكسي socks5://@127.0.0.1:1 غير متاح - رجوع تلقائي للاتصال المباشر
+2026-09-12 13:25:08,594 | WARNING | smartengage.proxies | acc_001 | البروكسي socks5://@127.0.0.1:1 غير متاح و fallback_to_direct=false - المحاولة عبره (فشل عابر محتمل)
+2026-09-12 13:25:09,610 | WARNING | smartengage.proxies | لا بروكسي سليم متاح - جلسة الضيف عبر اتصال مباشر
+2026-09-12 13:25:09,678 | WARNING | smartengage.resilience | إعادة محاولة (2/3) بعد 1.8 ثانية: net::err
+2026-09-12 13:25:09,678 | WARNING | smartengage.resilience | إعادة محاولة (3/3) بعد 1.2 ثانية: net::err
+2026-09-12 13:25:09,678 | WARNING | smartengage.resilience | إعادة محاولة (2/3) بعد 0.6 ثانية: timed out
+2026-09-12 13:25:09,679 | WARNING | smartengage.resilience | إعادة محاولة (3/3) بعد 1.0 ثانية: timed out
+2026-09-12 13:28:46,230 | INFO    | smartengage.main | فحص المدير: ok | جديد: 5
+2026-09-12 13:28:46,232 | INFO    | smartengage.routine | ===== بدء جلسة acc_001 (account1) =====
+2026-09-12 13:32:27,036 | ERROR   | asyncio | Task was destroyed but it is pending!
+task: <Task pending name='Task-456' coro=<Locator.hover() done, defined at C:\Users\pdx\AppData\Local\Programs\Python\Python311\Lib\site-packages\playwright\_impl\_locator.py:450> wait_for=<Future pending cb=[Task.task_wakeup()]> cb=[SyncBase._sync.<locals>.<lambda>() at C:\Users\pdx\AppData\Local\Programs\Python\Python311\Lib\site-packages\playwright\_impl\_sync_base.py:111, ProtocolCallback.__init__.<locals>.cb() at C:\Users\pdx\AppData\Local\Programs\Python\Python311\Lib\site-packages\playwright\_impl\_connection.py:230]>
+2026-09-12 13:32:27,043 | ERROR   | asyncio | Task was destroyed but it is pending!
+task: <Task pending name='Task-457' coro=<BrowserContext.close() running at C:\Users\pdx\AppData\Local\Programs\Python\Python311\Lib\site-packages\playwright\_impl\_browser_context.py:584> cb=[SyncBase._sync.<locals>.<lambda>() at C:\Users\pdx\AppData\Local\Programs\Python\Python311\Lib\site-packages\playwright\_impl\_sync_base.py:111]>
+2026-09-12 13:56:01,519 | WARNING | smartengage.proxies | acc_001 | البروكسي socks5://@127.0.0.1:1 غير متاح - رجوع تلقائي للاتصال المباشر
+2026-09-12 13:56:01,537 | WARNING | smartengage.proxies | acc_001 | البروكسي socks5://@127.0.0.1:1 غير متاح - رجوع تلقائي للاتصال المباشر
+2026-09-12 13:56:02,595 | WARNING | smartengage.proxies | لا بروكسي سليم متاح - جلسة الضيف عبر اتصال مباشر
+2026-09-12 13:56:02,648 | WARNING | smartengage.resilience | إعادة محاولة (2/3) بعد 1.8 ثانية: net::err
+2026-09-12 13:56:02,648 | WARNING | smartengage.resilience | إعادة محاولة (3/3) بعد 1.2 ثانية: net::err
+2026-09-12 13:56:02,649 | WARNING | smartengage.resilience | إعادة محاولة (2/3) بعد 0.6 ثانية: timed out
+2026-09-12 13:56:02,649 | WARNING | smartengage.resilience | إعادة محاولة (3/3) بعد 1.0 ثانية: timed out
+2026-09-12 14:02:09,027 | INFO    | smartengage.main | فحص المدير: ok | جديد: 4
+2026-09-12 14:02:09,028 | INFO    | smartengage.routine | ===== بدء جلسة acc_001 (account1) =====
+2026-09-12 14:02:30,527 | INFO    | smartengage.routine | acc_001 | تعليق عشوائي #1
+2026-09-12 14:02:32,704 | INFO    | smartengage.grow | acc_001 | بحث كريبتو للمتابعة: "altcoins" (متبقي اليوم: 3)
+2026-09-12 14:02:58,542 | INFO    | smartengage.grow | acc_001 | تخطي @AltcoinShrine: غير مؤهل (verified)
+2026-09-12 14:07:36,803 | ERROR   | asyncio | Task was destroyed but it is pending!
+task: <Task pending name='Task-298' coro=<Page.wait_for_timeout() done, defined at C:\Users\pdx\AppData\Local\Programs\Python\Python311\Lib\site-packages\playwright\_impl\_page.py:1100> wait_for=<Future pending cb=[Task.task_wakeup()]> cb=[SyncBase._sync.<locals>.<lambda>() at C:\Users\pdx\AppData\Local\Programs\Python\Python311\Lib\site-packages\playwright\_impl\_sync_base.py:111, ProtocolCallback.__init__.<locals>.cb() at C:\Users\pdx\AppData\Local\Programs\Python\Python311\Lib\site-packages\playwright\_impl\_connection.py:230]>
+2026-09-12 14:07:36,810 | ERROR   | asyncio | Task was destroyed but it is pending!
+task: <Task pending name='Task-299' coro=<BrowserContext.close() running at C:\Users\pdx\AppData\Local\Programs\Python\Python311\Lib\site-packages\playwright\_impl\_browser_context.py:584> cb=[SyncBase._sync.<locals>.<lambda>() at C:\Users\pdx\AppData\Local\Programs\Python\Python311\Lib\site-packages\playwright\_impl\_sync_base.py:111]>
+2026-09-12 14:09:54,875 | INFO    | smartengage.main | فحص المدير: ok | جديد: 5
+2026-09-12 14:09:54,875 | INFO    | smartengage.routine | ===== بدء جلسة acc_001 (account1) =====

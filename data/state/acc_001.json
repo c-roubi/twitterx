@@ -1,0 +1,46 @@
+{
+  "date": "2026-10-20",
+  "caps": {
+    "likes": 16,
+    "retweets": 2,
+    "comments": 1,
+    "follows": 3
+  },
+  "rest_day": false,
+  "done": {
+    "likes": 16,
+    "retweets": 2,
+    "comments": 1,
+    "follows": 0
+  },
+  "sessions": [
+    {
+      "start": "12:09",
+      "minutes": 29
+    },
+    {
+      "start": "14:50",
+      "minutes": 16
+    },
+    {
+      "start": "16:56",
+      "minutes": 33
+    }
+  ],
+  "sessions_run": 0,
+  "warmup_at": "09:02",
+  "warmup_done": false,
+  "needs_relogin": false,
+  "last_session_end": null,
+  "active_days": 3,
+  "followed_handles": [],
+  "seen_users": [
+    "AltcoinShrine",
+    "ETH_Daily",
+    "MetaMask",
+    "elethereum",
+    "ethereum",
+    "ethereumfndn",
+    "theMarvelCrypto"
+  ]
+}

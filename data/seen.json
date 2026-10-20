@@ -1,0 +1,121 @@
+{
+  "1994760282065809633": {
+    "tweet_id": "1994760282065809633",
+    "url": "https://x.com/twitter/status/1994760282065809633",
+    "text": "مسابقة مهندس الكريبتو — 500$! \n\nجاهز تربح 100$؟ 👀🔥\n\nشروط المشاركة:\n\nتابع حسابي على تويتر:\n\n@engcryptoo\n\n\nhttps://\nx.com/engcryptoo\n\nتفاعل على هاي التويتة (لايك + كومنت).\n\nإعادة نشر (ريتويت).\n\nالجوائز:\n\n5 فائزين — كل واحد 100$\nالمجموع 500$\nوالسحب يتم عند وصول الحساب 1000 متابع.",
+    "detected_at": "2026-09-08T14:52:20",
+    "scheduled": true,
+    "queue": [
+      {
+        "account": "acc_001",
+        "actions": [
+          "like"
+        ],
+        "due": 1788873647.5193644,
+        "done": []
+      }
+    ]
+  },
+  "2004883408355557412": {
+    "tweet_id": "2004883408355557412",
+    "url": "https://x.com/twitter/status/2004883408355557412",
+    "text": "$BIFI \n تم تحقيق 65% من سعر دخولنا مبارك عليكم❤️\n\n#EPIK #ISLM #ONT #TRU $BOMB",
+    "detected_at": "2026-09-08T14:52:20",
+    "scheduled": true,
+    "queue": [
+      {
+        "account": "acc_001",
+        "actions": [
+          "like"
+        ],
+        "due": 1788872895.5810308,
+        "done": []
+      }
+    ]
+  },
+  "2004257433863245897": {
+    "tweet_id": "2004257433863245897",
+    "url": "https://x.com/twitter/status/2004257433863245897",
+    "text": "$SYLO \nتحقيق 40% ربح 🔥🔥",
+    "detected_at": "2026-09-08T14:52:20",
+    "scheduled": true,
+    "queue": [
+      {
+        "account": "acc_001",
+        "actions": [
+          "like"
+        ],
+        "due": 1788869545.8970153,
+        "done": []
+      }
+    ]
+  },
+  "2004138528163447267": {
+    "tweet_id": "2004138528163447267",
+    "url": "https://x.com/twitter/status/2004138528163447267",
+    "text": "$SYLO \nبدأت المضخة🔥",
+    "detected_at": "2026-09-08T14:52:20",
+    "scheduled": true,
+    "queue": [
+      {
+        "account": "acc_001",
+        "actions": [
+          "like"
+        ],
+        "due": 1788871299.537043,
+        "done": []
+      }
+    ]
+  },
+  "2004137642649395548": {
+    "tweet_id": "2004137642649395548",
+    "url": "https://x.com/twitter/status/2004137642649395548",
+    "text": "$SYLO 🔥🔥",
+    "detected_at": "2026-09-08T14:52:20",
+    "scheduled": true,
+    "queue": [
+      {
+        "account": "acc_001",
+        "actions": [
+          "like"
+        ],
+        "due": 1788870088.4457846,
+        "done": []
+      }
+    ]
+  },
+  "2000107022315139577": {
+    "tweet_id": "2000107022315139577",
+    "url": "https://x.com/twitter/status/2000107022315139577",
+    "text": "$BIFI",
+    "detected_at": "2026-09-12T13:03:28",
+    "scheduled": true,
+    "queue": [
+      {
+        "account": "acc_001",
+        "actions": [
+          "like"
+        ],
+        "due": 1789216899.5521863,
+        "done": []
+      }
+    ]
+  },
+  "2112515434163703879": {
+    "tweet_id": "2112515434163703879",
+    "url": "https://x.com/twitter/status/2112515434163703879",
+    "text": "$BOS \nThe downtrend was broken and successfully retested, stabilizing above it.\nThe coin has great potential.\nWe will see a strong pump.",
+    "detected_at": "2026-10-20T15:05:26",
+    "scheduled": true,
+    "queue": [
+      {
+        "account": "acc_001",
+        "actions": [
+          "like"
+        ],
+        "due": 1792499393.747439,
+        "done": []
+      }
+    ]
+  }
+}

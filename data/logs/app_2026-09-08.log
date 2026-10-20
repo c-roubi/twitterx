@@ -1,0 +1,89 @@
+2026-09-08 13:30:14,539 | WARNING | smartengage.proxies | acc_001 | البروكسي socks5://@127.0.0.1:1 غير متاح - رجوع تلقائي للاتصال المباشر
+2026-09-08 13:30:14,573 | WARNING | smartengage.proxies | acc_001 | البروكسي socks5://@127.0.0.1:1 غير متاح و fallback_to_direct=false - المحاولة عبره (فشل عابر محتمل)
+2026-09-08 13:30:15,636 | WARNING | smartengage.proxies | لا بروكسي سليم متاح - جلسة الضيف عبر اتصال مباشر
+2026-09-08 13:30:15,925 | WARNING | smartengage.resilience | إعادة محاولة (2/3) بعد 1.8 ثانية: net::err
+2026-09-08 13:30:15,928 | WARNING | smartengage.resilience | إعادة محاولة (3/3) بعد 1.2 ثانية: net::err
+2026-09-08 13:30:15,929 | WARNING | smartengage.resilience | إعادة محاولة (2/3) بعد 0.6 ثانية: timed out
+2026-09-08 13:30:15,931 | WARNING | smartengage.resilience | إعادة محاولة (3/3) بعد 1.0 ثانية: timed out
+2026-09-08 13:42:27,667 | WARNING | smartengage.proxies | acc_001 | البروكسي socks5://@127.0.0.1:1 غير متاح - رجوع تلقائي للاتصال المباشر
+2026-09-08 13:42:27,676 | WARNING | smartengage.proxies | acc_001 | البروكسي socks5://@127.0.0.1:1 غير متاح و fallback_to_direct=false - المحاولة عبره (فشل عابر محتمل)
+2026-09-08 13:42:28,708 | WARNING | smartengage.proxies | لا بروكسي سليم متاح - جلسة الضيف عبر اتصال مباشر
+2026-09-08 13:42:28,933 | WARNING | smartengage.resilience | إعادة محاولة (2/3) بعد 1.8 ثانية: net::err
+2026-09-08 13:42:28,933 | WARNING | smartengage.resilience | إعادة محاولة (3/3) بعد 1.2 ثانية: net::err
+2026-09-08 13:42:28,933 | WARNING | smartengage.resilience | إعادة محاولة (2/3) بعد 0.6 ثانية: timed out
+2026-09-08 13:42:28,934 | WARNING | smartengage.resilience | إعادة محاولة (3/3) بعد 1.0 ثانية: timed out
+2026-09-08 13:48:34,251 | INFO    | smartengage.main | فحص المدير: dry-run | جديد: 0
+2026-09-08 13:48:34,252 | INFO    | smartengage.routine | acc_001 | خطة اليوم: 15 لايك / 2 ريتويت / 1 تعليق / 4 متابعة | جلسات: ['12:31', '18:56', '20:40'] | إحماء: 09:14
+2026-09-08 13:48:34,271 | INFO    | smartengage.routine | ===== بدء جلسة acc_001 (account1) =====
+2026-09-08 13:48:34,273 | INFO    | smartengage.routine | ===== إحماء acc_001 (account1) =====
+2026-09-08 13:49:51,120 | INFO    | smartengage.routine | ===== بدء جلسة acc_001 (account1) =====
+2026-09-08 13:50:18,062 | INFO    | smartengage.routine | acc_001 | لايك عشوائي #1
+2026-09-08 13:50:32,745 | INFO    | smartengage.routine | acc_001 | لايك عشوائي #2
+2026-09-08 13:50:57,700 | INFO    | smartengage.routine | acc_001 | لايك عشوائي #3
+2026-09-08 13:51:47,020 | INFO    | smartengage.routine | acc_001 | لايك عشوائي #4
+2026-09-08 13:52:53,832 | INFO    | smartengage.routine | acc_001 | لايك عشوائي #5
+2026-09-08 13:54:07,511 | INFO    | smartengage.routine | acc_001 | لايك عشوائي #6
+2026-09-08 13:54:35,468 | INFO    | smartengage.routine | acc_001 | لايك عشوائي #7
+2026-09-08 13:55:11,821 | INFO    | smartengage.routine | acc_001 | لايك عشوائي #8
+2026-09-08 13:55:27,498 | INFO    | smartengage.routine | acc_001 | لايك عشوائي #9
+2026-09-08 13:55:42,162 | INFO    | smartengage.routine | acc_001 | لايك عشوائي #10
+2026-09-08 13:55:56,869 | INFO    | smartengage.routine | acc_001 | لايك عشوائي #11
+2026-09-08 13:56:18,888 | INFO    | smartengage.routine | acc_001 | لايك عشوائي #12
+2026-09-08 13:56:34,431 | INFO    | smartengage.routine | acc_001 | لايك عشوائي #13
+2026-09-08 13:56:49,144 | INFO    | smartengage.routine | acc_001 | لايك عشوائي #14
+2026-09-08 13:57:03,790 | INFO    | smartengage.routine | acc_001 | لايك عشوائي #15
+2026-09-08 13:57:28,774 | INFO    | smartengage.routine | acc_001 | ريتويت عشوائي #1
+2026-09-08 13:58:20,320 | INFO    | smartengage.routine | acc_001 | ريتويت عشوائي #2
+2026-09-08 14:04:26,064 | ERROR   | smartengage.routine | acc_001 | خطأ في الجلسة: Page.wait_for_timeout: Target page, context or browser has been closed
+2026-09-08 14:10:01,455 | WARNING | smartengage.proxies | acc_001 | البروكسي socks5://@127.0.0.1:1 غير متاح - رجوع تلقائي للاتصال المباشر
+2026-09-08 14:10:01,457 | WARNING | smartengage.proxies | acc_001 | البروكسي socks5://@127.0.0.1:1 غير متاح و fallback_to_direct=false - المحاولة عبره (فشل عابر محتمل)
+2026-09-08 14:10:02,480 | WARNING | smartengage.proxies | لا بروكسي سليم متاح - جلسة الضيف عبر اتصال مباشر
+2026-09-08 14:10:02,513 | WARNING | smartengage.resilience | إعادة محاولة (2/3) بعد 1.8 ثانية: net::err
+2026-09-08 14:10:02,513 | WARNING | smartengage.resilience | إعادة محاولة (3/3) بعد 1.2 ثانية: net::err
+2026-09-08 14:10:02,513 | WARNING | smartengage.resilience | إعادة محاولة (2/3) بعد 0.6 ثانية: timed out
+2026-09-08 14:10:02,513 | WARNING | smartengage.resilience | إعادة محاولة (3/3) بعد 1.0 ثانية: timed out
+2026-09-08 14:14:39,549 | WARNING | smartengage.proxies | acc_001 | البروكسي socks5://@127.0.0.1:1 غير متاح - رجوع تلقائي للاتصال المباشر
+2026-09-08 14:14:39,551 | WARNING | smartengage.proxies | acc_001 | البروكسي socks5://@127.0.0.1:1 غير متاح و fallback_to_direct=false - المحاولة عبره (فشل عابر محتمل)
+2026-09-08 14:14:40,565 | WARNING | smartengage.proxies | لا بروكسي سليم متاح - جلسة الضيف عبر اتصال مباشر
+2026-09-08 14:14:40,624 | WARNING | smartengage.resilience | إعادة محاولة (2/3) بعد 1.8 ثانية: net::err
+2026-09-08 14:14:40,624 | WARNING | smartengage.resilience | إعادة محاولة (3/3) بعد 1.2 ثانية: net::err
+2026-09-08 14:14:40,624 | WARNING | smartengage.resilience | إعادة محاولة (2/3) بعد 0.6 ثانية: timed out
+2026-09-08 14:14:40,625 | WARNING | smartengage.resilience | إعادة محاولة (3/3) بعد 1.0 ثانية: timed out
+2026-09-08 14:16:17,200 | ERROR   | smartengage.monitor | فشل جلب تغريدات المدير (guest): Page.wait_for_timeout: Target page, context or browser has been closed
+2026-09-08 14:16:17,743 | WARNING | smartengage.monitor | فشل جلب تغريدات المدير (error:Page.wait_for_timeout: Target page, context or browser has been closed) - إعادة المحاولة (2/3) بعد 5.3 ثانية
+2026-09-08 14:17:34,674 | INFO    | smartengage.routine | ===== بدء جلسة acc_001 (account1) =====
+2026-09-08 14:40:25,609 | INFO    | smartengage.grow | acc_001 | لايك كريبتو #1
+2026-09-08 14:41:34,624 | INFO    | smartengage.grow | acc_001 | بحث كريبتو للمتابعة: "solana" (متبقي اليوم: 4)
+2026-09-08 14:42:09,504 | INFO    | smartengage.grow | acc_001 | تخطي @theMarvelCrypto: no-profile
+2026-09-08 14:47:15,652 | ERROR   | smartengage.routine | acc_001 | خطأ في الجلسة: Page.wait_for_timeout: Target page, context or browser has been closed
+2026-09-08 14:50:39,789 | WARNING | smartengage.proxies | acc_001 | البروكسي socks5://@127.0.0.1:1 غير متاح - رجوع تلقائي للاتصال المباشر
+2026-09-08 14:50:39,792 | WARNING | smartengage.proxies | acc_001 | البروكسي socks5://@127.0.0.1:1 غير متاح و fallback_to_direct=false - المحاولة عبره (فشل عابر محتمل)
+2026-09-08 14:50:40,817 | WARNING | smartengage.proxies | لا بروكسي سليم متاح - جلسة الضيف عبر اتصال مباشر
+2026-09-08 14:50:40,840 | WARNING | smartengage.resilience | إعادة محاولة (2/3) بعد 1.8 ثانية: net::err
+2026-09-08 14:50:40,840 | WARNING | smartengage.resilience | إعادة محاولة (3/3) بعد 1.2 ثانية: net::err
+2026-09-08 14:50:40,840 | WARNING | smartengage.resilience | إعادة محاولة (2/3) بعد 0.6 ثانية: timed out
+2026-09-08 14:50:40,840 | WARNING | smartengage.resilience | إعادة محاولة (3/3) بعد 1.0 ثانية: timed out
+2026-09-08 14:52:20,210 | INFO    | smartengage.main | فحص المدير: ok | جديد: 5
+2026-09-08 14:52:20,212 | INFO    | smartengage.monitor | جدولة تفاعل للتغريدة 1994760282065809633: 1 حساب | أول عملية بعد 88 دقيقة
+2026-09-08 14:52:20,221 | INFO    | smartengage.monitor | جدولة تفاعل للتغريدة 2004883408355557412: 1 حساب | أول عملية بعد 75 دقيقة
+2026-09-08 14:52:20,227 | INFO    | smartengage.monitor | جدولة تفاعل للتغريدة 2004257433863245897: 1 حساب | أول عملية بعد 20 دقيقة
+2026-09-08 14:52:20,234 | INFO    | smartengage.monitor | جدولة تفاعل للتغريدة 2004138528163447267: 1 حساب | أول عملية بعد 49 دقيقة
+2026-09-08 14:52:20,242 | INFO    | smartengage.monitor | جدولة تفاعل للتغريدة 2004137642649395548: 1 حساب | أول عملية بعد 29 دقيقة
+2026-09-08 14:52:20,248 | INFO    | smartengage.routine | ===== بدء جلسة acc_001 (account1) =====
+2026-09-08 14:52:38,132 | INFO    | smartengage.routine | acc_001 | لايك عشوائي #2
+2026-09-08 14:53:18,163 | INFO    | smartengage.routine | acc_001 | لايك عشوائي #3
+2026-09-08 14:53:54,633 | INFO    | smartengage.routine | acc_001 | لايك عشوائي #4
+2026-09-08 14:54:23,851 | INFO    | smartengage.routine | acc_001 | لايك عشوائي #5
+2026-09-08 14:54:38,536 | INFO    | smartengage.routine | acc_001 | لايك عشوائي #6
+2026-09-08 14:54:55,547 | INFO    | smartengage.routine | acc_001 | لايك عشوائي #7
+2026-09-08 14:55:24,204 | INFO    | smartengage.routine | acc_001 | لايك عشوائي #8
+2026-09-08 14:55:42,575 | INFO    | smartengage.routine | acc_001 | لايك عشوائي #9
+2026-09-08 14:55:57,284 | INFO    | smartengage.routine | acc_001 | لايك عشوائي #10
+2026-09-08 14:56:29,241 | INFO    | smartengage.routine | acc_001 | لايك عشوائي #11
+2026-09-08 14:57:06,586 | INFO    | smartengage.routine | acc_001 | لايك عشوائي #12
+2026-09-08 14:57:21,234 | INFO    | smartengage.routine | acc_001 | لايك عشوائي #13
+2026-09-08 14:57:41,513 | INFO    | smartengage.routine | acc_001 | لايك عشوائي #14
+2026-09-08 14:59:17,867 | ERROR   | smartengage.routine | acc_001 | خطأ في الجلسة: Page.wait_for_timeout: Target page, context or browser has been closed
+2026-09-08 14:59:18,361 | INFO    | smartengage.routine | ===== إحماء acc_001 (account1) =====
+2026-09-08 14:59:18,361 | ERROR   | smartengage.routine | acc_001 | خطأ في الإحماء: It looks like you are using Playwright Sync API inside the asyncio loop.
+Please use the Async API instead.
