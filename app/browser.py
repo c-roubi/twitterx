@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """إدارة متصفح Playwright: بروفايل دائم لكل حساب + جلسة ضيف للمراقبة."""
 import os
+import shutil
 import time
 
 from playwright.sync_api import sync_playwright
@@ -11,6 +12,19 @@ from .humanizer import fingerprint_for, Human
 from .logger import get_logger
 
 log = get_logger("browser")
+
+
+def _find_chromium_executable():
+    """البحث عن ملف chromium التنفيذي: أولاً بالمسار المعتاد لـ Playwright، ثم بالنظام."""
+    pw_base = os.environ.get("PLAYWRIGHT_BROWSERS_PATH", "/opt/pw-browsers")
+    for entry in sorted(os.listdir(pw_base), reverse=True) if os.path.isdir(pw_base) else []:
+        if entry.startswith("chromium"):
+            for sub in ("chrome-linux64/chrome", "chrome-linux/chrome"):
+                p = os.path.join(pw_base, entry, sub)
+                if os.path.isfile(p):
+                    return p
+    return shutil.which("chromium") or shutil.which("chromium-browser")
+
 
 LOGIN_OK_SELECTORS = [
     'a[href="/home"]',
@@ -104,6 +118,10 @@ def launch_guest(cfg, pw):
         }
         if use_chrome:
             launch_kwargs["channel"] = "chrome"
+        else:
+            exe = _find_chromium_executable()
+            if exe:
+                launch_kwargs["executable_path"] = exe
         browser = pw.chromium.launch(**launch_kwargs)
         ctx_kwargs = {
             "viewport": {"width": fp["viewport"][0], "height": fp["viewport"][1]},
@@ -173,6 +191,9 @@ def launch_account(account, cfg, pw=None, owned_pw=True):
             ctx_kwargs["channel"] = "chrome"
         else:
             ctx_kwargs["user_agent"] = fp["user_agent"]
+            exe = _find_chromium_executable()
+            if exe:
+                ctx_kwargs["executable_path"] = exe
         if use_proxy:
             ctx_kwargs["proxy"] = proxies.proxy_args(use_proxy)
         context = pw.chromium.launch_persistent_context(**ctx_kwargs)
