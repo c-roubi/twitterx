@@ -166,18 +166,13 @@ def run_session(acc_id, cfg, accounts, dry_run=False):
                 save_state(acc_id, state)
             except Exception:
                 pass
-        if pw_owned:
-            try:
-                pw.stop()
-            except Exception:
-                pass
     finally:
         if ctx is not None:
             try:
                 ctx.close()
             except Exception:
                 pass
-        if pw_owned:
+        if pw is not None:
             try:
                 pw.stop()
             except Exception:
@@ -243,7 +238,7 @@ def run_warmup(acc_id, cfg, accounts, dry_run=False):
                 ctx.close()
             except Exception:
                 pass
-        if pw_owned:
+        if pw is not None:
             try:
                 pw.stop()
             except Exception:

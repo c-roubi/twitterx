@@ -11,7 +11,7 @@ from .logger import get_logger
 
 log = get_logger("monitor")
 
-TWEET_URL = "https://x.com/twitter/status/{tid}"
+TWEET_URL = "https://x.com/i/web/status/{tid}"
 
 
 def fetch_manager_tweets(cfg, accounts, dry_run=False):
@@ -85,10 +85,12 @@ def _fetch_with_account(cfg, accounts, acc_id):
     pw = sync_playwright().start()
     try:
         _, ctx, page, pw_owned = browser.launch_account(acc, cfg, pw=pw, owned_pw=False)
+        page.goto("https://x.com/home", timeout=60000, wait_until="domcontentloaded")
+        page.wait_for_timeout(3000)
         if not browser.is_logged_in(page):
-            # ✅ تم التعديل هنا: إضافة wait_until="domcontentloaded" لتسريع التحميل وتجنب الـ Timeout
-            page.goto("https://x.com/home", timeout=60000, wait_until="domcontentloaded")
-            page.wait_for_timeout(3000)
+            log.warning(f"{acc_id} | حساب المراقبة غير مسجّل الدخول")
+            browser.close_ctx(pw, ctx, False)
+            return [], "not-logged-in"
         human = humanizer.Human(page)
         ids, status = scrape_profile_tweets(
             page, cfg["manager_handle"].lstrip("@"), max_scrolls=3, human=human

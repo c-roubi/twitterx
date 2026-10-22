@@ -39,9 +39,9 @@ class Human:
 
     @staticmethod
     def _lognormal(lo, hi):
-        # توزيع مائل: غالباً قريب من الحد الأدنى مع ذيل طويل (سلوك بشري حقيقي)
-        mu = (lo + hi) / 2
-        sigma = (hi - lo) / 4
+        import math
+        mu = math.log(max(0.01, (lo + hi) / 2))
+        sigma = 0.3
         v = random.lognormvariate(mu, sigma)
         return max(lo * 0.8, min(v, hi * 1.2))
 
@@ -103,8 +103,9 @@ def build_comment(template, used_texts=(), force_unique=True):
             continue
         return base
     
-    # حل بديل آمن لتجنب التكرار النهائي
-    return spintax(template).strip() + f" {random.randint(10, 999)}"
+    base = spintax(template).strip()
+    suffix = random.choice(SUFFIX_POOL)
+    return base + suffix if suffix else base
 
 
 def lighter_day_factor():
@@ -191,13 +192,17 @@ def random_sessions(cfg):
 
 
 def fingerprint_for(account):
-    """بصمة متصفح ثابتة لكل حساب (تُحفظ أول مرة)."""
+    """بصمة متصفح ثابتة لكل حساب (مبنية على hash الحساب لتبقى ثابتة بين التشغيلات)."""
     fp = account.get("fingerprint")
     if fp:
         return fp
+    import hashlib
+    acc_id = account.get("id", account.get("handle", "default"))
+    seed = int(hashlib.md5(str(acc_id).encode()).hexdigest()[:8], 16)
+    rng = random.Random(seed)
     fp = {
-        "viewport": random.choice(VIEWPORTS),
-        "user_agent": random.choice(USER_AGENTS),
+        "viewport": rng.choice(VIEWPORTS),
+        "user_agent": rng.choice(USER_AGENTS),
         "locale": account.get("locale", "ar"),
         "timezone_id": account.get("timezone", "Asia/Riyadh"),
     }

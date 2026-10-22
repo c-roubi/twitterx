@@ -251,24 +251,23 @@ def all_of(page, candidates, visible=False):
     """كل العناصر المطابقة لأي من المرشحات (بدون تكرار حسب المقبض الفعلي)."""
     if isinstance(candidates, str):
         candidates = [candidates]
-    seen = set()
+    seen_boxes = []
     out = []
     for sel in candidates:
         try:
             for el in page.locator(sel).all():
                 if visible and not el.is_visible():
                     continue
-                
-                # استخدام المقبض الفعلي (element_handle) لضمان عدم التكرار بدقة
                 try:
-                    handle = el.element_handle()
-                    if handle:
-                        if handle in seen:
+                    box = el.bounding_box()
+                    if box:
+                        key = (round(box["x"]), round(box["y"]), round(box["width"]), round(box["height"]))
+                        if key in seen_boxes:
                             continue
-                        seen.add(handle)
-                        out.append(el)
+                        seen_boxes.append(key)
+                    out.append(el)
                 except Exception:
-                    pass
+                    out.append(el)
         except Exception:
             continue
     return out
