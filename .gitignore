@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+data/logs/
+data/profiles/
+data/sessions/
+data/state/
+*.tmp
