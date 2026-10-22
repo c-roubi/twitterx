@@ -10,7 +10,7 @@ from .actions import (
     TWEET_ARTICLE, LIKE_BTN, UNLIKE_BTN, RETWEET_BTN, UNRETWEET_BTN,
     comment_on_tweet, like_tweet, retweet_tweet, dismiss_compose_dialog,
     open_tweet, open_tweet_with_retry,
-    scroll_home,
+    scroll_home, extract_tweet_id,
 )
 from .selectors import RETWEET_CONFIRM_CANDIDATES, TWEET_TEXT
 from .comments import build_comment_for
@@ -301,11 +301,16 @@ def _pick_browse_action(cfg, state):
     return avail[-1]
 
 
-def _like_one_random(page, articles, acc_id, state, human):
+def _like_one_random(page, articles, acc_id, state, human, liked_ids=None):
     """لايك لتغريدة عشوائية واحدة ضمن الحد اليومي."""
     for art in random.sample(articles, min(len(articles), 5)):
         try:
+            tid = extract_tweet_id(art)
+            if tid and liked_ids is not None and tid in liked_ids:
+                continue
             if art.locator(UNLIKE_BTN).first.count() > 0:
+                if tid and liked_ids is not None:
+                    liked_ids.add(tid)
                 continue
             like_btn = art.locator(LIKE_BTN).first
             if like_btn.count() == 0 or not like_btn.is_visible():
@@ -314,6 +319,8 @@ def _like_one_random(page, articles, acc_id, state, human):
             human.pause(0.7, 2.0)
             like_btn.click()
             page.wait_for_timeout(1200)
+            if tid and liked_ids is not None:
+                liked_ids.add(tid)
             _mark_done(state, "likes")
             log.info(f"{acc_id} | لايك عشوائي #{state['done']['likes']}")
             return True
@@ -322,11 +329,16 @@ def _like_one_random(page, articles, acc_id, state, human):
     return False
 
 
-def _retweet_one_random(page, articles, acc_id, state, human):
+def _retweet_one_random(page, articles, acc_id, state, human, retweeted_ids=None):
     """ريتويت لتغريدة عشوائية واحدة ضمن الحد اليومي."""
     for art in random.sample(articles, min(len(articles), 5)):
         try:
+            tid = extract_tweet_id(art)
+            if tid and retweeted_ids is not None and tid in retweeted_ids:
+                continue
             if art.locator(UNRETWEET_BTN).first.count() > 0:
+                if tid and retweeted_ids is not None:
+                    retweeted_ids.add(tid)
                 continue
             rt = art.locator(RETWEET_BTN).first
             if rt.count() == 0 or not rt.is_visible():
@@ -343,6 +355,8 @@ def _retweet_one_random(page, articles, acc_id, state, human):
                     dismiss_compose_dialog(page, human)
                     log.warning(f"{acc_id} | فُتح محرر الاقتباس بالخطأ - أُغلق بدون حفظ")
                     return False
+                if tid and retweeted_ids is not None:
+                    retweeted_ids.add(tid)
                 _mark_done(state, "retweets")
                 log.info(f"{acc_id} | ريتويت عشوائي #{state['done']['retweets']}")
                 return True
@@ -357,6 +371,8 @@ def _browse_and_interact(page, acc_id, cfg, state, human, session_secs, session_
     en_ratio = _account_en_ratio(acc)
     last_action = None
     scrolls = 0
+    liked_ids = set()
+    retweeted_ids = set()
     dismiss_compose_dialog(page, human)  # تنظيف أي محرر/حوار من جولة سابقة
     while time.time() - session_start < session_secs:
         save_state(acc_id, state)  # حفظ التقدم عند كل دور
@@ -398,9 +414,9 @@ def _browse_and_interact(page, acc_id, cfg, state, human, session_secs, session_
         last_action = action
 
         if action == "like":
-            _like_one_random(page, articles, acc_id, state, human)
+            _like_one_random(page, articles, acc_id, state, human, liked_ids)
         elif action == "retweet":
-            _retweet_one_random(page, articles, acc_id, state, human)
+            _retweet_one_random(page, articles, acc_id, state, human, retweeted_ids)
         else:  # comment
             try:
                 art = random.choice(articles)

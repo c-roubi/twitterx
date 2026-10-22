@@ -166,9 +166,22 @@ def retweet_tweet(page, human):
             btn.hover()
             human.pause(0.8, 2.5)
             btn.click()
-            page.wait_for_timeout(1500)
-            # القائمة المنبثقة: زر Repost الصريح فقط - لا عناصر عامة قد تكون Quote
-            confirm = selectors.first(page, RETWEET_CONFIRM_CANDIDATES)
+            # انتظار ظهور القائمة المنبثقة (حتى 3 ثوانٍ)
+            confirm = None
+            for _ in range(6):
+                confirm = selectors.first(page, RETWEET_CONFIRM_CANDIDATES)
+                if confirm is not None:
+                    break
+                page.wait_for_timeout(500)
+            if confirm is None:
+                try:
+                    for mi in page.locator('[role="menuitem"]').all()[:3]:
+                        txt = (mi.inner_text() or "").lower()
+                        if any(k in txt for k in ("repost", "retweet", "إعادة نشر", "إعادة تغريد")):
+                            confirm = mi
+                            break
+                except Exception:
+                    pass
             if confirm is None:
                 page.keyboard.press("Escape")
                 return False, "menu-not-found"
@@ -293,7 +306,12 @@ def comment_on_tweet(page, text, human):
     dismiss_compose_dialog(page, human)  # خروج آمن من أي مسودة/حوار سابق
     for attempt in range(MAX_ATTEMPTS):
         try:
-            # افتح محرر الرد فقط إن لم يكن مفتوحاً مسبقاً (لا نغلق ما هو مفتوح)
+            # تمرير خفيف لإظهار منطقة الرد على صفحة التغريدة
+            try:
+                page.mouse.wheel(0, 300)
+                page.wait_for_timeout(600)
+            except Exception:
+                pass
             ta = selectors.first(page, TEXTAREA_CANDIDATES)
             if ta is None:
                 reply = selectors.first(page, REPLY_BTN_CANDIDATES)
@@ -301,8 +319,13 @@ def comment_on_tweet(page, text, human):
                     reply.hover()
                     human.pause(0.5, 1.6)
                     reply.click()
-                    page.wait_for_timeout(1200)
-                ta = selectors.first(page, TEXTAREA_CANDIDATES)
+                    for _w in range(8):
+                        ta = selectors.first(page, TEXTAREA_CANDIDATES)
+                        if ta is not None:
+                            break
+                        page.wait_for_timeout(500)
+                if ta is None:
+                    ta = selectors.first(page, TEXTAREA_CANDIDATES)
             if ta is None:
                 dismiss_compose_dialog(page, human)
                 if attempt == MAX_ATTEMPTS - 1:
@@ -365,6 +388,20 @@ def _tweet_text_of(art):
     except Exception:
         pass
     return ""
+
+
+def extract_tweet_id(art):
+    """استخراج معرّف التغريدة من عنصر المقال (أو None)."""
+    try:
+        link = art.locator(STATUS_LINK).first
+        if link.count() > 0:
+            href = link.get_attribute("href") or ""
+            m = re.search(r"/status/(\d+)", href)
+            if m:
+                return m.group(1)
+    except Exception:
+        pass
+    return None
 
 
 def scrape_profile_tweets(page, handle, max_scrolls=5, human=None):

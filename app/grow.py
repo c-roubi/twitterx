@@ -7,7 +7,7 @@ from urllib.parse import quote
 
 from .actions import (
     TWEET_ARTICLE, LIKE_BTN, UNLIKE_BTN, USER_CELL,
-    follow_user, open_profile, read_profile,
+    follow_user, open_profile, read_profile, extract_tweet_id,
 )
 from .browser import is_login_wall
 from .config import save_state
@@ -184,6 +184,7 @@ def browse_crypto_search(page, acc_id, cfg, state, human, budget_s, start):
         return
     page.wait_for_timeout(3500)
     scrolls = 0
+    liked_ids = set()
     while time.time() - start < budget_s:
         human.pause(2.0, 6.0)
         page.mouse.wheel(0, random.randint(500, 1500))
@@ -204,17 +205,21 @@ def browse_crypto_search(page, acc_id, cfg, state, human, budget_s, start):
         if likes_left and random.random() < 0.5:
             try:
                 art = random.choice(articles)
-                
-                # ✅ تم التعديل: التأكد أن التغريدة لم يتم الإعجاب بها مسبقاً لمنع إلغاء اللايك بالخطأ
-                if art.locator(UNLIKE_BTN).first.count() > 0:
+                tid = extract_tweet_id(art)
+                if tid and tid in liked_ids:
                     continue
-                    
+                if art.locator(UNLIKE_BTN).first.count() > 0:
+                    if tid:
+                        liked_ids.add(tid)
+                    continue
                 like_btn = art.locator(LIKE_BTN).first
                 if like_btn.count() > 0 and like_btn.is_visible():
                     like_btn.hover()
                     human.pause(0.7, 2.0)
                     like_btn.click()
                     page.wait_for_timeout(1200)
+                    if tid:
+                        liked_ids.add(tid)
                     state["done"]["likes"] += 1
                     save_state(acc_id, state)
                     log.info(f"{acc_id} | لايك كريبتو #{state['done']['likes']}")

@@ -141,7 +141,7 @@ def schedule_for_tweet(tid, text="", cfg=None, accounts=None):
 
     now = time.time()
     queue = []
-    for aid in chosen:
+    for idx, aid in enumerate(chosen):
         actions = []
         if random.random() <= mix.get("like", 1.0):
             actions.append("like")
@@ -151,7 +151,8 @@ def schedule_for_tweet(tid, text="", cfg=None, accounts=None):
             actions.append("comment")
         if not actions:
             actions = ["like"]
-        due = now + random.uniform(120, spread)  # أول عملية بعد دقيقتين على الأقل
+        delay = random.uniform(10, 90) if idx == 0 else random.uniform(120, spread)
+        due = now + delay
         queue.append({"account": aid, "actions": actions, "due": due, "done": []})
 
     seen[tid] = {
@@ -163,7 +164,7 @@ def schedule_for_tweet(tid, text="", cfg=None, accounts=None):
         "queue": queue,
     }
     save_seen(seen)
-    log.info(f"جدولة تفاعل للتغريدة {tid}: {len(queue)} حساب | أول عملية بعد {int((queue[0]['due']-now)/60)} دقيقة")
+    log.info(f"جدولة تفاعل للتغريدة {tid}: {len(queue)} حساب | أول عملية بعد {int((queue[0]['due']-now))} ثانية")
     return seen[tid]
 
 
