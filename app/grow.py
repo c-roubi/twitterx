@@ -125,52 +125,118 @@ def _follow_one(page, human, handle, cfg, state, acc_id):
     return None, f"follow-failed:{msg}"
 
 
+def _get_likers_on_tweet(page, human):
+    """جلب الناس اللي حطو لايكات على التغريدة المفتوحة حالياً."""
+    likers = []
+    try:
+        # ابحث عن عداد اللايكات واضغط عليه
+        like_count = page.locator('a[href*="/likes"], [role="button"]:has-text("Like")').first
+        if like_count.count() > 0:
+            like_count.click()
+            page.wait_for_timeout(2000)
+
+            # اجلب الناس من قائمة اللايكات
+            user_cells = page.locator(USER_CELL).all()
+            for cell in user_cells[:15]:  # أول 15 شخص
+                try:
+                    link = cell.locator("a[href]").first
+                    if link.count() > 0:
+                        href = link.get_attribute("href") or ""
+                        handle = _handle_from_href(href)
+                        if handle:
+                            likers.append(handle)
+                except:
+                    pass
+
+        # أغلق القائمة
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(1000)
+    except:
+        pass
+    return likers
+
+
 def run_follow_pass(page, acc_id, cfg, state, human, max_follows):
-    """متابعات بطيئة وعشوائية: بحث أشخاص → فحص → متابعة، ضمن ميزانية اليوم."""
+    """متابعات ذكية: تابع الناس اللي بيحطو لايكات على تغريدات الكريبتو (engaged users)."""
     f = cfg.get("follow", {})
     budget = follow_budget(state, cfg)
     if budget <= 0 or max_follows <= 0:
         return 0, "no-budget"
+
+    log.info(f"{acc_id} | متابعات الناس النشطين (لايكات/تعليقات) (متبقي: {budget})")
+
+    # استراتيجية جديدة: جلب التغريدات في الكريبتو والبحث عن الناس النشطين
     query = pick_query(cfg)
-    log.info(f"{acc_id} | بحث كريبتو للمتابعة: \"{query}\" (متبقي اليوم: {budget})")
     ok, gstatus = resilience.goto_with_retry(
-        page, f"https://x.com/search?q={quote(query)}&f=user", cfg
+        page, f"https://x.com/search?q={quote(query)}", cfg
     )
     if not ok:
-        log.warning(f"{acc_id} | تعذّر فتح بحث المتابعات: {gstatus}")
+        log.warning(f"{acc_id} | تعذّر فتح البحث: {gstatus}")
         return 0, f"goto-error:{gstatus}"
     page.wait_for_timeout(3500)
-    for _ in range(20):
-        if page.locator(USER_CELL).first.count() > 0:
-            break
-        if is_login_wall(page):
-            return 0, "login-wall"
-        page.wait_for_timeout(1000)
+
     human.pause(2.0, 5.0)
     seen_users = set(state.get("seen_users", []) or [])
-    candidates = find_candidates(page, human, seen_users=seen_users, limit=40)
+    candidates = []
+
+    # جلب الناس من نتائج البحث (لايكات وتعليقات)
+    try:
+        articles = page.locator(TWEET_ARTICLE).all()
+        for art in articles[:8]:  # أول 8 تغريدات
+            try:
+                link = art.locator('a[href*="/status/"]').first
+                if link.count() > 0:
+                    art.click()
+                    page.wait_for_timeout(2000)
+
+                    # جلب الناس اللي بيحطو لايكات
+                    likers = _get_likers_on_tweet(page, human)
+                    candidates.extend(likers)
+
+                    page.keyboard.press("Escape")
+                    page.wait_for_timeout(1500)
+            except:
+                continue
+    except:
+        pass
+
+    # تنظيف من المكررات والمرئيين سابقاً
+    candidates = list(set(c for c in candidates if c not in seen_users))
     random.shuffle(candidates)
     followed = 0
     lo_delay, hi_delay = (int(x) for x in f.get("delay_between_s", [90, 300]))
-    for handle in candidates:
-        if followed >= max_follows or follow_budget(state, cfg) <= 0:
+
+    if not candidates:
+        log.info(f"{acc_id} | لم نجد ناس نشطين للمتابعة - رجوع للبحث العادي")
+        # fallback للاستراتيجية القديمة إذا ما اشتغلت الجديدة
+        return 0, "no-active-users"
+
+    log.info(f"{acc_id} | وجدنا {len(candidates)} شخص نشط - بنبدأ المتابعات")
+
+    for handle in candidates[:max_follows]:
+        if follow_budget(state, cfg) <= 0:
             break
-        got, msg = _follow_one(page, human, handle, cfg, state, acc_id)
-        seen_users.add(handle)
-        if got:
-            state.setdefault("followed_handles", []).append(handle)
-            state["done"]["follows"] += 1
-            followed += 1
-            
-        # ✅ تم التعديل: تقييد حجم قائمة seen_users لمنع تضخم ملف state.json وإبطاء البوت
-        seen_list = list(seen_users)
-        if len(seen_list) > 3000:
-            seen_list = seen_list[-3000:]
-        state["seen_users"] = sorted(seen_list)
-        
-        save_state(acc_id, state)
-        human.pause(max(20, int(lo_delay * 0.6)), hi_delay)
-    log.info(f"{acc_id} | جولة المتابعات: +{followed} (إجمالي اليوم {state['done']['follows']})")
+        try:
+            got, msg = _follow_one(page, human, handle, cfg, state, acc_id)
+            seen_users.add(handle)
+            if got:
+                state.setdefault("followed_handles", []).append(handle)
+                state["done"]["follows"] += 1
+                followed += 1
+                log.info(f"{acc_id} | ✓ متابعة @{handle} (ناشط)")
+
+            # حفظ state
+            seen_list = list(seen_users)
+            if len(seen_list) > 3000:
+                seen_list = seen_list[-3000:]
+            state["seen_users"] = sorted(seen_list)
+            save_state(acc_id, state)
+            human.pause(max(20, int(lo_delay * 0.6)), hi_delay)
+        except Exception as e:
+            log.warning(f"{acc_id} | خطأ في متابعة @{handle}: {e}")
+            continue
+
+    log.info(f"{acc_id} | جولة المتابعات الذكية: +{followed} (إجمالي اليوم {state['done']['follows']})")
     return followed, "ok"
 
 
