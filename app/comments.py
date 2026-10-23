@@ -22,6 +22,27 @@ from .crypto_comments import (
 from .humanizer import build_comment
 
 
+def _is_sensitive_topic(tweet_text):
+    """تجنب التغريدات الحساسة: حرب، كوارث، سياسة، كراهية، إلخ."""
+    sensitive_keywords = [
+        # حرب وعسكري
+        "war", "attack", "military", "ukraine", "russia", "israel", "palestine",
+        "bombing", "conflict", "troops", "forces",
+        # كوارث وموت
+        "disaster", "death", "killed", "dead", "died", "earthquake", "tsunami",
+        "crash", "collapse", "accident", "fatal",
+        # سياسة حساسة
+        "politics", "election", "politician", "coup",
+        # عنف وكراهية
+        "violence", "hate", "terror", "extremist", "racist",
+        # عربي
+        "الحرب", "هجوم", "عسكري", "قتل", "قتلى", "كارثة", "أزمة", "سياسة", "انتخابات",
+        "كره", "عنف", "إرهاب", "كارثة طبيعية",
+    ]
+    text_lower = (tweet_text or "").lower()
+    return any(keyword in text_lower for keyword in sensitive_keywords)
+
+
 def _unique(text, used_texts, force_unique=True):
     text = (text or "").strip()
     if not text:
@@ -82,7 +103,13 @@ def _contextual_comment(tweet_text, used, cfg=None, en_ratio=None):
 
 
 def build_comment_for(tweet_text, used_texts=(), cfg=None, force_unique=True, en_ratio=None):
-    """تعليق سياقي ذكي من نص التغريدة، مع تجنب تكرار التعليقات."""
+    """تعليق سياقي ذكي من نص التغريدة، مع تجنب تكرار التعليقات.
+
+    تجنب التغريدات الحساسة (حرب، كوارث، سياسة) - ترجع None بدل تعليق غير مناسب."""
+    # تجنب التغريدات الحساسة
+    if _is_sensitive_topic(tweet_text):
+        return None
+
     cfg = cfg or load_config()
     comments_cfg = cfg.get("comments", {})
     used = set(used_texts or ())
