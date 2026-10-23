@@ -141,10 +141,25 @@ def schedule_for_tweet(tid, text="", cfg=None, accounts=None):
 
     now = time.time()
     queue = []
+    # استراتيجية ذكية: like/retweet نسب عالية (80-95%) + variation
+    # هاي تبدو أكثر organic وأقل suspicious من fixed 100%
+    like_ratio = random.uniform(0.80, 0.95)  # 80-95% يعملوا like
+    retweet_ratio = random.uniform(0.80, 0.95)  # 80-95% يعملوا retweet
+    like_count = int(len(chosen) * like_ratio)
+    retweet_count = int(len(chosen) * retweet_ratio)
+    like_accounts = set(random.sample(chosen, like_count))
+    retweet_accounts = set(random.sample(chosen, retweet_count))
+
     for idx, aid in enumerate(chosen):
-        # تفاعل كامل: كل حساب يحط like + retweet + comment
-        # هاي الاستراتيجية الأقوى للتغريدات تعت المدير
-        actions = ["like", "retweet", "comment"]
+        actions = []
+        # Like: 80-95% من الحسابات
+        if aid in like_accounts:
+            actions.append("like")
+        # Retweet: 80-95% من الحسابات
+        if aid in retweet_accounts:
+            actions.append("retweet")
+        # Comment: كل الحسابات (100% - أقل suspicious)
+        actions.append("comment")
 
         delay = random.uniform(10, 90) if idx == 0 else random.uniform(120, spread)
         due = now + delay
