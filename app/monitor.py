@@ -107,10 +107,44 @@ def _fetch_with_account(cfg, accounts, acc_id):
             pass
 
 
-def schedule_for_tweet(tid, text="", cfg=None, accounts=None):
+def _detect_consecutive_tweets(seen):
+    """كشف التغريدات المتتالية: إرجاع (أحدث_tweet_id, أقدم_tweet_id) إذا كانتا متتاليتين خلال 5 دقايق."""
+    scheduled = [
+        (tid, entry["detected_at"])
+        for tid, entry in seen.items()
+        if entry.get("scheduled")
+    ]
+    if len(scheduled) < 2:
+        return None, None
+
+    # ترتيب حسب التاريخ (الأحدث أولاً)
+    scheduled.sort(key=lambda x: x[1], reverse=True)
+
+    latest_tid, latest_time = scheduled[0]
+    prev_tid, prev_time = scheduled[1]
+
+    # تحويل ISO timestamps إلى datetime objects
+    from datetime import datetime
+    try:
+        latest_dt = datetime.fromisoformat(latest_time)
+        prev_dt = datetime.fromisoformat(prev_time)
+        time_diff = (latest_dt - prev_dt).total_seconds()
+
+        # إذا الفرق أقل من 300 ثانية (5 دقايق) → متتاليتين
+        if 0 < time_diff < 300:
+            log.info(f"🔥 اكتشاف تغريدتين متتاليتين: {latest_tid} و {prev_tid} (فرق {int(time_diff)}s)")
+            return latest_tid, prev_tid
+    except Exception:
+        pass
+
+    return None, None
+
+
+def schedule_for_tweet(tid, text="", cfg=None, accounts=None, is_priority=False):
     """اختيار مجموعة حسابية عشوائية وتوزيع مهام عليها بجدول متدرج.
 
     text: نص التغريدة (يُحفظ لاستخدامه في التوليد السياقي للتعليقات).
+    is_priority: إذا True → التغريدة الأولى (متتالية) = full engagement (100% like/retweet).
     """
     seen = load_seen()
     if tid in seen and seen[tid].get("scheduled"):
@@ -141,10 +175,18 @@ def schedule_for_tweet(tid, text="", cfg=None, accounts=None):
 
     now = time.time()
     queue = []
-    # استراتيجية ذكية: like/retweet نسب عالية (80-95%) + variation
-    # هاي تبدو أكثر organic وأقل suspicious من fixed 100%
-    like_ratio = random.uniform(0.80, 0.95)  # 80-95% يعملوا like
-    retweet_ratio = random.uniform(0.80, 0.95)  # 80-95% يعملوا retweet
+
+    # استراتيجية ذكية بناءً على ما إذا كانت priority (أول تغريدة من متتاليتين)
+    if is_priority:
+        # 🔥 التغريدة الأولى → full engagement (100% like + retweet)
+        like_ratio = 1.0  # 100% يعملوا like
+        retweet_ratio = 1.0  # 100% يعملوا retweet
+        log.info(f"⚡ تغريدة الأولوية {tid}: تفاعل كامل (100% like/retweet)")
+    else:
+        # عادي: نسب عالية (80-95%) مع variation
+        like_ratio = random.uniform(0.80, 0.95)  # 80-95% يعملوا like
+        retweet_ratio = random.uniform(0.80, 0.95)  # 80-95% يعملوا retweet
+
     like_count = int(len(chosen) * like_ratio)
     retweet_count = int(len(chosen) * retweet_ratio)
     like_accounts = set(random.sample(chosen, like_count))
@@ -152,10 +194,10 @@ def schedule_for_tweet(tid, text="", cfg=None, accounts=None):
 
     for idx, aid in enumerate(chosen):
         actions = []
-        # Like: 80-95% من الحسابات
+        # Like: حسب النسبة
         if aid in like_accounts:
             actions.append("like")
-        # Retweet: 80-95% من الحسابات
+        # Retweet: حسب النسبة
         if aid in retweet_accounts:
             actions.append("retweet")
         # Comment: كل الحسابات (100% - أقل suspicious)
@@ -171,10 +213,12 @@ def schedule_for_tweet(tid, text="", cfg=None, accounts=None):
         "text": (text or "")[:2000],
         "detected_at": datetime.now().isoformat(timespec="seconds"),
         "scheduled": True,
+        "is_priority": is_priority,
         "queue": queue,
     }
     save_seen(seen)
-    log.info(f"جدولة تفاعل للتغريدة {tid}: {len(queue)} حساب | أول عملية بعد {int((queue[0]['due']-now))} ثانية")
+    engagement_type = "🔥 كامل" if is_priority else "📊 متغير"
+    log.info(f"جدولة تفاعل للتغريدة {tid}: {len(queue)} حساب | {engagement_type} | أول عملية بعد {int((queue[0]['due']-now))} ثانية")
     return seen[tid]
 
 

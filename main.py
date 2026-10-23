@@ -99,11 +99,14 @@ def cmd_check(args):
         snippet = (t.get("text", "") if isinstance(t, dict) else "").replace("\n", " ")[:70]
         print(f"  - {tid}  [{known}]" + (f"  | {snippet}" if snippet else ""))
     if tweets and not args.no_schedule:
+        # كشف التغريدات المتتالية (ضمن 5 دقايق)
+        priority_tid, _ = monitor._detect_consecutive_tweets(seen)
         for t in tweets:
             tid = t["id"] if isinstance(t, dict) else t
             text = t.get("text", "") if isinstance(t, dict) else ""
             if not seen.get(tid, {}).get("scheduled"):
-                monitor.schedule_for_tweet(tid, text, cfg, accounts)
+                is_priority = (tid == priority_tid)
+                monitor.schedule_for_tweet(tid, text, cfg, accounts, is_priority=is_priority)
 
 
 # FIX-WEDGE-V1: أنماط أخطاء Playwright القاتلة التي تُفسد عملية المونيتور بالكامل.
@@ -171,10 +174,13 @@ def cmd_monitor(args):
                 log.info(f"فحص المدير: {status} | جديد: {len(tweets)}")
                 if tweets:
                     seen = load_seen()
+                    # كشف التغريدات المتتالية (ضمن 5 دقايق)
+                    priority_tid, _ = monitor._detect_consecutive_tweets(seen)
                     for t in tweets:
                         tid = t["id"] if isinstance(t, dict) else t
                         if not seen.get(tid, {}).get("scheduled"):
-                            monitor.schedule_for_tweet(tid, t.get("text", "") if isinstance(t, dict) else "", cfg, accounts)
+                            is_priority = (tid == priority_tid)
+                            monitor.schedule_for_tweet(tid, t.get("text", "") if isinstance(t, dict) else "", cfg, accounts, is_priority=is_priority)
                 next_check_at = now + _next_interval(cfg)
             # 2) الجلسات اليومية + مهام المدير المستحقة
             res = routine.check_due_sessions(cfg, accounts, dry_run=args.dry_run)
@@ -201,10 +207,13 @@ def _run_full_pass(cfg, accounts, dry_run=False):
     log.info(f"فحص المدير: {status} | جديد: {len(tweets)}")
     if tweets:
         seen = load_seen()
+        # كشف التغريدات المتتالية (ضمن 5 دقايق)
+        priority_tid, _ = monitor._detect_consecutive_tweets(seen)
         for t in tweets:
             tid = t["id"] if isinstance(t, dict) else t
             if not seen.get(tid, {}).get("scheduled"):
-                monitor.schedule_for_tweet(tid, t.get("text", "") if isinstance(t, dict) else "", cfg, accounts)
+                is_priority = (tid == priority_tid)
+                monitor.schedule_for_tweet(tid, t.get("text", "") if isinstance(t, dict) else "", cfg, accounts, is_priority=is_priority)
                 res["scheduled"] += 1
     sres = routine.check_due_sessions(cfg, accounts, dry_run=dry_run)
     wres = routine.check_due_warmups(cfg, accounts, dry_run=dry_run)

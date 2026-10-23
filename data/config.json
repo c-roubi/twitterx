@@ -3,8 +3,8 @@
   "monitor": {
     "method": "account",
     "interval_min": [
-      6,
-      14
+      5,
+      5
     ],
     "use_account": "acc_001"
   },
