@@ -142,15 +142,10 @@ def schedule_for_tweet(tid, text="", cfg=None, accounts=None):
     now = time.time()
     queue = []
     for idx, aid in enumerate(chosen):
-        actions = []
-        if random.random() <= mix.get("like", 1.0):
-            actions.append("like")
-        if random.random() <= mix.get("retweet", 1.0):
-            actions.append("retweet")
-        if aid in commenters:
-            actions.append("comment")
-        if not actions:
-            actions = ["like"]
+        # تفاعل كامل: كل حساب يحط like + retweet + comment
+        # هاي الاستراتيجية الأقوى للتغريدات تعت المدير
+        actions = ["like", "retweet", "comment"]
+
         delay = random.uniform(10, 90) if idx == 0 else random.uniform(120, spread)
         due = now + delay
         queue.append({"account": aid, "actions": actions, "due": due, "done": []})
