@@ -29,10 +29,10 @@
     "en_ratio": 0.9,
     "ai": {
       "enabled": true,
-      "provider": "groq",
-      "api_key": "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",
-      "model": "llama-3.1-8b-instant",
-      "min_interval_s": 10
+      "provider": "gemini",
+      "api_key": "AQ.Ab8RN6JfylR7DrvrnCYX1lPznf0bYbIJ5X8zwtGZId9MRBcvmQ",
+      "model": "gemini-1.5-flash",
+      "min_interval_s": 5
     }
   },
   "behavior": {
