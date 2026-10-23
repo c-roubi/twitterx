@@ -53,7 +53,8 @@ def _unique(text, used_texts, force_unique=True):
 
 
 # انحياز القوالب التي تحمل {TICKER} عند وجود رمز عملة في التغريدة
-_TICKER_BIAS = 0.8
+# رفعناها لـ 0.95 عشان نكتسح توتير بـ $TICKER mentions
+_TICKER_BIAS = 0.95
 
 
 def _contextual_comment(tweet_text, used, cfg=None, en_ratio=None):
