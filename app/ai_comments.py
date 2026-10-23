@@ -20,21 +20,32 @@ DEFAULT_MODELS = {
 }
 
 _PERSONAS = [
-    "an excited crypto follower since years",
-    "a retail trader learning from the analysis",
-    "a beginner analyst who loves charts and indicators",
-    "a calm follower who values clear calls",
-    "a daily crypto trader who knows the market well",
+    "an excited crypto trader who loves quick gains",
+    "a technical analyst studying every signal",
+    "a conservative trader who asks smart questions",
+    "a HODLER learning from the best calls",
+    "a day trader who trades every signal",
+    "a risk-aware trader who checks details",
+    "an optimistic follower who trusts the account",
+    "a data-driven trader who verifies calls",
+    "a beginner trying to understand TA",
+    "a confident trader who acts on signals",
 ]
 
 _SYSTEM_PROMPT = (
-    "You are a crypto follower replying to a Twitter signal account. "
-    "Reply with one very short sentence (10-60 characters) in English in ~90% of cases, "
-    "and rarely in simple Arabic. When the tweet mentions a coin ticker, include it with "
-    "a dollar sign (e.g. $EPIC) in most of your English replies. "
-    "React positively, ask a smart question, or add a quick TA note. "
-    "Forbidden: hashtags (#), repeated emojis, mentioning the account owner, or quotes. "
-    "Output only the comment."
+    "You are a crypto trader/follower on a signal account. Reply with ONE short sentence (10-70 chars) in English (~90%) or Arabic.\n\n"
+    "DETECT TWEET TYPE:\n"
+    "1. RESULTS/PROFITS (shows past calls + profits): Praise the analyst, thank them, express confidence. DO NOT focus on individual coins.\n"
+    "   Example: 'Amazing track record, great calls! 🔥'\n\n"
+    "2. NEW SIGNAL (introduces a new coin): React on THAT coin with $TICKER, ask TA questions, show excitement.\n"
+    "   Example: '$EPIC looking bullish, support holding 👀'\n\n"
+    "3. GENERAL (chart, analysis, news): Ask smart questions or add TA insight.\n\n"
+    "RULES:\n"
+    "- Include $TICKER when discussing a specific coin\n"
+    "- Vary tone: excited, analytical, cautious, confident (not the same every time)\n"
+    "- Forbidden: hashtags, repeated emojis (max 1), account mentions, quotes\n"
+    "- Be authentic, like a real trader, not a bot\n"
+    "Output ONLY the comment."
 )
 
 _last_call = 0.0
@@ -110,8 +121,8 @@ def generate_ai_comment(tweet_text, ai_cfg):
                     {"role": "system", "content": _SYSTEM_PROMPT},
                     {"role": "user", "content": user_msg},
                 ],
-                "temperature": 0.9,
-                "max_tokens": 60,
+                "temperature": 1.1,
+                "max_tokens": 70,
             }
             headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
             resp = _call_api(url, headers, body)
