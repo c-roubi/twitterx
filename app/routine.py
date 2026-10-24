@@ -131,6 +131,9 @@ def run_session(acc_id, cfg, accounts, dry_run=False):
             return
         page.wait_for_timeout(3000)
 
+        # تعمل dismiss تلقائي لأي modal/popup (Views, alerts, إلخ)
+        actions.dismiss_all_modals(page, human)
+
         if browser.is_login_wall(page) or not browser.is_logged_in(page):
             state["needs_relogin"] = True
             save_state(acc_id, state)

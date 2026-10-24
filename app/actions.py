@@ -82,6 +82,36 @@ def dismiss_compose_dialog(page, human):
 # FIX-SAVEPOST-V2-DISMISS
 
 
+def dismiss_all_modals(page, human):
+    """تعمل dismiss تلقائي لأي modal/popup على الصفحة (Views, alerts, إلخ)."""
+    try:
+        # البحث عن زرار Dismiss
+        dismiss_btns = page.locator('button:has-text("Dismiss"), button:contains("Dismiss")')
+        if dismiss_btns.count() > 0:
+            try:
+                human.pause(0.2, 0.5)
+                dismiss_btns.first.click()
+                page.wait_for_timeout(600)
+                return True
+            except Exception:
+                pass
+
+        # محاولة X button للـ close
+        close_btn = page.locator('button[aria-label="Close"]')
+        if close_btn.count() > 0:
+            try:
+                human.pause(0.2, 0.5)
+                close_btn.first.click()
+                page.wait_for_timeout(600)
+                return True
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    return False
+
+
 def open_tweet(page, url):
     """فتح تغريدة. ترجع (ok, status) حيث status من: ok/deleted/login-wall/network-error/timeout/error."""
     try:
