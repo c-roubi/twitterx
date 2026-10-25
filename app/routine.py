@@ -6,10 +6,11 @@ from datetime import datetime
 
 from . import browser, monitor, resilience
 from . import selectors
+from . import actions
 from .actions import (
     TWEET_ARTICLE, LIKE_BTN, UNLIKE_BTN, RETWEET_BTN, UNRETWEET_BTN,
     comment_on_tweet, like_tweet, retweet_tweet, dismiss_compose_dialog,
-    open_tweet, open_tweet_with_retry,
+    open_tweet, open_tweet_with_retry, dismiss_all_modals,
     scroll_home, extract_tweet_id,
 )
 from .selectors import RETWEET_CONFIRM_CANDIDATES, TWEET_TEXT
@@ -583,6 +584,124 @@ def _dry_run_session(acc_id, cfg, state):
             print(f"      * تغريدة {t['tweet_id']}: {', '.join(t['remaining'])}")
     else:
         print("  - لا مهام مستحقة للمدير حالياً")
+
+
+def execute_single_account_immediate(acc_id, tid, tweet_text, cfg, accounts, delay):
+    """تنفيذ تفاعل فوري لحساب واحد على تغريدة (مباشرة بدون جدولة).
+
+    يفتح الحساب، ينتظر delay، ثم يعمل like + retweet + comment على التغريدة.
+    """
+    from playwright.sync_api import sync_playwright
+
+    acc = dict(accounts[acc_id])
+    acc["id"] = acc_id
+
+    pw = sync_playwright().start()
+    try:
+        _, ctx, page, pw_owned = browser.launch_account(acc, cfg, pw=pw, owned_pw=False)
+        human = Human(page)
+
+        # انتظر قليلاً (10-45 ثانية عشوائي)
+        time.sleep(delay)
+
+        # فتح التغريدة
+        tweet_url = f"https://x.com/i/web/status/{tid}"
+        ok, status = open_tweet_with_retry(page, tweet_url, cfg)
+        if not ok:
+            log.warning(f"{acc_id} | فتح التغريدة {tid} فشل: {status}")
+            return
+
+        human.pause(1.5, 3.0)
+
+        # البحث عن التغريدة على الصفحة
+        articles = page.locator(TWEET_ARTICLE).all()
+        if not articles:
+            log.warning(f"{acc_id} | لم نجد التغريدة {tid} على الصفحة")
+            return
+
+        article = articles[0]
+        state = load_state(acc_id)
+
+        # Like
+        try:
+            if article.locator(UNLIKE_BTN).first.count() == 0:
+                like_btn = article.locator(LIKE_BTN).first
+                if like_btn.count() > 0:
+                    like_btn.hover()
+                    human.pause(0.5, 1.5)
+                    like_btn.click()
+                    state["done"]["likes"] = state["done"].get("likes", 0) + 1
+                    log.info(f"{acc_id} | ❤️ لايك التغريدة {tid}")
+                    human.pause(1.0, 2.5)
+        except Exception as e:
+            log.warning(f"{acc_id} | خطأ في like: {e}")
+
+        # Retweet
+        try:
+            if article.locator(UNRETWEET_BTN).first.count() == 0:
+                rt_btn = article.locator(RETWEET_BTN).first
+                if rt_btn.count() > 0:
+                    rt_btn.hover()
+                    human.pause(0.5, 1.5)
+                    rt_btn.click()
+                    page.wait_for_timeout(1200)
+
+                    # confirm retweet
+                    confirm = selectors.first(page, RETWEET_CONFIRM_CANDIDATES)
+                    if confirm:
+                        human.pause(0.3, 0.8)
+                        confirm.click()
+                        state["done"]["retweets"] = state["done"].get("retweets", 0) + 1
+                        log.info(f"{acc_id} | 🔄 ريتويت التغريدة {tid}")
+                    human.pause(1.0, 2.5)
+        except Exception as e:
+            log.warning(f"{acc_id} | خطأ في retweet: {e}")
+
+        # Comment
+        try:
+            reply_btn = article.locator('[data-testid="reply"]').first
+            if reply_btn.count() > 0:
+                reply_btn.hover()
+                human.pause(0.5, 1.5)
+                reply_btn.click()
+                page.wait_for_timeout(1500)
+
+                # ابحث عن textarea
+                textarea = selectors.first(page, ['[data-testid="tweetTextarea"]'])
+                if textarea:
+                    textarea.hover()
+                    human.pause(0.3, 0.8)
+                    textarea.click()
+
+                    # توليد تعليق
+                    comment = build_comment_for(tweet_text, cfg=cfg)
+                    if comment:
+                        textarea.fill(comment)
+                        human.pause(0.5, 1.2)
+
+                        # ابحث عن send button
+                        send_btn = page.locator('button[data-testid="Tweet"]').first
+                        if send_btn.count() > 0 and send_btn.is_enabled():
+                            send_btn.click()
+                            page.wait_for_timeout(1200)
+                            state["done"]["comments"] = state["done"].get("comments", 0) + 1
+                            log.info(f"{acc_id} | 💬 تعليق على التغريدة {tid}")
+        except Exception as e:
+            log.warning(f"{acc_id} | خطأ في comment: {e}")
+
+        save_state(acc_id, state)
+
+    except Exception as e:
+        log.error(f"{acc_id} | خطأ في التفاعل الفوري: {e}")
+    finally:
+        try:
+            browser.close_ctx(pw, ctx, pw_owned)
+        except Exception:
+            pass
+        try:
+            pw.stop()
+        except Exception:
+            pass
 
 
 _CRASH_COOLDOWN_S = 300  # مهلة الأمان بعد انهيار جلسة: لا نعيد المحاولة خلالها
