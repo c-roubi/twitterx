@@ -13,7 +13,7 @@ from .actions import (
     open_tweet, open_tweet_with_retry, dismiss_all_modals,
     scroll_home, extract_tweet_id,
 )
-from .selectors import RETWEET_CONFIRM_CANDIDATES, TWEET_TEXT
+from .selectors import RETWEET_CONFIRM_CANDIDATES, TWEET_TEXT, first as selectors_first
 from .comments import build_comment_for
 from .config import (
     enabled_accounts, load_accounts, load_config,
@@ -351,7 +351,7 @@ def _retweet_one_random(page, articles, acc_id, state, human, retweeted_ids=None
             human.pause(0.8, 2.2)
             rt.click()
             page.wait_for_timeout(1200)
-            confirm = selectors.first(page, RETWEET_CONFIRM_CANDIDATES)
+            confirm = selectors_first(page, RETWEET_CONFIRM_CANDIDATES)
             if confirm is not None:
                 confirm.click()
                 page.wait_for_timeout(1500)
@@ -647,7 +647,7 @@ def execute_single_account_immediate(acc_id, tid, tweet_text, cfg, accounts, del
                     page.wait_for_timeout(1200)
 
                     # confirm retweet
-                    confirm = selectors.first(page, RETWEET_CONFIRM_CANDIDATES)
+                    confirm = selectors_first(page, RETWEET_CONFIRM_CANDIDATES)
                     if confirm:
                         human.pause(0.3, 0.8)
                         confirm.click()
@@ -667,7 +667,7 @@ def execute_single_account_immediate(acc_id, tid, tweet_text, cfg, accounts, del
                 page.wait_for_timeout(1500)
 
                 # ابحث عن textarea
-                textarea = selectors.first(page, ['[data-testid="tweetTextarea"]'])
+                textarea = selectors_first(page, ['[data-testid="tweetTextarea"]'])
                 if textarea:
                     textarea.hover()
                     human.pause(0.3, 0.8)
