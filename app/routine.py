@@ -694,10 +694,26 @@ def execute_single_account_immediate(acc_id, tid, tweet_text, cfg, accounts, del
                         if comment:
                             log.info(f"{acc_id} | تعليق مولد: {comment[:50]}")
 
-                            # اكتب بشكل بطيء character by character
-                            for char in comment:
-                                textarea.type(char)
-                                human.pause(0.01, 0.05)
+                            # جرب طرق مختلفة للكتابة
+                            written = False
+                            try:
+                                # الطريقة 1: استخدم page.keyboard
+                                page.keyboard.type(comment, delay=20)
+                                written = True
+                                log.info(f"{acc_id} | كُتب بـ keyboard.type")
+                            except Exception as e1:
+                                log.warning(f"{acc_id} | keyboard.type فشل: {e1}")
+                                try:
+                                    # الطريقة 2: استخدم fill
+                                    textarea.fill(comment)
+                                    written = True
+                                    log.info(f"{acc_id} | كُتب بـ fill")
+                                except Exception as e2:
+                                    log.warning(f"{acc_id} | fill فشل: {e2}")
+
+                            if not written:
+                                log.warning(f"{acc_id} | فشلت كل طرق الكتابة")
+                                raise Exception("Failed to write comment")
 
                             human.pause(0.8, 1.5)
 
