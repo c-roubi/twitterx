@@ -665,86 +665,19 @@ def execute_single_account_immediate(acc_id, tid, tweet_text, cfg, accounts, del
         except Exception as e:
             log.warning(f"{acc_id} | خطأ في retweet: {e}")
 
-        # Comment
+        # Comment - استخدم نفس الـ function اللي بتستخدم في Home
         try:
-            reply_btn = article.locator('[data-testid="reply"]').first
-            if reply_btn.count() > 0:
-                reply_btn.hover()
-                human.pause(0.5, 1.5)
-                reply_btn.click()
-                page.wait_for_timeout(2000)
-                log.info(f"{acc_id} | فتح نافذة الرد للتغريدة {tid}")
-
-                # ابحث عن textarea (محاولات متعددة)
-                textarea = None
-                for attempt in range(5):
-                    page.wait_for_timeout(300)
-                    textarea = selectors_first(page, ['[data-testid="tweetTextarea"]'])
-                    if textarea:
-                        log.info(f"{acc_id} | وجدت textarea في المحاولة {attempt + 1}")
-                        break
-
-                if textarea:
-                    try:
-                        # dismiss أي modals قد تحجب textarea
-                        actions.dismiss_all_modals(page, human)
-
-                        # scroll لـ textarea
-                        page.evaluate("arguments[0].scrollIntoView(true);", textarea.element_handle())
-                        human.pause(0.5, 1.0)
-
-                        # click و focus
-                        textarea.click()
-                        human.pause(0.5, 1.0)
-
-                        # توليد تعليق
-                        comment = build_comment_for(tweet_text, cfg=cfg)
-                        if comment:
-                            log.info(f"{acc_id} | تعليق مولد: {comment[:50]}")
-
-                            # جرب طرق مختلفة للكتابة
-                            written = False
-                            try:
-                                # الطريقة 1: استخدم page.keyboard
-                                page.keyboard.type(comment, delay=20)
-                                written = True
-                                log.info(f"{acc_id} | كُتب بـ keyboard.type")
-                            except Exception as e1:
-                                log.warning(f"{acc_id} | keyboard.type فشل: {e1}")
-                                try:
-                                    # الطريقة 2: استخدم fill
-                                    textarea.fill(comment)
-                                    written = True
-                                    log.info(f"{acc_id} | كُتب بـ fill")
-                                except Exception as e2:
-                                    log.warning(f"{acc_id} | fill فشل: {e2}")
-
-                            if not written:
-                                log.warning(f"{acc_id} | فشلت كل طرق الكتابة")
-                                raise Exception("Failed to write comment")
-
-                            human.pause(0.8, 1.5)
-
-                            # ابحث عن send button
-                            send_btn = page.locator('button[data-testid="Tweet"]').first
-                            if send_btn.count() > 0:
-                                if send_btn.is_enabled():
-                                    send_btn.click()
-                                    page.wait_for_timeout(1500)
-                                    state["done"]["comments"] = state["done"].get("comments", 0) + 1
-                                    log.info(f"{acc_id} | 💬 تعليق على التغريدة {tid} ✓")
-                                else:
-                                    log.warning(f"{acc_id} | Send button معطل")
-                            else:
-                                log.warning(f"{acc_id} | ما لقيت Send button")
-                        else:
-                            log.warning(f"{acc_id} | ما اتولد تعليق")
-                    except Exception as e:
-                        log.warning(f"{acc_id} | خطأ في كتابة التعليق: {e}")
+            comment = build_comment_for(tweet_text, cfg=cfg)
+            if comment:
+                log.info(f"{acc_id} | تعليق مولد: {comment[:50]}")
+                ok, status = comment_on_tweet(page, comment, human)
+                if ok:
+                    state["done"]["comments"] = state["done"].get("comments", 0) + 1
+                    log.info(f"{acc_id} | 💬 تعليق على التغريدة {tid} ✓")
                 else:
-                    log.warning(f"{acc_id} | ما لقيت textarea")
+                    log.warning(f"{acc_id} | comment_on_tweet فشل: {status}")
             else:
-                log.warning(f"{acc_id} | ما لقيت reply button")
+                log.warning(f"{acc_id} | ما اتولد تعليق")
         except Exception as e:
             log.warning(f"{acc_id} | خطأ في comment: {e}")
 
