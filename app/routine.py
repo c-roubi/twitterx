@@ -677,34 +677,48 @@ def execute_single_account_immediate(acc_id, tid, tweet_text, cfg, accounts, del
                         break
 
                 if textarea:
-                    textarea.hover()
-                    human.pause(0.3, 0.8)
-                    textarea.click()
-                    human.pause(0.5, 1.0)
+                    try:
+                        # dismiss أي modals قد تحجب textarea
+                        actions.dismiss_all_modals(page, human)
 
-                    # توليد تعليق
-                    comment = build_comment_for(tweet_text, cfg=cfg)
-                    if comment:
-                        log.info(f"{acc_id} | تعليق مولد: {comment[:50]}")
-                        textarea.fill(comment)
-                        human.pause(0.5, 1.2)
+                        # scroll لـ textarea
+                        page.evaluate("arguments[0].scrollIntoView(true);", textarea.element_handle())
+                        human.pause(0.5, 1.0)
 
-                        # ابحث عن send button
-                        send_btn = page.locator('button[data-testid="Tweet"]').first
-                        if send_btn.count() > 0:
-                            if send_btn.is_enabled():
-                                send_btn.click()
-                                page.wait_for_timeout(1200)
-                                state["done"]["comments"] = state["done"].get("comments", 0) + 1
-                                log.info(f"{acc_id} | 💬 تعليق على التغريدة {tid}")
+                        # click و focus
+                        textarea.click()
+                        human.pause(0.5, 1.0)
+
+                        # توليد تعليق
+                        comment = build_comment_for(tweet_text, cfg=cfg)
+                        if comment:
+                            log.info(f"{acc_id} | تعليق مولد: {comment[:50]}")
+
+                            # اكتب بشكل بطيء character by character
+                            for char in comment:
+                                textarea.type(char)
+                                human.pause(0.01, 0.05)
+
+                            human.pause(0.8, 1.5)
+
+                            # ابحث عن send button
+                            send_btn = page.locator('button[data-testid="Tweet"]').first
+                            if send_btn.count() > 0:
+                                if send_btn.is_enabled():
+                                    send_btn.click()
+                                    page.wait_for_timeout(1500)
+                                    state["done"]["comments"] = state["done"].get("comments", 0) + 1
+                                    log.info(f"{acc_id} | 💬 تعليق على التغريدة {tid} ✓")
+                                else:
+                                    log.warning(f"{acc_id} | Send button معطل")
                             else:
-                                log.warning(f"{acc_id} | Send button موجود لكن معطل")
+                                log.warning(f"{acc_id} | ما لقيت Send button")
                         else:
-                            log.warning(f"{acc_id} | ما لقيت Send button")
-                    else:
-                        log.warning(f"{acc_id} | ما اتولد تعليق (ممكن sensitive topic)")
+                            log.warning(f"{acc_id} | ما اتولد تعليق")
+                    except Exception as e:
+                        log.warning(f"{acc_id} | خطأ في كتابة التعليق: {e}")
                 else:
-                    log.warning(f"{acc_id} | ما لقيت textarea بعد 5 محاولات")
+                    log.warning(f"{acc_id} | ما لقيت textarea")
             else:
                 log.warning(f"{acc_id} | ما لقيت reply button")
         except Exception as e:
