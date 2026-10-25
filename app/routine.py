@@ -664,28 +664,49 @@ def execute_single_account_immediate(acc_id, tid, tweet_text, cfg, accounts, del
                 reply_btn.hover()
                 human.pause(0.5, 1.5)
                 reply_btn.click()
-                page.wait_for_timeout(1500)
+                page.wait_for_timeout(2000)
+                log.info(f"{acc_id} | فتح نافذة الرد للتغريدة {tid}")
 
-                # ابحث عن textarea
-                textarea = selectors_first(page, ['[data-testid="tweetTextarea"]'])
+                # ابحث عن textarea (محاولات متعددة)
+                textarea = None
+                for attempt in range(5):
+                    page.wait_for_timeout(300)
+                    textarea = selectors_first(page, ['[data-testid="tweetTextarea"]'])
+                    if textarea:
+                        log.info(f"{acc_id} | وجدت textarea في المحاولة {attempt + 1}")
+                        break
+
                 if textarea:
                     textarea.hover()
                     human.pause(0.3, 0.8)
                     textarea.click()
+                    human.pause(0.5, 1.0)
 
                     # توليد تعليق
                     comment = build_comment_for(tweet_text, cfg=cfg)
                     if comment:
+                        log.info(f"{acc_id} | تعليق مولد: {comment[:50]}")
                         textarea.fill(comment)
                         human.pause(0.5, 1.2)
 
                         # ابحث عن send button
                         send_btn = page.locator('button[data-testid="Tweet"]').first
-                        if send_btn.count() > 0 and send_btn.is_enabled():
-                            send_btn.click()
-                            page.wait_for_timeout(1200)
-                            state["done"]["comments"] = state["done"].get("comments", 0) + 1
-                            log.info(f"{acc_id} | 💬 تعليق على التغريدة {tid}")
+                        if send_btn.count() > 0:
+                            if send_btn.is_enabled():
+                                send_btn.click()
+                                page.wait_for_timeout(1200)
+                                state["done"]["comments"] = state["done"].get("comments", 0) + 1
+                                log.info(f"{acc_id} | 💬 تعليق على التغريدة {tid}")
+                            else:
+                                log.warning(f"{acc_id} | Send button موجود لكن معطل")
+                        else:
+                            log.warning(f"{acc_id} | ما لقيت Send button")
+                    else:
+                        log.warning(f"{acc_id} | ما اتولد تعليق (ممكن sensitive topic)")
+                else:
+                    log.warning(f"{acc_id} | ما لقيت textarea بعد 5 محاولات")
+            else:
+                log.warning(f"{acc_id} | ما لقيت reply button")
         except Exception as e:
             log.warning(f"{acc_id} | خطأ في comment: {e}")
 
