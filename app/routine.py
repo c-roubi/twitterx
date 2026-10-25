@@ -601,6 +601,14 @@ def execute_single_account_immediate(acc_id, tid, tweet_text, cfg, accounts, del
         _, ctx, page, pw_owned = browser.launch_account(acc, cfg, pw=pw, owned_pw=False)
         human = Human(page)
 
+        # تحضير page state: افتح Home أول (نفس الـ routine العادي)
+        log.info(f"{acc_id} | تحضير page بفتح Home")
+        ok_home, _ = resilience.goto_with_retry(page, "https://x.com/home", cfg)
+        page.wait_for_timeout(2000)
+
+        # dismiss أي modals
+        actions.dismiss_all_modals(page, human)
+
         # انتظر قليلاً (10-45 ثانية عشوائي)
         time.sleep(delay)
 
