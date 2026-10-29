@@ -143,13 +143,74 @@ def _self_restart(reason):
 
 
 def cmd_monitor(args):
-    """الأمر الواحد الذي يشغّل كل المهام: مراقبة المدير + الجلسات + الإحماء + المتابعات."""
+    """الأمر الواحد الذي يشغّل كل المهام: مراقبة المدير + الجلسات + الإحماء + المتابعات + Webhook Server."""
     cfg = load_config()
     accounts = load_accounts()
     if not cfg.get("manager_handle"):
         sys.exit("⚠ manager_handle فارغ في config.json - اضبطه أولاً ثم أعد التشغيل")
     if not accounts:
         sys.exit("⚠ لا حسابات - أضف حساباتك أولاً: python main.py add --handle ...")
+
+    # 🚀 شغّل Webhook Server في background (thread منفصل)
+    def run_webhook():
+        try:
+            from flask import Flask, request
+            from datetime import datetime
+            from threading import Thread as ThreadObj
+
+            app = Flask(__name__)
+            webhook_log = []
+
+            @app.route('/webhook/twitter', methods=['POST'])
+            def twitter_webhook():
+                try:
+                    data = request.json
+                    if not data:
+                        return {'error': 'empty body'}, 400
+
+                    tid = data.get('tweet_id') or data.get('tweet_id_str')
+                    text = data.get('text', '')
+
+                    if not tid:
+                        return {'error': 'missing tweet_id'}, 400
+
+                    tid = str(tid)
+                    text = str(text)[:2000]
+
+                    log.info(f"⚡ WEBHOOK تويتة جديدة: {tid}")
+                    webhook_log.append({'tid': tid, 'received_at': datetime.now().isoformat()})
+
+                    def engage():
+                        try:
+                            monitor.execute_immediate_engagement(tid, text, cfg, accounts)
+                            log.info(f"✅ تفاعل webhook مكتمل")
+                        except Exception as e:
+                            log.error(f"❌ خطأ في التفاعل: {e}")
+
+                    thread = ThreadObj(target=engage, daemon=True)
+                    thread.start()
+
+                    return {'status': 'received', 'tweet_id': tid}, 202
+                except Exception as e:
+                    log.error(f"❌ خطأ في webhook: {e}")
+                    return {'error': str(e)[:100]}, 500
+
+            @app.route('/health', methods=['GET'])
+            def health():
+                return {'status': 'running', 'webhooks': len(webhook_log)}, 200
+
+            log.info("🚀 Webhook Server شغّال على http://0.0.0.0:8000")
+            app.run(host='0.0.0.0', port=8000, debug=False, use_reloader=False, threaded=True)
+        except Exception as e:
+            log.error(f"❌ خطأ في Webhook Server: {e}")
+
+    # شغّل Webhook في background
+    webhook_thread = __import__('threading').Thread(target=run_webhook, daemon=True)
+    webhook_thread.start()
+    log.info("✅ Webhook Server بدأ في background")
+
+    # استنى شوي عشان يكون جاهز
+    time.sleep(2)
 
     if args.once:
         print("🚀 تنفيذ دورة واحدة كاملة (كل المهام)")
