@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""مراقبة تغريدات المدير وجدولة التفاعلات المتدرجة."""
+"""Monitoring manager tweets and scheduling graduated engagement."""
 import json
 import os
 import random
@@ -17,20 +17,20 @@ TWEET_URL = "https://x.com/i/web/status/{tid}"
 
 
 def fetch_manager_tweets(cfg, accounts, dry_run=False):
-    """جلب آخر تغريدات المدير بـ rotation بين الحسابات (ما نستخدم نفس الحساب)."""
+    """Fetch latest manager tweets with rotation between accounts (don't use same account)."""
     handle = cfg["manager_handle"].lstrip("@")
     if not handle:
-        log.warning("manager_handle فارغ - اضبطه في config.json")
+        log.warning("manager_handle is empty - set it in config.json")
         return [], "no-manager"
 
     if dry_run:
         return [], "dry-run"
 
-    # جلب الحسابات المفعّلة
+    # Fetch enabled accounts
     from .config import enabled_accounts
     acc_list = [aid for aid in enabled_accounts(accounts)]
     if not acc_list:
-        log.warning("لا حسابات مفعّلة - استخدم guest context")
+        log.warning("No enabled accounts - using guest context")
         return _fetch_guest(cfg)
 
     # Rotation: استخدم حساب مختلف كل مرة
@@ -54,7 +54,7 @@ def fetch_manager_tweets(cfg, accounts, dry_run=False):
     except Exception:
         pass
 
-    log.info(f"فحص المدير: استخدام حساب {acc_id} (rotation {next_idx + 1}/{len(acc_list)})")
+    log.info(f"Checking manager: using account {acc_id} (rotation {next_idx + 1}/{len(acc_list)})")
 
     retries = int(cfg.get("resilience", {}).get("monitor_fetch_retries", 2))
     base = float(cfg.get("resilience", {}).get("retry_base_delay_s", 5.0))
@@ -65,13 +65,13 @@ def fetch_manager_tweets(cfg, accounts, dry_run=False):
         if ids or not resilience.is_retryable(resilience.error_kind_from_msg(status)):
             return ids, status
 
-        # لو فشل: جرب حساب تاني
+        # If failed: try another account
         if attempt < retries:
             next_idx = (next_idx + 1) % len(acc_list)
             acc_id = acc_list[next_idx]
             d = resilience.backoff_delay(attempt, base)
             log.warning(
-                f"فشل جلب تغريدات المدير ({status}) - جرب حساب {acc_id} بعد {d:.1f} ثانية"
+                f"Failed to fetch manager tweets ({status}) - trying account {acc_id} after {d:.1f} seconds"
             )
             time.sleep(d)
 
@@ -92,12 +92,12 @@ def _fetch_guest(cfg):
         ctx.close()
         if status in ("login-wall", "blocked-empty", "empty-page"):
             log.warning(
-                f"جلسة الضيف محجوبة ({status}) - فعّل monitor.method=account وحدد use_account في config.json "
-                "ليتم الفحص بحساب مسجّل دخول، أو شغّل الأداة من شبكة منزلية/مكتبية"
+                f"Guest session blocked ({status}) - enable monitor.method=account and set use_account in config.json "
+                "for logged-in account scanning, or run the tool from a home/office network"
             )
         return ids, status
     except Exception as e:
-        log.error(f"فشل جلب تغريدات المدير (guest): {e}")
+        log.error(f"Failed to fetch manager tweets (guest): {e}")
         return [], f"error:{e}"[:100]
     finally:
         try:
@@ -117,7 +117,7 @@ def _fetch_with_account(cfg, accounts, acc_id):
         page.goto("https://x.com/home", timeout=60000, wait_until="domcontentloaded")
         page.wait_for_timeout(3000)
         if not browser.is_logged_in(page):
-            log.warning(f"{acc_id} | حساب المراقبة غير مسجّل الدخول")
+            log.warning(f"{acc_id} | Monitor account not logged in")
             browser.close_ctx(pw, ctx, False)
             return [], "not-logged-in"
         human = humanizer.Human(page)
@@ -127,7 +127,7 @@ def _fetch_with_account(cfg, accounts, acc_id):
         browser.close_ctx(pw, ctx, False)
         return ids, status
     except Exception as e:
-        log.error(f"فشل جلب تغريدات المدير (account {acc_id}): {e}")
+        log.error(f"Failed to fetch manager tweets (account {acc_id}): {e}")
         return [], f"error:{e}"[:100]
     finally:
         try:
@@ -137,7 +137,7 @@ def _fetch_with_account(cfg, accounts, acc_id):
 
 
 def _detect_consecutive_tweets(seen):
-    """كشف التغريدات المتتالية: إرجاع (أحدث_tweet_id, أقدم_tweet_id) إذا كانتا متتاليتين خلال 5 دقايق."""
+    """Detect consecutive tweets: return (latest_tweet_id, oldest_tweet_id) if consecutive within 5 minutes."""
     scheduled = [
         (tid, entry["detected_at"])
         for tid, entry in seen.items()
@@ -146,22 +146,22 @@ def _detect_consecutive_tweets(seen):
     if len(scheduled) < 2:
         return None, None
 
-    # ترتيب حسب التاريخ (الأحدث أولاً)
+    # Sort by date (newest first)
     scheduled.sort(key=lambda x: x[1], reverse=True)
 
     latest_tid, latest_time = scheduled[0]
     prev_tid, prev_time = scheduled[1]
 
-    # تحويل ISO timestamps إلى datetime objects
+    # Convert ISO timestamps to datetime objects
     from datetime import datetime
     try:
         latest_dt = datetime.fromisoformat(latest_time)
         prev_dt = datetime.fromisoformat(prev_time)
         time_diff = (latest_dt - prev_dt).total_seconds()
 
-        # إذا الفرق أقل من 300 ثانية (5 دقايق) → متتاليتين
+        # If difference is less than 300 seconds (5 minutes) → consecutive
         if 0 < time_diff < 300:
-            log.info(f"🔥 اكتشاف تغريدتين متتاليتين: {latest_tid} و {prev_tid} (فرق {int(time_diff)}s)")
+            log.info(f"🔥 Detected consecutive tweets: {latest_tid} and {prev_tid} (diff {int(time_diff)}s)")
             return latest_tid, prev_tid
     except Exception:
         pass
@@ -170,10 +170,10 @@ def _detect_consecutive_tweets(seen):
 
 
 def execute_immediate_engagement(tid, text="", cfg=None, accounts=None):
-    """تفاعل فوري مباشر على التغريدة (غير-blocking، queue-based).
+    """Immediate direct engagement on tweet (non-blocking, queue-based).
 
-    أضف التغريدة للـ queue بـ priority عالية.
-    كل حساب يتفاعل من الـ session الخاص فيه (لا توقف البوت).
+    Add tweet to queue with high priority.
+    Each account engages from its own session (non-blocking).
     """
     seen = load_seen()
     if tid in seen and seen[tid].get("immediate_done"):
@@ -184,7 +184,7 @@ def execute_immediate_engagement(tid, text="", cfg=None, accounts=None):
         if a.get("enabled", True)
     ]
     if not enabled:
-        log.warning("لا حسابات مفعّلة للتفاعل الفوري")
+        log.warning("No enabled accounts for immediate engagement")
         return None
 
     lo, hi = cfg["engagement"]["accounts_per_tweet"]
@@ -192,9 +192,9 @@ def execute_immediate_engagement(tid, text="", cfg=None, accounts=None):
     n = random.randint(lo, min(hi, len(enabled)))
     chosen = random.sample(enabled, n)
 
-    log.info(f"⚡ تفاعل فوري للتغريدة {tid}: أضيف لـ queue ({len(chosen)} حساب)")
+    log.info(f"⚡ Immediate engagement for tweet {tid}: added to queue ({len(chosen)} accounts)")
 
-    # حفظ التغريدة كمفعولة فوراً
+    # Save tweet as immediately engaged
     seen[tid] = {
         "tweet_id": tid,
         "url": TWEET_URL.format(tid=tid),
@@ -203,17 +203,17 @@ def execute_immediate_engagement(tid, text="", cfg=None, accounts=None):
         "immediate_done": True,
         "mode": "immediate",
         "accounts": chosen,
-        "priority": True,  # علم عالي الأولوية
+        "priority": True,  # High priority flag
     }
     save_seen(seen)
     return seen[tid]
 
 
 def schedule_for_tweet(tid, text="", cfg=None, accounts=None, is_priority=False):
-    """اختيار مجموعة حسابية عشوائية وتوزيع مهام عليها بجدول متدرج.
+    """Select random account group and distribute tasks with graduated schedule.
 
-    text: نص التغريدة (يُحفظ لاستخدامه في التوليد السياقي للتعليقات).
-    is_priority: إذا True → التغريدة الأولى (متتالية) = full engagement (100% like/retweet).
+    text: Tweet text (saved for contextual comment generation).
+    is_priority: If True → first tweet (consecutive) = full engagement (100% like/retweet).
     """
     seen = load_seen()
     if tid in seen and seen[tid].get("scheduled"):
@@ -224,11 +224,11 @@ def schedule_for_tweet(tid, text="", cfg=None, accounts=None, is_priority=False)
         if a.get("enabled", True)
     ]
     if not enabled:
-        log.warning("لا حسابات مفعّلة لجدولة التفاعل")
+        log.warning("No enabled accounts for scheduling engagement")
         return None
 
     lo, hi = cfg["engagement"]["accounts_per_tweet"]
-    # حماية: لو عدد الحسابات أقل من الحد الأدنى، نتفاعل مع كل المتاح
+    # Protection: if account count less than minimum, engage with all available
     lo = min(lo, len(enabled))
     n = random.randint(lo, min(hi, len(enabled)))
     chosen = random.sample(enabled, n)
@@ -236,7 +236,7 @@ def schedule_for_tweet(tid, text="", cfg=None, accounts=None, is_priority=False)
     max_comments = cfg["engagement"].get("max_comments_per_tweet", 8)
     spread = random.uniform(*cfg["engagement"]["spread_hours"]) * 3600
 
-    # نسبة تعليق شبه ثابتة ~ نسبة المزيج (60%) مع تذبذب خفيف 55-65%
+    # Comment ratio fairly constant ~ mix ratio (60%) with light variation 55-65%
     comment_rate = mix.get("comment", 0.6)
     n_comments = round(len(chosen) * random.uniform(comment_rate - 0.05, comment_rate + 0.05))
     n_comments = max(0, min(n_comments, max_comments, len(chosen)))
@@ -245,16 +245,16 @@ def schedule_for_tweet(tid, text="", cfg=None, accounts=None, is_priority=False)
     now = time.time()
     queue = []
 
-    # استراتيجية ذكية بناءً على ما إذا كانت priority (أول تغريدة من متتاليتين)
+    # Smart strategy based on whether priority (first tweet of consecutive pair)
     if is_priority:
-        # 🔥 التغريدة الأولى → full engagement (100% like + retweet)
-        like_ratio = 1.0  # 100% يعملوا like
-        retweet_ratio = 1.0  # 100% يعملوا retweet
-        log.info(f"⚡ تغريدة الأولوية {tid}: تفاعل كامل (100% like/retweet)")
+        # 🔥 First tweet → full engagement (100% like + retweet)
+        like_ratio = 1.0  # 100% will like
+        retweet_ratio = 1.0  # 100% will retweet
+        log.info(f"⚡ Priority tweet {tid}: full engagement (100% like/retweet)")
     else:
-        # عادي: نسب عالية (80-95%) مع variation
-        like_ratio = random.uniform(0.80, 0.95)  # 80-95% يعملوا like
-        retweet_ratio = random.uniform(0.80, 0.95)  # 80-95% يعملوا retweet
+        # Normal: high ratios (80-95%) with variation
+        like_ratio = random.uniform(0.80, 0.95)  # 80-95% will like
+        retweet_ratio = random.uniform(0.80, 0.95)  # 80-95% will retweet
 
     like_count = int(len(chosen) * like_ratio)
     retweet_count = int(len(chosen) * retweet_ratio)
@@ -263,13 +263,13 @@ def schedule_for_tweet(tid, text="", cfg=None, accounts=None, is_priority=False)
 
     for idx, aid in enumerate(chosen):
         actions = []
-        # Like: حسب النسبة
+        # Like: based on ratio
         if aid in like_accounts:
             actions.append("like")
-        # Retweet: حسب النسبة
+        # Retweet: based on ratio
         if aid in retweet_accounts:
             actions.append("retweet")
-        # Comment: كل الحسابات (100% - أقل suspicious)
+        # Comment: all accounts (100% - less suspicious)
         actions.append("comment")
 
         delay = random.uniform(10, 90) if idx == 0 else random.uniform(120, spread)
@@ -286,13 +286,13 @@ def schedule_for_tweet(tid, text="", cfg=None, accounts=None, is_priority=False)
         "queue": queue,
     }
     save_seen(seen)
-    engagement_type = "🔥 كامل" if is_priority else "📊 متغير"
-    log.info(f"جدولة تفاعل للتغريدة {tid}: {len(queue)} حساب | {engagement_type} | أول عملية بعد {int((queue[0]['due']-now))} ثانية")
+    engagement_type = "🔥 Full" if is_priority else "📊 Variable"
+    log.info(f"Scheduled engagement for tweet {tid}: {len(queue)} accounts | {engagement_type} | first action after {int((queue[0]['due']-now))} seconds")
     return seen[tid]
 
 
 def due_tasks_for(acc_id, seen=None):
-    """مهام الحساب المستحقة التنفيذ الآن (تتخطى المحذوفة والمتخلى عنها)."""
+    """Account tasks due for execution now (skipping deleted and abandoned)."""
     seen = seen or load_seen()
     tasks = []
     for tid, entry in seen.items():
@@ -335,7 +335,7 @@ def mark_done(tid, acc_id, action):
 
 
 def mark_tweet_deleted(tid):
-    """وسم التغريدة كمحذوفة من المدير وإزالتها من الجدول نهائياً."""
+    """Mark tweet as deleted by manager and remove from schedule permanently."""
     seen = load_seen()
     entry = seen.get(tid)
     if not entry:
@@ -343,11 +343,11 @@ def mark_tweet_deleted(tid):
     entry["deleted"] = True
     entry["deleted_at"] = datetime.now().isoformat(timespec="seconds")
     save_seen(seen)
-    log.info(f"التغريدة {tid} محذوفة من المدير - أُزيلت من جدول المهام")
+    log.info(f"Tweet {tid} deleted by manager - removed from task schedule")
 
 
 def record_tweet_open_attempt(tid):
-    """زيادة عدّاد محاولات فتح التغريدة (لتشخيص المشاكل)."""
+    """Increment tweet open attempt counter (for troubleshooting)."""
     seen = load_seen()
     entry = seen.get(tid)
     if not entry:
@@ -357,7 +357,7 @@ def record_tweet_open_attempt(tid):
 
 
 def record_action_attempt(tid, acc_id, action):
-    """تسجيل محاولة تنفيذ عملية معينة على تغريدة المدير لحساب معين."""
+    """Record attempt to execute action on manager tweet for specific account."""
     seen = load_seen()
     entry = seen.get(tid)
     if not entry:
@@ -370,7 +370,7 @@ def record_action_attempt(tid, acc_id, action):
 
 
 def give_up_action(tid, acc_id, action):
-    """التخلي النهائي عن عملية بعد تجاوز حد المحاولات (تخطي واستمرار)."""
+    """Final abandonment of action after exceeding retry limit (skip and continue)."""
     seen = load_seen()
     entry = seen.get(tid)
     if not entry:
@@ -380,4 +380,4 @@ def give_up_action(tid, acc_id, action):
             if action not in task.setdefault("failed", []):
                 task["failed"].append(action)
     save_seen(seen)
-    log.info(f"{acc_id} | تخطّي نهائي للعملية {action} على التغريدة {tid}")
+    log.info(f"{acc_id} | Final skip of action {action} on tweet {tid}")

@@ -21,7 +21,7 @@ log = get_logger("browser")
 
 
 def _find_chromium_executable():
-    """البحث عن ملف chromium التنفيذي: أولاً بالمسار المعتاد لـ Playwright، ثم بالنظام."""
+    """Search for chromium executable: first at the usual Playwright path, then system-wide."""
     pw_base = os.environ.get("PLAYWRIGHT_BROWSERS_PATH", "/opt/pw-browsers")
     for entry in sorted(os.listdir(pw_base), reverse=True) if os.path.isdir(pw_base) else []:
         if entry.startswith("chromium"):

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""عمليات التفاعل على تويتر: لايك، ريتويت، تعليق، جلب تغريدات."""
+"""Twitter interaction operations: like, retweet, comment, fetch tweets."""
 import random
 import re
 import time
@@ -30,7 +30,7 @@ log = get_logger("actions")
 
 
 def _err_status(e):
-    """تحويل استثناء إلى حالة نصية قابلة للتصنيف (شبكة/مهلة/أخرى)."""
+    """Convert exception to classifiable status text (network/timeout/other)."""
     kind = resilience.classify_error(e)
     if kind == "timeout":
         return "timeout"
@@ -40,14 +40,14 @@ def _err_status(e):
 
 
 def _detect_oops_error(page):
-    """كشف صفحة الـ Oops error من Twitter (عادة تحتوي على 'Oops' أو 'Something went wrong')."""
+    """Detect Oops error page from Twitter (usually contains 'Oops' or 'Something went wrong')."""
     if not page:
         return False
     try:
-        # شيك الـ page content عن أخطاء شائعة
+        # Check page content for common errors
         content = page.content() or ""
         if "Oops" in content or "Something went wrong" in content or "error" in content.lower():
-            # تأكد أنها فعلاً error page (ليست محتوى عادي)
+            # Ensure it's actually an error page (not regular content)
             if page.locator("text=/Oops|Something went wrong/i").count() > 0:
                 return True
     except Exception:
@@ -56,7 +56,7 @@ def _detect_oops_error(page):
 
 
 def _recover_from_error(page, human, cfg=None, max_retries=3):
-    """استعادة من error page: reload و retry."""
+    """Recover from error page: reload and retry."""
     for attempt in range(max_retries):
         try:
             if _detect_oops_error(page):
@@ -66,25 +66,25 @@ def _recover_from_error(page, human, cfg=None, max_retries=3):
                 if human:
                     human.pause(1.0, 3.0)
                 if not _detect_oops_error(page):
-                    return True  # تم التعافي بنجاح
+                    return True  # Successfully recovered
             else:
                 return True
         except Exception as e:
-            log.warning(f"خطأ أثناء التعافي من error: {e}")
+            log.warning(f"Error while recovering from error: {e}")
             if attempt < max_retries - 1:
                 page.wait_for_timeout(1500)
     return False
 
 
 def _safe_goto(page, url, cfg=None, human=None, timeout=45000):
-    """فتح URL بـ safety checks و recovery من errors."""
+    """Open URL with safety checks and error recovery."""
     max_attempts = 3
     for attempt in range(max_attempts):
         try:
             page.goto(url, timeout=timeout, wait_until="domcontentloaded")
             page.wait_for_timeout(1500)
 
-            # تشيك هل في Oops error
+            # Check for Oops error
             if _detect_oops_error(page):
                 if attempt < max_attempts - 1:
                     log.warning(f"Oops error after goto - retry (attempt {attempt + 2}/{max_attempts})")
@@ -96,7 +96,7 @@ def _safe_goto(page, url, cfg=None, human=None, timeout=45000):
             return True, "ok"
         except Exception as e:
             if attempt < max_attempts - 1:
-                log.warning(f"خطأ في goto {url}: {e} - إعادة محاولة")
+                log.warning(f"Error in goto {url}: {e} - retrying")
                 if human:
                     human.pause(1.5, 3.0)
             else:
@@ -105,10 +105,10 @@ def _safe_goto(page, url, cfg=None, human=None, timeout=45000):
 
 
 def dismiss_compose_dialog(page, human):
-    """الخروج الآمن من محرر الاقتباس/حوار حفظ المسودة (Discard فقط، لا Save أبداً).
+    """Safe exit from quote composer/draft save dialog (Discard only, never Save).
 
-    يغلق أي حوار 'Save post?'/'تجاهل' ويخرج من صفحة /compose إن كنا عالقين فيها.
-    يرجع True إذا تعامل مع شيء، وإلا False.
+    Closes any 'Save post?'/'Discard' dialog and exits /compose page if stuck.
+    Returns True if handled something, else False.
     """
     try:
         for _ in range(3):
@@ -127,7 +127,7 @@ def dismiss_compose_dialog(page, human):
                         return True
                     continue
             if "/compose/" in (page.url or ""):
-                # محرر مفتوح بلا حوار: Escape يغلقه أو يظهر حوار الحفظ فنرفضه
+                # Composer open with no dialog: Escape closes it or shows save dialog we reject
                 page.keyboard.press("Escape")
                 page.wait_for_timeout(900)
                 continue

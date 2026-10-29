@@ -127,7 +127,7 @@ def retry(fn, attempts=2, base_delay=5.0, exc_filter=None, on_retry=None):
             d = backoff_delay(i, base_delay)
             if on_retry:
                 on_retry(i + 1, e, d)
-            log.warning(f"إعادة محاولة ({i + 2}/{total}) بعد {d:.1f} ثانية: {e}")
+            log.warning(f"Retrying ({i + 2}/{total}) after {d:.1f} seconds: {e}")
             time.sleep(d)
     return False, last_err
 
@@ -166,7 +166,7 @@ def goto_with_retry(page, url, cfg, timeout=None, wait_until="domcontentloaded")
             if not is_retryable(last) or i == int(r):
                 return False, last
             d = backoff_delay(i, base)
-            log.warning(f"مشكلة شبكة في فتح {url} - إعادة المحاولة ({i + 2}/{int(r) + 1}) بعد {d:.1f} ثانية")
+            log.warning(f"Network problem opening {url} - retrying ({i + 2}/{int(r) + 1}) after {d:.1f} seconds")
             time.sleep(d)
     return False, last
 

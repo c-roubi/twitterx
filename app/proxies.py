@@ -134,7 +134,7 @@ def _probe(proxy, timeout, host, port):
         s.close()
         return resp.startswith("HTTP/1.1 200") or resp.startswith("HTTP/1.0 200")
     except Exception as e:
-        log.debug("اختبار بروكسي فشل: {} - {}".format(proxy_key(proxy), e))
+        log.debug("Proxy test failed: {} - {}".format(proxy_key(proxy), e))
         return False
 
 
@@ -192,7 +192,7 @@ def resolve_for(acc_id, cfg):
     ok = test_proxy(proxy, pcfg.get("test_timeout", 10))
     if ok:
         return proxy
-    log.warning("{} | البروكسي {} غير متاح - رجوع تلقائي للاتصال المباشر".format(acc_id, proxy_key(proxy)))
+    log.warning("{} | Proxy {} unavailable - falling back to direct connection".format(acc_id, proxy_key(proxy)))
     return None
 
 
@@ -209,5 +209,5 @@ def resolve_guest(cfg):
     for p in parsed[:3]:
         if test_proxy(p, timeout):
             return p
-    log.warning("لا بروكسي سليم متاح - جلسة الضيف عبر اتصال مباشر")
+    log.warning("No healthy proxy available - guest session using direct connection")
     return None
