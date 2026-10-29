@@ -305,11 +305,20 @@ def _next_interval(cfg, last_had_tweets=False):
     except Exception:
         pass
 
-    # Exponential backoff: 1, 2, 4, 8, 15, 30 minutes
-    checks_without = state["checks_without_tweets"]
-    backoff_minutes = min(30, max(1, 2 ** (checks_without - 1)))
+    # استخدم config interval كـ base (60-120 دقيقة)
+    # بدون exponential backoff (webhook = primary)
+    lo, hi = cfg["monitor"]["interval_min"]
 
-    return backoff_minutes * 60
+    # إذا آخر check كان في tweets → استخدم الـ base interval
+    if state["checks_without_tweets"] == 0:
+        return (lo + (hi - lo) * __import__("random").random()) * 60
+
+    # إذا ما في tweets → ضاعف الـ interval (لكن ليس أكثر من 120 دقيقة)
+    multiplier = min(2, state["checks_without_tweets"] * 0.5)  # max 2x
+    base_minutes = (lo + hi) / 2
+    final_minutes = min(120, base_minutes * multiplier)
+
+    return final_minutes * 60
 
 
 def cmd_daily(args):
