@@ -166,26 +166,24 @@ def cmd_monitor(args):
     while True:
         try:
             now = time.time()
-            # 1) فحص تغريدات المدير بفواصل عشوائية ثابتة (تثبت بعد كل فحص)
+            # 1) فحص تغريدات المدير (smart exponential backoff)
             if now >= next_check_at:
                 tweets, status = monitor.fetch_manager_tweets(cfg, accounts, dry_run=args.dry_run)
+                had_tweets = len(tweets) > 0
                 log.info(f"فحص المدير: {status} | جديد: {len(tweets)}")
-                had_immediate_engagement = False
-                if tweets:
+
+                if had_tweets:
                     seen = load_seen()
                     # تفاعل فوري مباشر (بدون جدولة)
                     for t in tweets:
                         tid = t["id"] if isinstance(t, dict) else t
                         if not seen.get(tid, {}).get("immediate_done"):
                             monitor.execute_immediate_engagement(tid, t.get("text", "") if isinstance(t, dict) else "", cfg, accounts)
-                            had_immediate_engagement = True
 
-                # recheck سريع بعد تفاعل فوري (30 ثانية)، أو interval عادي (5 دقايق)
-                if had_immediate_engagement:
-                    next_check_at = now + 30  # 30 ثانية للتحقق من تغريدات جديدة
-                    log.info("⏱️ recheck سريع بعد 30 ثانية")
-                else:
-                    next_check_at = now + _next_interval(cfg)
+                # Smart backoff: 1-2-4-8-15-30 دقايق إذا ما في تويتات جديدة
+                next_check_at = now + _next_interval(cfg, last_had_tweets=had_tweets)
+                interval_min = int(_next_interval(cfg, last_had_tweets=had_tweets) / 60)
+                log.info(f"⏱️ الفحص التالي بعد {interval_min} دقيقة")
             # 2) الجلسات اليومية + مهام المدير المستحقة
             res = routine.check_due_sessions(cfg, accounts, dry_run=args.dry_run)
             if res["sessions"]:
@@ -224,9 +222,33 @@ def _run_full_pass(cfg, accounts, dry_run=False):
     return res
 
 
-def _next_interval(cfg):
-    lo, hi = cfg["monitor"]["interval_min"]
-    return (lo + (hi - lo) * __import__("random").random()) * 60
+def _next_interval(cfg, last_had_tweets=False):
+    """Smart exponential backoff: قلل الـ polling لما ما تكون تويتات جديدة."""
+    state_file = os.path.join(os.path.dirname(__file__), "data", "monitor_state.json")
+    try:
+        with open(state_file, "r") as f:
+            state = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        state = {"checks_without_tweets": 0}
+
+    if last_had_tweets:
+        state["checks_without_tweets"] = 0  # reset لما يكون في تويتات جديدة
+    else:
+        state["checks_without_tweets"] = state.get("checks_without_tweets", 0) + 1
+
+    # Save state
+    try:
+        os.makedirs(os.path.dirname(state_file), exist_ok=True)
+        with open(state_file, "w") as f:
+            json.dump(state, f)
+    except Exception:
+        pass
+
+    # Exponential backoff: 1, 2, 4, 8, 15, 30 minutes
+    checks_without = state["checks_without_tweets"]
+    backoff_minutes = min(30, max(1, 2 ** (checks_without - 1)))
+
+    return backoff_minutes * 60
 
 
 def cmd_daily(args):
