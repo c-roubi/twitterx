@@ -313,12 +313,12 @@ def smart_follow_engaged_users(page, acc_id, cfg, state, human, max_follows):
 
     log.info(f"{acc_id} | متابعة مستخدمين مهتمين (engaged users)")
 
-    # جلب الناس المهتمين من timeline
+    # جلب الناس المهتمين من Home Timeline (recent, not top)
     engaged_candidates = []
     try:
-        # ابحث عن crypto tweets
+        # افتح Home Timeline
         ok, _ = resilience.goto_with_retry(
-            page, f"https://x.com/search?q={quote('crypto OR #crypto OR bitcoin')}&f=live", cfg
+            page, "https://x.com/home", cfg
         )
         if not ok:
             return 0, "goto-failed"
@@ -326,8 +326,12 @@ def smart_follow_engaged_users(page, acc_id, cfg, state, human, max_follows):
         page.wait_for_timeout(3000)
         human.pause(1.0, 3.0)
 
-        # جلب تغريدات
-        articles = page.locator(TWEET_ARTICLE).all()[:5]  # أول 5 تغريدات فقط
+        # Scroll قليل عشان نجلب recent tweets
+        page.mouse.wheel(0, 500)
+        page.wait_for_timeout(1500)
+
+        # جلب تغريدات حديثة
+        articles = page.locator(TWEET_ARTICLE).all()[:8]  # أول 8 تغريدات حديثة
 
         for article in articles:
             try:
