@@ -2,12 +2,32 @@
 
 ## Step 1: Install Dependencies
 
+### Linux/Mac
 ```bash
 cd ~/twitterx
 python3 setup.py
 ```
 
-This will automatically:
+### Windows
+**Option A: Batch Script (recommended)**
+```cmd
+cd C:\Users\YourUsername\twitterx
+setup.bat
+```
+
+**Option B: PowerShell**
+```powershell
+cd C:\Users\YourUsername\twitterx
+powershell -ExecutionPolicy Bypass -File setup.ps1
+```
+
+**Option C: Manual**
+```cmd
+pip install -r requirements.txt
+python -m playwright install chromium
+```
+
+All methods will:
 - ✓ Install all Python dependencies
 - ✓ Download Playwright browsers
 - ✓ Initialize data directories
