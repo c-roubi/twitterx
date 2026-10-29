@@ -232,7 +232,21 @@ def launch_account(account, cfg, pw=None, owned_pw=True):
 
 
 def is_logged_in(page):
-    """Check login status from current page."""
+    """Check login status from current page, dismissing blocking popups first."""
+    try:
+        # Dismiss popups that might block detection
+        for _ in range(3):
+            try:
+                from .actions import dismiss_all_modals
+                from .humanizer import Human
+                if dismiss_all_modals(page, Human()):
+                    page.wait_for_timeout(500)
+                    break
+            except Exception:
+                pass
+    except Exception:
+        pass
+
     for sel in LOGIN_OK_SELECTORS:
         try:
             if page.locator(sel).first.count() > 0:

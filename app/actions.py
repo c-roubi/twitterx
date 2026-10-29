@@ -148,29 +148,55 @@ def dismiss_compose_dialog(page, human):
 
 
 def dismiss_all_modals(page, human):
-    """Auto-dismiss any modal/popup on page (Views, alerts, etc)."""
+    """Auto-dismiss any modal/popup/alert on page (robust multi-strategy handler)."""
     try:
-        # Search for Dismiss button
-        dismiss_btns = page.locator('button:has-text("Dismiss"), button:contains("Dismiss")')
-        if dismiss_btns.count() > 0:
+        # Strategy 1: Dismiss button (common)
+        for selector in ['button:has-text("Dismiss")', 'button:contains("Dismiss")', 'button[aria-label="Dismiss"]']:
             try:
-                human.pause(0.2, 0.5)
-                dismiss_btns.first.click()
-                page.wait_for_timeout(600)
-                return True
+                btn = page.locator(selector).first
+                if btn.count() > 0:
+                    human.pause(0.2, 0.5)
+                    btn.click()
+                    page.wait_for_timeout(600)
+                    return True
             except Exception:
                 pass
 
-        # Try X button for close
-        close_btn = page.locator('button[aria-label="Close"]')
-        if close_btn.count() > 0:
+        # Strategy 2: Close/X button (modals)
+        for selector in ['button[aria-label="Close"]', 'button[aria-label="close"]', '[role="button"][aria-label*="Close"]']:
             try:
-                human.pause(0.2, 0.5)
-                close_btn.first.click()
-                page.wait_for_timeout(600)
-                return True
+                btn = page.locator(selector).first
+                if btn.count() > 0:
+                    human.pause(0.2, 0.5)
+                    btn.click()
+                    page.wait_for_timeout(600)
+                    return True
             except Exception:
                 pass
+
+        # Strategy 3: OK/Got it buttons (alerts)
+        for text in ["Got it", "OK", "Confirm", "Accept"]:
+            try:
+                btn = page.locator(f'button:has-text("{text}")').first
+                if btn.count() > 0:
+                    human.pause(0.2, 0.5)
+                    btn.click()
+                    page.wait_for_timeout(600)
+                    return True
+            except Exception:
+                pass
+
+        # Strategy 4: Generic modal close (click overlay)
+        try:
+            overlay = page.locator('[role="dialog"], .modal-backdrop, [class*="modal"]').first
+            if overlay.count() > 0:
+                # Try ESC key
+                page.keyboard.press("Escape")
+                page.wait_for_timeout(400)
+                return True
+        except Exception:
+            pass
+
     except Exception:
         pass
 
