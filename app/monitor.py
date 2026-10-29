@@ -203,7 +203,7 @@ def execute_immediate_engagement(tid, text="", cfg=None, accounts=None):
         "immediate_done": True,
         "mode": "immediate",
         "accounts": chosen,
-        "priority": True,  ← علم عالي الأولوية
+        "priority": True,  # علم عالي الأولوية
     }
     save_seen(seen)
     return seen[tid]
