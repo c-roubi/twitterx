@@ -7,8 +7,13 @@ import subprocess
 import sys
 import os
 import time
-import threading
+import shutil
 from datetime import datetime
+
+# ========== CONFIGURATION ==========
+NGROK_TOKEN = "3LMjg3cmh8s21sXWwfBpd0lAzLE_5MXqg1tnaX32waZktDJK8"
+DEFAULT_PORT = 8000
+# ===================================
 
 def print_header():
     """Print startup header."""
@@ -16,41 +21,56 @@ def print_header():
     print(" TwitterX Bot - Complete Startup")
     print("="*70 + "\n")
 
-def setup_ngrok_token():
+def cleanup_ngrok_config():
+    """Clean up old ngrok config to avoid path issues."""
+    try:
+        old_paths = [
+            os.path.expanduser('~/.ngrok2'),
+            os.path.expanduser('~/.config/ngrok')
+        ]
+        for path in old_paths:
+            if os.path.exists(path):
+                shutil.rmtree(path)
+                print(f"[+] Cleaned up old ngrok config: {path}")
+    except Exception as e:
+        print(f"[*] Could not clean ngrok config: {e}")
+
+def setup_ngrok_token(token=None):
     """Setup ngrok authentication token."""
-    token = os.getenv('NGROK_AUTHTOKEN')
-    if not token:
-        print("[!] NGROK_AUTHTOKEN not set!")
-        print("[*] Please set environment variable:")
-        print("    Windows: set NGROK_AUTHTOKEN=your_token_here")
-        print("    Linux/Mac: export NGROK_AUTHTOKEN=your_token_here")
-        print("\n[*] Or provide token as argument:")
-        print("    python run.py --ngrok-token YOUR_TOKEN")
+    auth_token = token or os.getenv('NGROK_AUTHTOKEN') or NGROK_TOKEN
+
+    if not auth_token:
+        print("[!] No ngrok token available!")
         return False
 
     try:
+        # Clean up old config first
+        cleanup_ngrok_config()
+
         from pyngrok import ngrok
-        ngrok.set_auth_token(token)
-        print("[+] ngrok authenticated")
+        ngrok.set_auth_token(auth_token)
+        print("[+] ngrok authenticated successfully")
         return True
     except Exception as e:
-        print(f"[!] ngrok setup failed: {e}")
+        print(f"[!] ngrok setup failed: {str(e)[:100]}")
         return False
 
-def start_ngrok_tunnel(port=8000):
+def start_ngrok_tunnel(port=DEFAULT_PORT):
     """Start ngrok tunnel."""
     try:
         from pyngrok import ngrok
         print(f"[*] Starting ngrok tunnel on port {port}...")
+
         tunnel = ngrok.connect(port)
         url = str(tunnel).split(" -> ")[0].strip()
         webhook_url = f"{url}/webhook/twitter"
+
         print(f"[+] ngrok tunnel: {url}")
         print(f"[+] Webhook URL: {webhook_url}")
-        print(f"[+] Use this URL in IFTTT!")
+
         return tunnel, webhook_url
     except Exception as e:
-        print(f"[!] ngrok tunnel failed: {e}")
+        print(f"[!] ngrok tunnel failed: {str(e)[:100]}")
         return None, None
 
 def check_accounts():
@@ -68,7 +88,26 @@ def check_accounts():
         print(f"[!] Account check failed: {e}")
         return False
 
-def start_webhook_server(port=8000):
+def check_dependencies():
+    """Check if all dependencies are available."""
+    required = ['flask', 'pyngrok', 'playwright']
+    missing = []
+
+    for module in required:
+        try:
+            __import__(module)
+        except ImportError:
+            missing.append(module)
+
+    if missing:
+        print(f"[!] Missing dependencies: {', '.join(missing)}")
+        print(f"[*] Install with: pip install -r requirements.txt")
+        return False
+
+    print("[+] All dependencies OK")
+    return True
+
+def start_webhook_server(port=DEFAULT_PORT):
     """Start webhook server in background."""
     print(f"\n[*] Starting Webhook Server (port {port})...")
     cmd = [sys.executable, 'webhook_server.py', '--port', str(port)]
@@ -83,7 +122,7 @@ def start_webhook_server(port=8000):
 
         if process.poll() is not None:
             stderr = process.stderr.read().decode()
-            print(f"[!] Webhook server failed: {stderr}")
+            print(f"[!] Webhook server failed: {stderr[:200]}")
             return None
 
         print(f"[+] Webhook Server running (PID: {process.pid})")
@@ -110,16 +149,16 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser(description='TwitterX Bot - Complete Startup')
-    parser.add_argument('--ngrok-token', help='ngrok authentication token')
-    parser.add_argument('--port', type=int, default=8000, help='Webhook port')
+    parser.add_argument('--ngrok-token', help='ngrok authentication token (overrides default)')
+    parser.add_argument('--port', type=int, default=DEFAULT_PORT, help='Webhook port')
     parser.add_argument('--no-ngrok', action='store_true', help='Disable ngrok tunnel')
     args = parser.parse_args()
 
     print_header()
 
-    # Set ngrok token if provided
-    if args.ngrok_token:
-        os.environ['NGROK_AUTHTOKEN'] = args.ngrok_token
+    # Check dependencies
+    if not check_dependencies():
+        sys.exit(1)
 
     # Check accounts
     if not check_accounts():
@@ -129,10 +168,11 @@ def main():
     tunnel = None
     webhook_url = None
     if not args.no_ngrok:
-        if setup_ngrok_token():
+        print("\n[*] Setting up ngrok...")
+        if setup_ngrok_token(args.ngrok_token):
             tunnel, webhook_url = start_ngrok_tunnel(args.port)
         else:
-            print("[!] ngrok setup skipped")
+            print("[!] ngrok setup failed, continuing with local-only mode")
 
     # Start webhook server
     webhook_process = None
@@ -141,10 +181,11 @@ def main():
         print("[!] Webhook server failed to start")
         sys.exit(1)
 
-    # Display webhook info
+    # Display system info
     print("\n" + "="*70)
     print(" System Ready!")
     print("="*70)
+
     if webhook_url:
         print(f"\n[+] IFTTT Webhook URL:")
         print(f"    {webhook_url}")
@@ -155,8 +196,9 @@ def main():
     else:
         print(f"\n[+] Local Webhook URL:")
         print(f"    http://localhost:{args.port}/webhook/twitter")
+        print(f"\n[!] For external access, configure ngrok token and run: python run.py")
 
-    print(f"\n[*] Monitor will check for tweets every 60-120 minutes (fallback)")
+    print(f"\n[*] Fallback polling: every 60-120 minutes")
     print("="*70 + "\n")
 
     # Start monitor (blocking)
@@ -164,17 +206,21 @@ def main():
         start_monitor()
     finally:
         # Cleanup
+        print("\n[*] Cleaning up...")
+
         if webhook_process:
-            print("[*] Stopping webhook server...")
-            webhook_process.terminate()
             try:
+                webhook_process.terminate()
                 webhook_process.wait(timeout=5)
             except:
-                webhook_process.kill()
+                try:
+                    webhook_process.kill()
+                except:
+                    pass
 
         if tunnel:
-            from pyngrok import ngrok
             try:
+                from pyngrok import ngrok
                 ngrok.disconnect(tunnel)
             except:
                 pass

@@ -1,67 +1,104 @@
-# TwitterX Bot - Quick Start
+# TwitterX Bot - Quick Start Guide
 
-## Setup (One-Time)
+## ⚡ One-Command Startup
 
-```bash
-python3 setup.py
-```
+Everything is ready to go! Just run:
 
-## Configure ngrok Token
-
-### Windows (Batch)
-```cmd
-set NGROK_AUTHTOKEN=3LMjg3cmh8s21sXWwfBpd0lAzLE_5MXqg1tnaX32waZktDJK8
-```
-
-### Windows (PowerShell)
-```powershell
-$env:NGROK_AUTHTOKEN = "3LMjg3cmh8s21sXWwfBpd0lAzLE_5MXqg1tnaX32waZktDJK8"
-```
-
-### Linux/Mac
-```bash
-export NGROK_AUTHTOKEN=3LMjg3cmh8s21sXWwfBpd0lAzLE_5MXqg1tnaX32waZktDJK8
-```
-
-## Add Accounts
-
-```bash
-python main.py add --handle @account1 --username "Name"
-python main.py login acc_001
-```
-
-## Run Bot (Single Command!)
-
-### Option 1: With ngrok Tunnel
 ```bash
 python run.py
 ```
 
-**Output:**
-```
-[+] ngrok tunnel: https://undocked-nutty-prone.ngrok-free.dev
-[+] Webhook URL: https://undocked-nutty-prone.ngrok-free.dev/webhook/twitter
-[+] Use this URL in IFTTT!
+That's it! No environment variables, no setup needed. The ngrok token is embedded.
 
-[*] Configure IFTTT with:
-    URL: https://undocked-nutty-prone.ngrok-free.dev/webhook/twitter
-    Body: {"tweet_url": "{{LinkToTweet}}", "text": "{{Text}}"}
-```
+---
 
-### Option 2: Local Only (No External Access)
+## 📋 Complete Setup (First Time Only)
+
+### Step 1: Install Dependencies
 ```bash
-python run.py --no-ngrok
+python3 setup.py
+```
+
+### Step 2: Add Accounts
+```bash
+python main.py add --handle @account1 --username "Name"
+python main.py add --handle @account2 --username "Name"
+```
+
+### Step 3: Login to Accounts
+```bash
+python main.py login acc_001
+python main.py login acc_002
+```
+
+### Step 4: Run Bot
+```bash
+python run.py
 ```
 
 ---
 
-## Configure IFTTT (One-Time)
+## 🪟 Windows Quick Start
+
+### Option 1: Batch Script (Easiest)
+```cmd
+start-bot.bat
+```
+
+### Option 2: PowerShell
+```powershell
+.\start-bot.ps1
+```
+
+### Option 3: Direct Command
+```cmd
+python run.py
+```
+
+---
+
+## 🚀 What Happens on Startup
+
+```
+[+] Dependencies OK
+[+] 1 accounts loaded
+
+[*] Setting up ngrok...
+[+] ngrok authenticated successfully
+[*] Starting ngrok tunnel on port 8000...
+[+] ngrok tunnel: https://abc123.ngrok.io
+[+] Webhook URL: https://abc123.ngrok.io/webhook/twitter
+
+[*] Starting Webhook Server (port 8000)...
+[+] Webhook Server running (PID: 1234)
+
+[+] IFTTT Webhook URL:
+    https://abc123.ngrok.io/webhook/twitter
+
+[*] Configure IFTTT with:
+    URL: https://abc123.ngrok.io/webhook/twitter
+    Body: {"tweet_url": "{{LinkToTweet}}", "text": "{{Text}}"}
+
+[*] Starting Monitor...
+[*] Press Ctrl+C to stop
+```
+
+---
+
+## 🔧 Configure IFTTT (One-Time)
 
 1. Go to https://ifttt.com/applets
-2. Create/Edit applet for @Engcryptoo
-3. Set Webhook URL: `https://your-ngrok-url/webhook/twitter`
-4. Set Body:
-```json
+2. Create/Edit applet
+3. **IF:** Twitter → New tweet by @Engcryptoo
+4. **THEN:** Webhooks → Make a web request
+
+**Settings:**
+```
+URL: https://abc123.ngrok.io/webhook/twitter
+Method: POST
+Content Type: application/json
+
+Body:
 {
   "tweet_url": "{{LinkToTweet}}",
   "text": "{{Text}}"
@@ -70,47 +107,46 @@ python run.py --no-ngrok
 
 ---
 
-## System Architecture
+## 📊 System Architecture
 
 ```
 Manager tweets on Twitter
     ↓ (instant)
 IFTTT detects
     ↓ (< 1 sec)
-ngrok tunnel
+ngrok tunnel (https://abc123.ngrok.io)
     ↓
 Webhook Server (http://0.0.0.0:8000)
     ↓
+Monitor processes
+    ↓
 All accounts engage ⚡
     ↓
-If no webhook: Polling every 60-120 min
+If no webhook: Polling every 60-120 min (fallback)
 ```
 
 ---
 
-## What Happens When You Run?
+## ⚙️ Advanced Options
 
-✅ ngrok tunnel auto-starts
-✅ Webhook server starts (background)
-✅ Monitor loop starts (foreground)
-✅ Displays webhook URL automatically
-✅ Ready for IFTTT
-
----
-
-## Stop Bot
-
-Press `Ctrl+C` to stop everything gracefully.
-
----
-
-## Troubleshooting
-
-### ngrok error: authentication failed
+### Run Without ngrok (Local Only)
 ```bash
-set NGROK_AUTHTOKEN=your_token_here
-python run.py
+python run.py --no-ngrok
 ```
+
+### Custom Port
+```bash
+python run.py --port 8001
+```
+
+### Custom ngrok Token
+```bash
+python run.py --ngrok-token YOUR_TOKEN_HERE
+```
+
+---
+
+## 🐛 Troubleshooting
 
 ### Port 8000 already in use
 ```bash
@@ -123,11 +159,44 @@ python main.py add --handle @account1 --username "Name"
 python main.py login acc_001
 ```
 
+### Dependencies missing
+```bash
+pip install -r requirements.txt
+python -m playwright install chromium
+```
+
 ---
 
-## That's it! 🚀
+## 🛑 Stop the Bot
 
-**One command to rule them all:**
+Press **Ctrl+C** to stop gracefully. All processes will clean up automatically.
+
+---
+
+## 📝 What Gets Created
+
+When you run the bot, it creates:
+
+- `data/accounts.json` - Your account configurations
+- `data/seen.json` - Tracked tweets and engagement
+- `data/config.json` - Bot settings
+- `logs/` - Activity logs
+- `sessions/` - Browser sessions (auto-cleaned)
+
+---
+
+## ✨ That's It!
+
+**One command:**
 ```bash
 python run.py
 ```
+
+Your bot is now:
+- ✅ Running webhook server on port 8000
+- ✅ Connected to ngrok tunnel
+- ✅ Ready for IFTTT webhooks
+- ✅ Monitoring for manager tweets
+- ✅ Auto-engaging all accounts
+
+**Happy botting!** 🚀
