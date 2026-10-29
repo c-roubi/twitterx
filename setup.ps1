@@ -22,8 +22,8 @@ Write-Host "[+] $pythonVersion" -ForegroundColor Green
 # Install dependencies
 Write-Host ""
 Write-Host "[*] Installing dependencies..." -ForegroundColor Yellow
-python -m pip install --upgrade pip | Out-Null
-python -m pip install -r requirements.txt | Out-Null
+python -m pip install --upgrade pip --quiet 2>&1 | Out-Null
+python -m pip install -r requirements.txt --quiet 2>&1 | Out-Null
 
 if ($LASTEXITCODE -ne 0) {
     Write-Host "[-] Failed to install dependencies" -ForegroundColor Red
@@ -36,7 +36,7 @@ Write-Host "[+] Dependencies installed" -ForegroundColor Green
 # Install Playwright
 Write-Host ""
 Write-Host "[*] Installing Playwright browsers..." -ForegroundColor Yellow
-python -m playwright install chromium | Out-Null
+python -m playwright install chromium 2>&1 | Out-Null
 
 if ($LASTEXITCODE -ne 0) {
     Write-Host "[-] Failed to install Playwright" -ForegroundColor Red

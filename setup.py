@@ -40,7 +40,7 @@ def main():
     # Install Playwright browsers
     if not run_command(
         f"{sys.executable} -m playwright install chromium",
-        "Installing Playwright browsers"
+        "Installing Playwright browsers (this may take a minute)"
     ):
         sys.exit(1)
 

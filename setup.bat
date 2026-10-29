@@ -23,8 +23,8 @@ echo [+] %PYTHON_VER%
 REM Install dependencies
 echo.
 echo [*] Installing dependencies...
-python -m pip install --upgrade pip -q
-python -m pip install -r requirements.txt -q
+python -m pip install --upgrade pip --quiet
+python -m pip install -r requirements.txt --quiet
 
 if errorlevel 1 (
     echo [-] Failed to install dependencies
@@ -37,7 +37,7 @@ echo [+] Dependencies installed
 REM Install Playwright
 echo.
 echo [*] Installing Playwright browsers...
-python -m playwright install chromium -q
+python -m playwright install chromium
 
 if errorlevel 1 (
     echo [-] Failed to install Playwright
