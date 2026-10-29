@@ -4,13 +4,9 @@ import os
 import shutil
 import time
 
-# Try Camoufox first (stronger anti-detection), fallback to Playwright
-try:
-    from camoufox.sync_api import Camoufox as sync_playwright
-    BROWSER_ENGINE = "camoufox"
-except ImportError:
-    from playwright.sync_api import sync_playwright
-    BROWSER_ENGINE = "playwright"
+# Use Playwright (Camoufox has API differences on Windows)
+from playwright.sync_api import sync_playwright
+BROWSER_ENGINE = "playwright"
 
 from . import proxies, selectors
 from .config import PROFILES_DIR, SESSIONS_DIR
