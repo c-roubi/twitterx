@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
 """الروتين اليومي الذكي: نشاط عشوائي طبيعي + تنفيذ تفاعلات المدير."""
+import json
+import os
 import random
 import time
 from datetime import datetime
@@ -16,7 +18,7 @@ from .actions import (
 from .selectors import RETWEET_CONFIRM_CANDIDATES, TWEET_TEXT, first as selectors_first
 from .comments import build_comment_for
 from .config import (
-    enabled_accounts, load_accounts, load_config,
+    SESSIONS_DIR, enabled_accounts, load_accounts, load_config,
     load_seen, load_state, save_state,
 )
 from .grow import crypto_activity
@@ -740,30 +742,71 @@ def _is_fatal_session_error(msg):
 
 
 def check_due_sessions(cfg, accounts, dry_run=False):
-    """تشغيل جلسات الحسابات المستحقة + مهام المدير المستحقة.
+    """تشغيل جلسات الحسابات المستحقة (حسابين بالتوازي فقط) + مهام المدير.
 
-    FIX-WEDGE-V1: بعد انهيار جلسة بخطأ قاتل ننتظر _CRASH_COOLDOWN_S ثانية
-    بدلاً من إعادة المحاولة كل دقيقة (الانهيار المتكرر كان يكرر فشل النشر).
+    optimization: تشغيل أقصى حسابين في نفس الوقت لتوفير الموارد.
+    الحسابات الأخرى تنتظر في queue.
     """
     results = {"sessions": 0, "tasks": 0}
+    state_file = os.path.join(SESSIONS_DIR, "_parallel_queue.json")
+
+    # حمّل queue الحسابات الجارية
+    try:
+        with open(state_file, "r") as f:
+            parallel_state = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        parallel_state = {"active": [], "queue": []}
+
+    now = time.time()
+    # نظّف الحسابات المنتهية من الـ active list
+    parallel_state["active"] = [
+        a for a in parallel_state.get("active", [])
+        if (now - a.get("started_at", 0)) < 1800  # 30 دقيقة timeout
+    ]
+
+    # أضيف الحسابات المستحقة للـ queue
     for acc_id in enabled_accounts(accounts):
+        if acc_id in parallel_state["active"] or acc_id in parallel_state.get("queue", []):
+            continue  # بالفعل في queue أو شغّال
+
         state = ensure_daily_plan(acc_id, cfg)
         crash_at = float(state.get("last_session_crash") or 0)
         if crash_at and time.time() - crash_at < _CRASH_COOLDOWN_S:
-            log.warning(f"{acc_id} | الجلسة السابقة انهارت - إعادة محاولة بعد {int(_CRASH_COOLDOWN_S - (time.time() - crash_at))} ثانية")
             continue
+
         due_tasks = monitor.due_tasks_for(acc_id)
         session_due = False
         for s in state["sessions"]:
             h, m = map(int, s["start"].split(":"))
-            now = datetime.now()
-            if (now.hour, now.minute) >= (h, m) and state["sessions_run"] < len(state["sessions"]):
+            now_dt = datetime.now()
+            if (now_dt.hour, now_dt.minute) >= (h, m) and state["sessions_run"] < len(state["sessions"]):
                 session_due = True
                 break
+
         if session_due or due_tasks:
-            run_session(acc_id, cfg, accounts, dry_run=dry_run)
+            parallel_state["queue"].append(acc_id)
+
+    # شغّل حسابين فقط من الـ queue
+    while len(parallel_state["active"]) < 2 and parallel_state.get("queue"):
+        acc_id = parallel_state["queue"].pop(0)
+        if not dry_run:
+            log.info(f"{acc_id} | بدء الجلسة (حسابات نشطة: {len(parallel_state['active']) + 1}/2)")
+            parallel_state["active"].append({"id": acc_id, "started_at": now})
+            try:
+                run_session(acc_id, cfg, accounts, dry_run=False)
+            except Exception as e:
+                log.error(f"{acc_id} | خطأ في الجلسة: {e}")
             results["sessions"] += 1
-        elif dry_run:
+        else:
             run_session(acc_id, cfg, accounts, dry_run=True)
             results["sessions"] += 1
+
+    # احفظ الـ queue
+    try:
+        os.makedirs(SESSIONS_DIR, exist_ok=True)
+        with open(state_file, "w") as f:
+            json.dump(parallel_state, f, indent=2)
+    except Exception:
+        pass
+
     return results
