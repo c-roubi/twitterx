@@ -629,16 +629,35 @@ def execute_single_account_immediate(acc_id, tid, tweet_text, cfg, accounts, del
 
         article = articles[0]
         state = load_state(acc_id)
+        seen = load_seen()
+
+        # تحديث seen لـ track التفاعلات (prevent duplicates)
+        if tid not in seen:
+            seen[tid] = {}
+        tweet_entry = seen[tid]
+        if "engaged_by" not in tweet_entry:
+            tweet_entry["engaged_by"] = {}
 
         # Like
         try:
-            if article.locator(UNLIKE_BTN).first.count() == 0:
+            # تحقق: هل تفاعلنا معها من قبل؟
+            if tid in tweet_entry.get("engaged_by", {}).get(acc_id, {}).get("liked", False):
+                log.info(f"{acc_id} | ✓ لايك سابق على {tid} - skip")
+            elif article.locator(UNLIKE_BTN).first.count() == 0:
                 like_btn = article.locator(LIKE_BTN).first
                 if like_btn.count() > 0:
                     like_btn.hover()
                     human.pause(0.5, 1.5)
                     like_btn.click()
                     state["done"]["likes"] = state["done"].get("likes", 0) + 1
+
+                    # احفظ التفاعل
+                    if "engaged_by" not in tweet_entry:
+                        tweet_entry["engaged_by"] = {}
+                    if acc_id not in tweet_entry["engaged_by"]:
+                        tweet_entry["engaged_by"][acc_id] = {}
+                    tweet_entry["engaged_by"][acc_id]["liked"] = True
+
                     log.info(f"{acc_id} | ❤️ لايك التغريدة {tid}")
                     human.pause(1.0, 2.5)
         except Exception as e:
@@ -646,7 +665,10 @@ def execute_single_account_immediate(acc_id, tid, tweet_text, cfg, accounts, del
 
         # Retweet
         try:
-            if article.locator(UNRETWEET_BTN).first.count() == 0:
+            # تحقق: هل تفاعلنا معها من قبل؟
+            if tweet_entry.get("engaged_by", {}).get(acc_id, {}).get("retweeted", False):
+                log.info(f"{acc_id} | ✓ ريتويت سابق على {tid} - skip")
+            elif article.locator(UNRETWEET_BTN).first.count() == 0:
                 rt_btn = article.locator(RETWEET_BTN).first
                 if rt_btn.count() > 0:
                     rt_btn.hover()
@@ -660,10 +682,19 @@ def execute_single_account_immediate(acc_id, tid, tweet_text, cfg, accounts, del
                         human.pause(0.3, 0.8)
                         confirm.click()
                         state["done"]["retweets"] = state["done"].get("retweets", 0) + 1
+
+                        # احفظ التفاعل
+                        if acc_id not in tweet_entry["engaged_by"]:
+                            tweet_entry["engaged_by"][acc_id] = {}
+                        tweet_entry["engaged_by"][acc_id]["retweeted"] = True
+
                         log.info(f"{acc_id} | 🔄 ريتويت التغريدة {tid}")
                     human.pause(1.0, 2.5)
         except Exception as e:
             log.warning(f"{acc_id} | خطأ في retweet: {e}")
+
+        # احفظ الـ seen
+        save_seen(seen)
 
         # Comment - استخدم نفس الـ function اللي بتستخدم في Home
         try:
