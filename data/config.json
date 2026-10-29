@@ -75,8 +75,8 @@
   "follow": {
     "enabled": true,
     "daily_target": [
-      2,
-      5
+      5,
+      10
     ],
     "per_session": [
       1,
