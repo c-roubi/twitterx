@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Webhook Server - استقبال تويتات جديدة من IFTTT و تفاعل فوري."""
+"""Webhook Server - Receive tweets from IFTTT and trigger immediate engagement."""
 import json
 import os
 import sys
@@ -19,9 +19,15 @@ log = get_logger("webhook")
 try:
     from flask import Flask, request
 except ImportError:
-    print("❌ Flask مش مثبت!")
-    print("شغّل: pip install flask")
+    print("[!] ERROR: Flask not installed")
+    print("[*] Run: pip install -r requirements.txt")
     sys.exit(1)
+
+try:
+    from pyngrok import ngrok
+    NGROK_AVAILABLE = True
+except ImportError:
+    NGROK_AVAILABLE = False
 
 app = Flask(__name__)
 
@@ -31,22 +37,22 @@ accounts = None
 webhook_log = []
 
 def load_configs():
-    """تحميل الإعدادات."""
+    """Load configuration and accounts."""
     global cfg, accounts
     try:
         cfg = load_config()
         accounts = load_accounts()
         if not accounts:
-            log.error("❌ لا حسابات موجودة! استخدم: python main.py add --handle ...")
+            log.error("[!] No accounts found. Run: python main.py add --handle ...")
             return False
         return True
     except Exception as e:
-        log.error(f"❌ خطأ في تحميل الإعدادات: {e}")
+        log.error(f"[!] Config load error: {e}")
         return False
 
 @app.route('/webhook/twitter', methods=['POST'])
 def twitter_webhook():
-    """استقبال تويتة جديدة من IFTTT."""
+    """Receive new tweet from IFTTT."""
     try:
         data = request.json
         if not data:
@@ -56,17 +62,15 @@ def twitter_webhook():
         text = data.get('text', '')
 
         if not tid:
-            log.warning(f"⚠️ Missing tweet_id في الـ webhook payload: {data}")
+            log.warning(f"[!] Missing tweet_id in webhook payload: {data}")
             return {'error': 'missing tweet_id'}, 400
 
-        # تحويل لـ string إذا كان number
         tid = str(tid)
         text = str(text)[:2000]
 
-        log.info(f"⚡ WEBHOOK تويتة جديدة: {tid}")
-        log.info(f"   Text: {text[:100]}...")
+        log.info(f"[+] WEBHOOK: New tweet {tid}")
+        log.info(f"    Text: {text[:100]}...")
 
-        # تسجيل في الـ log
         webhook_log.append({
             'tid': tid,
             'text': text[:200],
@@ -74,15 +78,14 @@ def twitter_webhook():
             'status': 'processing'
         })
 
-        # تفاعل فوري (non-blocking في thread منفصل)
         def engage():
             try:
                 result = execute_immediate_engagement(tid, text, cfg, accounts)
                 webhook_log[-1]['status'] = 'completed'
-                log.info(f"✅ تفاعل مكتمل: {len(result.get('accounts', []))} حساب")
+                log.info(f"[+] Engagement complete: {len(result.get('accounts', []))} accounts")
             except Exception as e:
                 webhook_log[-1]['status'] = f'error: {str(e)[:50]}'
-                log.error(f"❌ خطأ في التفاعل: {e}")
+                log.error(f"[!] Engagement error: {e}")
 
         thread = Thread(target=engage, daemon=True)
         thread.start()
@@ -94,12 +97,12 @@ def twitter_webhook():
         }, 202
 
     except Exception as e:
-        log.error(f"❌ خطأ في webhook: {e}")
+        log.error(f"[!] Webhook error: {e}")
         return {'error': str(e)[:100]}, 500
 
 @app.route('/health', methods=['GET'])
 def health():
-    """صحة الـ server."""
+    """Server health check."""
     return {
         'status': 'running',
         'timestamp': datetime.now().isoformat(),
@@ -110,29 +113,27 @@ def health():
 
 @app.route('/status', methods=['GET'])
 def status():
-    """عرض الحالة و آخر الـ webhooks."""
+    """Display server status and recent webhooks."""
     return {
         'status': 'running',
         'accounts_count': len(accounts) if accounts else 0,
-        'webhooks_log': webhook_log[-10:]  # آخر 10
+        'webhooks_log': webhook_log[-10:]
     }, 200
 
 @app.route('/test', methods=['POST'])
 def test_webhook():
-    """تجربة الـ webhook (بدون IFTTT)."""
+    """Test webhook without IFTTT."""
     try:
-        # بيانات تجريبية
         test_data = {
             'tweet_id': '1234567890',
-            'text': '🧪 تجربة webhook'
+            'text': 'Test webhook message'
         }
 
-        # استدعاء الـ webhook
         response = twitter_webhook()
-        log.info("✅ اختبار webhook نجح")
+        log.info("[+] Webhook test successful")
         return {'test': 'ok', 'response': response[0]}, 200
     except Exception as e:
-        log.error(f"❌ فشل الاختبار: {e}")
+        log.error(f"[!] Test failed: {e}")
         return {'error': str(e)}, 500
 
 @app.errorhandler(404)
@@ -147,42 +148,72 @@ def not_found(e):
         ]
     }, 404
 
-def print_startup_info(port):
-    """طباعة معلومات البدء."""
-    print("\n" + "="*60)
-    print("🚀 Webhook Server")
-    print("="*60)
-    print(f"✅ Server شغّال على: http://0.0.0.0:{port}")
-    print(f"✅ Accounts: {len(accounts) if accounts else 0}")
-    print(f"✅ Config: {'✓' if cfg else '✗'}")
-    print("\n📍 Endpoints:")
-    print(f"  POST   http://localhost:{port}/webhook/twitter  ← IFTTT يرسل هنا")
-    print(f"  GET    http://localhost:{port}/health            ← فحص الحالة")
-    print(f"  GET    http://localhost:{port}/status            ← عرض الوضع")
-    print(f"  POST   http://localhost:{port}/test              ← تجربة محلية")
-    print("\n🔗 للـ external access (من الإنترنت):")
-    print(f"  pip install pyngrok")
-    print(f"  python -c \"from pyngrok import ngrok; print(ngrok.connect(8000))\"")
-    print("\n⏳ استنى على IFTTT notifications...")
-    print("="*60 + "\n")
+def setup_ngrok(port):
+    """Auto-setup ngrok tunnel for external access."""
+    if not NGROK_AVAILABLE:
+        return None
+
+    try:
+        print("[*] Setting up ngrok tunnel...")
+        tunnel = ngrok.connect(port)
+        ngrok_url = str(tunnel).replace("http://", "https://")
+        print(f"[+] ngrok tunnel: {tunnel}")
+        print(f"[+] IFTTT Webhook URL: {ngrok_url}/webhook/twitter")
+        return tunnel
+    except Exception as e:
+        print(f"[!] ngrok setup failed: {e}")
+        return None
+
+def print_startup_info(port, ngrok_url=None):
+    """Print startup information."""
+    print("\n" + "="*70)
+    print(" TwitterX Webhook Server")
+    print("="*70)
+    print(f"[+] Server running: http://0.0.0.0:{port}")
+    print(f"[+] Accounts: {len(accounts) if accounts else 0}")
+    print(f"[+] Config: {'OK' if cfg else 'ERROR'}")
+    print("\n[*] Endpoints:")
+    print(f"    POST   http://localhost:{port}/webhook/twitter")
+    print(f"    GET    http://localhost:{port}/health")
+    print(f"    GET    http://localhost:{port}/status")
+    print(f"    POST   http://localhost:{port}/test")
+
+    if ngrok_url:
+        print(f"\n[+] External Access (ngrok):")
+        print(f"    {ngrok_url}/webhook/twitter")
+    else:
+        print(f"\n[*] For external access (ngrok):")
+        print(f"    pip install pyngrok")
+        print(f"    python webhook_server.py --ngrok")
+
+    print(f"\n[*] Waiting for IFTTT notifications...")
+    print("="*70 + "\n")
 
 if __name__ == '__main__':
-    port = 8000
+    import argparse
 
-    print("\n📦 جاري التحميل...")
+    parser = argparse.ArgumentParser(description='TwitterX Webhook Server')
+    parser.add_argument('--port', type=int, default=8000, help='Port to run on')
+    parser.add_argument('--ngrok', action='store_true', help='Enable ngrok tunnel')
+    parser.add_argument('--host', default='0.0.0.0', help='Host to bind to')
+    args = parser.parse_args()
 
-    # تحميل الإعدادات
+    port = args.port
+    print(f"\n[*] Initializing...")
+
     if not load_configs():
-        print("❌ فشل تحميل الإعدادات!")
+        print("[!] Config load failed!")
         sys.exit(1)
 
-    # طباعة معلومات البدء
-    print_startup_info(port)
+    ngrok_url = None
+    if args.ngrok:
+        ngrok_url = setup_ngrok(port)
 
-    # شغّل الـ server
+    print_startup_info(port, ngrok_url)
+
     try:
         app.run(
-            host='0.0.0.0',
+            host=args.host,
             port=port,
             debug=False,
             use_reloader=False,
@@ -190,19 +221,19 @@ if __name__ == '__main__':
         )
     except OSError as e:
         if "Address already in use" in str(e):
-            print(f"\n❌ Port {port} مستخدم بالفعل!")
-            print(f"\nالحلول:")
-            print(f"1️⃣  استخدم port مختلف:")
-            print(f"    python webhook_server.py 8001")
-            print(f"\n2️⃣  اغلق البرنامج الآخر:")
-            print(f"    lsof -i :{port}")
-            print(f"    kill -9 <PID>")
+            print(f"\n[!] Port {port} is already in use!")
+            print(f"\n[*] Solutions:")
+            print(f"    1. Use different port:")
+            print(f"       python webhook_server.py --port 8001")
+            print(f"\n    2. Kill existing process:")
+            print(f"       lsof -i :{port}")
+            print(f"       kill -9 <PID>")
         else:
-            print(f"\n❌ خطأ: {e}")
+            print(f"\n[!] Error: {e}")
         sys.exit(1)
     except KeyboardInterrupt:
-        print("\n⏹ Server توقف")
+        print("\n[*] Server stopped")
         sys.exit(0)
     except Exception as e:
-        print(f"\n❌ خطأ غير متوقع: {e}")
+        print(f"\n[!] Unexpected error: {e}")
         sys.exit(1)
