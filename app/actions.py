@@ -39,6 +39,71 @@ def _err_status(e):
     return f"error:{e}"[:120]
 
 
+def _detect_oops_error(page):
+    """كشف صفحة الـ Oops error من Twitter (عادة تحتوي على 'Oops' أو 'Something went wrong')."""
+    if not page:
+        return False
+    try:
+        # شيك الـ page content عن أخطاء شائعة
+        content = page.content() or ""
+        if "Oops" in content or "Something went wrong" in content or "error" in content.lower():
+            # تأكد أنها فعلاً error page (ليست محتوى عادي)
+            if page.locator("text=/Oops|Something went wrong/i").count() > 0:
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def _recover_from_error(page, human, cfg=None, max_retries=3):
+    """استعادة من error page: reload و retry."""
+    for attempt in range(max_retries):
+        try:
+            if _detect_oops_error(page):
+                log.warning(f"Oops error detected - reload page (attempt {attempt + 1}/{max_retries})")
+                page.reload(wait_until="domcontentloaded")
+                page.wait_for_timeout(2000)
+                if human:
+                    human.pause(1.0, 3.0)
+                if not _detect_oops_error(page):
+                    return True  # تم التعافي بنجاح
+            else:
+                return True
+        except Exception as e:
+            log.warning(f"خطأ أثناء التعافي من error: {e}")
+            if attempt < max_retries - 1:
+                page.wait_for_timeout(1500)
+    return False
+
+
+def _safe_goto(page, url, cfg=None, human=None, timeout=45000):
+    """فتح URL بـ safety checks و recovery من errors."""
+    max_attempts = 3
+    for attempt in range(max_attempts):
+        try:
+            page.goto(url, timeout=timeout, wait_until="domcontentloaded")
+            page.wait_for_timeout(1500)
+
+            # تشيك هل في Oops error
+            if _detect_oops_error(page):
+                if attempt < max_attempts - 1:
+                    log.warning(f"Oops error after goto - retry (attempt {attempt + 2}/{max_attempts})")
+                    if human:
+                        human.pause(2.0, 4.0)
+                    continue
+                else:
+                    return False, "oops-error"
+            return True, "ok"
+        except Exception as e:
+            if attempt < max_attempts - 1:
+                log.warning(f"خطأ في goto {url}: {e} - إعادة محاولة")
+                if human:
+                    human.pause(1.5, 3.0)
+            else:
+                return False, _err_status(e)
+    return False, "max-retries"
+
+
 def dismiss_compose_dialog(page, human):
     """الخروج الآمن من محرر الاقتباس/حوار حفظ المسودة (Discard فقط، لا Save أبداً).
 
@@ -113,25 +178,43 @@ def dismiss_all_modals(page, human):
 
 
 def open_tweet(page, url):
-    """فتح تغريدة. ترجع (ok, status) حيث status من: ok/deleted/login-wall/network-error/timeout/error."""
-    try:
-        # ✅ تم التعديل: إضافة wait_until لتسريع الفتح وتجنب الـ Timeout
-        page.goto(url, timeout=60000, wait_until="domcontentloaded")
-    except Exception as e:
-        return False, _err_status(e)
-    page.wait_for_timeout(2500)
-    # انتظار تحميل المقال
-    for _ in range(20):
-        if selectors.has(page, TWEET_ARTICLE_CANDIDATES):
-            return True, "ok"
-        if selectors.has(page, LOGIN_WALL):
-            return False, "login-wall"
+    """فتح تغريدة. ترجع (ok, status) حيث status من: ok/deleted/login-wall/oops-error/network-error/timeout/error."""
+    max_attempts = 3
+    for attempt in range(max_attempts):
+        try:
+            page.goto(url, timeout=60000, wait_until="domcontentloaded")
+        except Exception as e:
+            if attempt < max_attempts - 1:
+                log.warning(f"خطأ في فتح التغريدة (محاولة {attempt + 2}): {_err_status(e)}")
+                page.wait_for_timeout(1500)
+                continue
+            return False, _err_status(e)
+
+        page.wait_for_timeout(2500)
+
+        # تشيك الأخطاء الشائعة
+        if _detect_oops_error(page):
+            if attempt < max_attempts - 1:
+                log.warning(f"Oops error عند فتح التغريدة - reload (محاولة {attempt + 2})")
+                page.wait_for_timeout(1500)
+                continue
+            return False, "oops-error"
+
+        # انتظار تحميل المقال
+        for _ in range(20):
+            if selectors.has(page, TWEET_ARTICLE_CANDIDATES):
+                return True, "ok"
+            if selectors.has(page, LOGIN_WALL):
+                return False, "login-wall"
+            if resilience.is_tweet_deleted(page):
+                return False, "deleted"
+            page.wait_for_timeout(1000)
+
         if resilience.is_tweet_deleted(page):
             return False, "deleted"
-        page.wait_for_timeout(1000)
-    if resilience.is_tweet_deleted(page):
-        return False, "deleted"
-    return True, "ok"
+        return True, "ok"
+
+    return False, "max-retries"
 
 
 def open_tweet_with_retry(page, url, cfg):
