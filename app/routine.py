@@ -838,6 +838,17 @@ def _is_fatal_session_error(msg):
     ))
 
 
+def get_active_accounts():
+    """جلب قائمة الحسابات الجارية حالياً (في الـ session أو الـ queue)."""
+    state_file = os.path.join(SESSIONS_DIR, "_parallel_queue.json")
+    try:
+        with open(state_file, "r") as f:
+            parallel_state = json.load(f)
+            return parallel_state.get("active", []) + parallel_state.get("queue", [])
+    except (FileNotFoundError, json.JSONDecodeError):
+        return []
+
+
 def check_due_sessions(cfg, accounts, dry_run=False):
     """تشغيل جلسات الحسابات المستحقة (حسابين بالتوازي فقط) + مهام المدير.
 

@@ -170,13 +170,11 @@ def _detect_consecutive_tweets(seen):
 
 
 def execute_immediate_engagement(tid, text="", cfg=None, accounts=None):
-    """تفاعل فوري مباشر على التغريدة (بدون جدولة).
+    """تفاعل فوري مباشر على التغريدة (غير-blocking، queue-based).
 
-    يختار حسابات عشوائية وينفذ التفاعل (like + retweet + comment) فوراً.
-    مثالي للتفاعل السريع مع تغريدات المدير الجديدة.
+    أضف التغريدة للـ queue بـ priority عالية.
+    كل حساب يتفاعل من الـ session الخاص فيه (لا توقف البوت).
     """
-    from . import routine
-
     seen = load_seen()
     if tid in seen and seen[tid].get("immediate_done"):
         return None
@@ -194,10 +192,9 @@ def execute_immediate_engagement(tid, text="", cfg=None, accounts=None):
     n = random.randint(lo, min(hi, len(enabled)))
     chosen = random.sample(enabled, n)
 
-    log.info(f"🚀 تفاعل فوري للتغريدة {tid}: اختيار {len(chosen)} حساب")
+    log.info(f"⚡ تفاعل فوري للتغريدة {tid}: أضيف لـ queue ({len(chosen)} حساب)")
 
     # حفظ التغريدة كمفعولة فوراً
-    now = time.time()
     seen[tid] = {
         "tweet_id": tid,
         "url": TWEET_URL.format(tid=tid),
@@ -206,18 +203,9 @@ def execute_immediate_engagement(tid, text="", cfg=None, accounts=None):
         "immediate_done": True,
         "mode": "immediate",
         "accounts": chosen,
+        "priority": True,  ← علم عالي الأولوية
     }
     save_seen(seen)
-
-    # تنفيذ التفاعل الفوري (بدون جدولة طويلة)
-    for idx, aid in enumerate(chosen):
-        delay = random.uniform(5, 25) if idx == 0 else random.uniform(10, 45)
-        try:
-            routine.execute_single_account_immediate(aid, tid, text, cfg, accounts, delay)
-        except Exception as e:
-            log.warning(f"خطأ في التفاعل الفوري للحساب {aid}: {e}")
-            continue
-
     return seen[tid]
 
 
