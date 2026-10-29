@@ -1,7 +1,33 @@
+# Data files (don't commit)
+data/accounts.json
+data/seen.json
+data/state/
+data/sessions/
+data/profiles/
+data/logs/
+data/comments.txt
+monitor_state.json
+
+# Python
 __pycache__/
 *.pyc
-data/logs/
-data/profiles/
-data/sessions/
-data/state/
-*.tmp
+*.pyo
+*.egg-info/
+.Python
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+.env
+.env.local
+
+# Logs
+*.log
+nohup.out
