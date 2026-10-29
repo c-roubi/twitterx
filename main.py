@@ -220,13 +220,15 @@ def cmd_monitor(args):
         print(f"✓ Cycle executed: {res['sessions']} sessions | {res['warmups']} warmups | {res['scheduled']} tweets scheduled")
         return
 
-    print("🚀 Starting continuous operation (Ctrl+C to stop) - runs all tasks automatically")
+    print("🚀 Starting continuous operation (Ctrl+C to stop) - full automation for all accounts")
     if args.dry_run:
         print("   DRY-RUN mode: no browser will be opened and no engagement will be executed")
+
     next_check_at = 0
     while True:
         try:
             now = time.time()
+
             # 1) Manager tweet check (smart exponential backoff)
             if now >= next_check_at:
                 tweets, status = monitor.fetch_manager_tweets(cfg, accounts, dry_run=args.dry_run)
@@ -235,24 +237,40 @@ def cmd_monitor(args):
 
                 if had_tweets:
                     seen = load_seen()
-                    # Direct immediate engagement (no scheduling)
                     for t in tweets:
                         tid = t["id"] if isinstance(t, dict) else t
                         if not seen.get(tid, {}).get("immediate_done"):
                             monitor.execute_immediate_engagement(tid, t.get("text", "") if isinstance(t, dict) else "", cfg, accounts)
 
-                # Smart backoff: 1-2-4-8-15-30 minutes if no new tweets
                 next_check_at = now + _next_interval(cfg, last_had_tweets=had_tweets)
                 interval_min = int(_next_interval(cfg, last_had_tweets=had_tweets) / 60)
-                log.info(f"⏱️ Next check in {interval_min} minute(s)")
-            # 2) Daily sessions + due manager tasks
+                log.info(f"⏱️ Next manager check in {interval_min} minute(s)")
+
+            # 2) Execute daily sessions for ALL enabled accounts (comprehensive mode)
             res = routine.check_due_sessions(cfg, accounts, dry_run=args.dry_run)
             if res["sessions"]:
                 log.info(f"Sessions executed: {res['sessions']}")
-            # 3) Due daily warmups
+
+            # 3) Execute warmups for ALL enabled accounts (comprehensive mode)
             wres = routine.check_due_warmups(cfg, accounts, dry_run=args.dry_run)
             if wres["warmups"]:
                 log.info(f"Warmups executed: {wres['warmups']}")
+
+            # 4) For comprehensive mode: run immediate daily sessions every 2 hours for active accounts
+            #    This ensures continuous engagement across all accounts
+            last_immediate = getattr(cmd_monitor, '_last_immediate_session', 0)
+            if now - last_immediate >= 7200:  # Every 2 hours
+                enabled = [aid for aid, acc in accounts.items() if acc.get("enabled", True)]
+                if enabled and not args.dry_run:
+                    log.info(f"Running immediate daily sessions for {len(enabled)} account(s)")
+                    # Run sessions sequentially (max 2 at once via config)
+                    for acc_id in enabled[:2]:
+                        try:
+                            routine.run_session(acc_id, cfg, accounts, dry_run=False)
+                        except Exception as e:
+                            log.warning(f"Immediate session error for {acc_id}: {e}")
+                    cmd_monitor._last_immediate_session = now
+
         except KeyboardInterrupt:
             print("\n⏹ Stopping")
             break
@@ -260,6 +278,7 @@ def cmd_monitor(args):
             log.error(f"Monitor cycle error: {e}")
             if _is_deadlock_error(e):
                 _self_restart(str(e)[:200])
+
         time.sleep(60)
 
 
