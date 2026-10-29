@@ -41,16 +41,16 @@
       "23:00"
     ],
     "max_likes_per_day": [
-      25,
-      45
+      8,
+      15
     ],
     "max_retweets_per_day": [
-      2,
-      6
+      1,
+      3
     ],
     "max_comments_per_day": [
       1,
-      4
+      2
     ],
     "min_action_delay_s": [
       8,
@@ -61,12 +61,12 @@
       120
     ],
     "session_minutes": [
-      15,
-      35
+      5,
+      10
     ],
     "sessions_per_day": [
-      1,
-      3
+      3,
+      6
     ],
     "allow_follow": false,
     "max_follows_per_day": 2,
@@ -75,12 +75,12 @@
   "follow": {
     "enabled": true,
     "daily_target": [
-      5,
-      10
+      2,
+      5
     ],
     "per_session": [
       1,
-      3
+      2
     ],
     "delay_between_s": [
       90,
@@ -108,8 +108,8 @@
   "warmup": {
     "enabled": true,
     "session_minutes": [
-      8,
-      15
+      5,
+      8
     ],
     "browse_probability": 0.8,
     "view_profiles": [
