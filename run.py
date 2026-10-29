@@ -150,7 +150,8 @@ def main():
         print(f"    {webhook_url}")
         print(f"\n[*] Configure IFTTT with:")
         print(f"    URL: {webhook_url}")
-        print(f"    Body: {\"tweet_url\": \"{{LinkToTweet}}\", \"text\": \"{{Text}}\"}")
+        body = '{"tweet_url": "{{LinkToTweet}}", "text": "{{Text}}"}'
+        print(f"    Body: {body}")
     else:
         print(f"\n[+] Local Webhook URL:")
         print(f"    http://localhost:{args.port}/webhook/twitter")
