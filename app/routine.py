@@ -379,6 +379,7 @@ def _browse_and_interact(page, acc_id, cfg, state, human, session_secs, session_
     scrolls = 0
     liked_ids = set()
     retweeted_ids = set()
+    last_manager_check = session_start
     dismiss_compose_dialog(page, human)  # تنظيف أي محرر/حوار من جولة سابقة
     while time.time() - session_start < session_secs:
         save_state(acc_id, state)  # حفظ التقدم عند كل دور
@@ -402,6 +403,14 @@ def _browse_and_interact(page, acc_id, cfg, state, human, session_secs, session_
 
         if scrolls % 3 == 0:
             human.pause(4.0, 12.0)  # توقف "للقراءة"
+
+        # ✅ كل 5 دقايق: فحص تغريدات المدير من الـ session
+        if time.time() - last_manager_check >= 300:
+            try:
+                _check_and_engage_manager_tweets_during_session(page, acc_id, cfg, state, human)
+                last_manager_check = time.time()
+            except Exception as e:
+                log.warning(f"{acc_id} | خطأ في check المدير أثناء الـ session: {e}")
 
         articles = page.locator(TWEET_ARTICLE).all()
         if not articles:
@@ -443,6 +452,94 @@ def _browse_and_interact(page, acc_id, cfg, state, human, session_secs, session_
             except Exception:
                 pass
         save_state(acc_id, state)
+
+
+def _check_and_engage_manager_tweets_during_session(page, acc_id, cfg, state, human):
+    """فحص تويتات المدير أثناء الـ session و تفاعل عليها من نفس الـ session."""
+    try:
+        tweets, _ = monitor.fetch_manager_tweets(cfg, {}, dry_run=False)
+        if not tweets:
+            return
+
+        seen = load_seen()
+        engaged_count = 0
+        for t in tweets:
+            tid = t["id"] if isinstance(t, dict) else t
+            if not seen.get(tid, {}).get("immediate_done"):
+                # تفاعل من الـ session الحالية
+                tweet_text = t.get("text", "") if isinstance(t, dict) else ""
+                _engage_on_manager_tweet_from_session(page, tid, tweet_text, acc_id, cfg, state, human)
+                seen[tid] = seen.get(tid, {})
+                seen[tid]["immediate_done"] = True
+                engaged_count += 1
+
+        if engaged_count > 0:
+            from .config import save_seen
+            save_seen(seen)
+            log.info(f"{acc_id} | ⚡ تفاعل على {engaged_count} تويتة مدير أثناء الـ session")
+    except Exception:
+        pass
+
+
+def _engage_on_manager_tweet_from_session(page, tid, tweet_text, acc_id, cfg, state, human):
+    """تفاعل على تويتة المدير من الـ session الجاري (like + retweet + comment)."""
+    try:
+        url = f"https://x.com/i/web/status/{tid}"
+        ok, _ = resilience.goto_with_retry(page, url, cfg)
+        if not ok:
+            return
+
+        page.wait_for_timeout(2000)
+        actions.dismiss_all_modals(page, human)
+
+        # Like
+        try:
+            like_btn = page.locator(LIKE_BTN).first
+            if like_btn.count() > 0:
+                like_btn.click()
+                state["done"]["likes"] += 1
+                page.wait_for_timeout(800)
+        except Exception:
+            pass
+
+        # Retweet
+        try:
+            rt_btn = page.locator(RETWEET_BTN).first
+            if rt_btn.count() > 0:
+                rt_btn.click()
+                page.wait_for_timeout(800)
+                confirm = page.locator("button:has-text('Retweet')").first
+                if confirm.count() > 0:
+                    confirm.click()
+                    state["done"]["retweets"] += 1
+                page.wait_for_timeout(800)
+        except Exception:
+            pass
+
+        # Comment
+        try:
+            if _can_do(state, "comments"):
+                used = {c for t, e in load_seen().items() for c in e.get("comments_used", [])}
+                en_ratio = _account_en_ratio({"en_ratio": cfg.get("comments", {}).get("en_ratio", 0.9)})
+                text = build_comment_for(tweet_text, used_texts=used, cfg=cfg, en_ratio=en_ratio)
+                if text and comment_on_tweet(page, text, human):
+                    state["done"]["comments"] += 1
+                    if tid not in load_seen():
+                        load_seen()[tid] = {}
+                    load_seen()[tid]["comments_used"] = list(used | {text})
+        except Exception:
+            pass
+
+        # الرجوع للرئيسية
+        try:
+            page.goto("https://x.com/home", timeout=30000, wait_until="domcontentloaded")
+            page.wait_for_timeout(1000)
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+
 # FIX-MIX-V1
 def _open_and_comment(page, url, acc_id, state, human, cfg=None, en_ratio=None):
     """فتح تغريدة والتعليق عليها بتعليق سياقي ذكي (من نص التغريدة)."""
