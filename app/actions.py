@@ -132,10 +132,10 @@ def dismiss_compose_dialog(page, human):
                 page.wait_for_timeout(900)
                 continue
             break
-        # لم تزل الورقة أو عالقون في /compose: غادر الصفحة
+        # Sheet didn't clear or stuck in /compose: leave page
         try:
             if page.locator('[data-testid="confirmationSheet"]').count() > 0 or "/compose/" in (page.url or ""):
-                # ✅ تم التعديل: إضافة wait_until لتجنب Timeout
+                # Add wait_until to avoid timeout
                 page.goto("https://x.com/home", timeout=45000, wait_until="domcontentloaded")
                 page.wait_for_timeout(1500)
                 return True
@@ -148,9 +148,9 @@ def dismiss_compose_dialog(page, human):
 
 
 def dismiss_all_modals(page, human):
-    """تعمل dismiss تلقائي لأي modal/popup على الصفحة (Views, alerts, إلخ)."""
+    """Auto-dismiss any modal/popup on page (Views, alerts, etc)."""
     try:
-        # البحث عن زرار Dismiss
+        # Search for Dismiss button
         dismiss_btns = page.locator('button:has-text("Dismiss"), button:contains("Dismiss")')
         if dismiss_btns.count() > 0:
             try:
@@ -161,7 +161,7 @@ def dismiss_all_modals(page, human):
             except Exception:
                 pass
 
-        # محاولة X button للـ close
+        # Try X button for close
         close_btn = page.locator('button[aria-label="Close"]')
         if close_btn.count() > 0:
             try:
@@ -178,29 +178,29 @@ def dismiss_all_modals(page, human):
 
 
 def open_tweet(page, url):
-    """فتح تغريدة. ترجع (ok, status) حيث status من: ok/deleted/login-wall/oops-error/network-error/timeout/error."""
+    """Open a tweet. Returns (ok, status) where status is: ok/deleted/login-wall/oops-error/network-error/timeout/error."""
     max_attempts = 3
     for attempt in range(max_attempts):
         try:
             page.goto(url, timeout=60000, wait_until="domcontentloaded")
         except Exception as e:
             if attempt < max_attempts - 1:
-                log.warning(f"خطأ في فتح التغريدة (محاولة {attempt + 2}): {_err_status(e)}")
+                log.warning(f"Error opening tweet (attempt {attempt + 2}): {_err_status(e)}")
                 page.wait_for_timeout(1500)
                 continue
             return False, _err_status(e)
 
         page.wait_for_timeout(2500)
 
-        # تشيك الأخطاء الشائعة
+        # Check for common errors
         if _detect_oops_error(page):
             if attempt < max_attempts - 1:
-                log.warning(f"Oops error عند فتح التغريدة - reload (محاولة {attempt + 2})")
+                log.warning(f"Oops error when opening tweet - reload (attempt {attempt + 2})")
                 page.wait_for_timeout(1500)
                 continue
             return False, "oops-error"
 
-        # انتظار تحميل المقال
+        # Wait for article to load
         for _ in range(20):
             if selectors.has(page, TWEET_ARTICLE_CANDIDATES):
                 return True, "ok"
@@ -218,7 +218,7 @@ def open_tweet(page, url):
 
 
 def open_tweet_with_retry(page, url, cfg):
-    """فتح تغريدة مع إعادة محاولة عند أخطاء الشبكة/المهلة."""
+    """Open tweet with retry on network/timeout errors."""
     r = int(cfg.get("resilience", {}).get("network_retries", 2))
     base = float(cfg.get("resilience", {}).get("retry_base_delay_s", 5.0))
     last = "error"
@@ -232,7 +232,7 @@ def open_tweet_with_retry(page, url, cfg):
             if i < r:
                 d = resilience.backoff_delay(i, base)
                 log.warning(
-                    f"مشكلة شبكة في فتح التغريدة {url} - إعادة المحاولة ({i + 2}/{r + 1}) بعد {d:.1f} ثانية"
+                    f"Network issue opening tweet {url} - retrying ({i + 2}/{r + 1}) after {d:.1f} seconds"
                 )
                 time.sleep(d)
                 continue
@@ -241,8 +241,8 @@ def open_tweet_with_retry(page, url, cfg):
 
 
 def like_tweet(page, human):
-    """لايك للتغريدة المفتوحة حالياً."""
-    dismiss_compose_dialog(page, human)  # خروج آمن من أي مسودة اقتباس سابقة
+    """Like the currently open tweet."""
+    dismiss_compose_dialog(page, human)  # Safe exit from any previous quote draft
     for attempt in range(MAX_ATTEMPTS):
         try:
             if selectors.has(page, UNLIKE_BTN_CANDIDATES):

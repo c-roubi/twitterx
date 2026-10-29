@@ -44,8 +44,8 @@ LOGIN_WALL_SELECTORS = selectors.LOGIN_WALL_CANDIDATES
 
 
 def _apply_fingerprint(context, fp, real_chrome=False):
-    """إخفاء آثار الأتمتة داخل صفحات Chromium الاحتياطي فقط.
-    أما كروم الحقيقي (channel=chrome) فيمتلك بصمة سليمة أصلاً، فلا نحقن عليه أي تعديل — لأن أي تباين مصطنع (لغة/أنوية/منصة) يزيد الشبهة بدل ما يقللها.
+    """Hide automation traces in fallback Chromium pages only.
+    Real Chrome (channel=chrome) has correct fingerprinting already, so we don't inject any modification — as any artificial variation (language/cores/platform) increases suspicion instead of reducing it.
     """
     if real_chrome:
         return
@@ -79,26 +79,26 @@ def _apply_fingerprint(context, fp, real_chrome=False):
 
 def _new_fp(account):
     fp = dict(fingerprint_for(account))
-    # لا نعيد توليد عشوائي لكل فتحة - البصمة تبقى ثابتة
+    # We don't regenerate random fingerprint per session - fingerprint stays constant
     return fp
 
 
 def _launch_with_fallback(launcher, headless_cfg):
-    """محاولة النافذة المرئية أولاً؛ إن لم تتوفر شاشة يتحول تلقائياً للوضع المخفي."""
+    """Try visible window first; if no display is available, automatically switch to headless mode."""
     try:
         return launcher(headless_cfg)
     except Exception as e:
         if "XServer" in str(e) or "no display" in str(e).lower() or "DISPLAY" in str(e):
             import logging
             logging.getLogger("smartengage.browser").warning(
-                "لا توجد شاشة متاحة - التحول إلى الوضع المخفي headless"
+                "No display available - switching to headless mode"
             )
             return launcher(True)
         raise
 
 
 def _browser_launchers(cfg):
-    """ترتيب محاولات التشغيل: كروم الحقيقي أولاً (بصمة حقيقية) ثم Chromium المرفق احتياطاً."""
+    """Launch attempt order: real Chrome first (real fingerprint) then bundled Chromium as fallback."""
     order = []
     if cfg.get("browser", {}).get("use_real_chrome", True):
         order.append(("chrome", True))
@@ -107,7 +107,7 @@ def _browser_launchers(cfg):
 
 
 def launch_guest(cfg, pw):
-    """سياق مؤقت بدون تسجيل دخول - لمراقبة تغريدات المدير (مع بروكسي إن كان مفعّلاً)."""
+    """Temporary context without login - for monitoring manager tweets (with proxy if enabled)."""
     fp = {
         "viewport": [1366, 768],
         "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
