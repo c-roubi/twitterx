@@ -37,10 +37,18 @@ def main():
     ):
         sys.exit(1)
 
-    # Install Playwright browsers
+    # Install Camoufox browsers (strongest anti-detection)
+    print("\n[*] Installing browser engines...")
+    if not run_command(
+        f"{sys.executable} -m camoufox install",
+        "Installing Camoufox (anti-detection browser)"
+    ):
+        print("[!] Camoufox install skipped, using Playwright fallback")
+
+    # Also install Playwright as fallback
     if not run_command(
         f"{sys.executable} -m playwright install chromium",
-        "Installing Playwright browsers (this may take a minute)"
+        "Installing Playwright browsers (fallback)"
     ):
         sys.exit(1)
 

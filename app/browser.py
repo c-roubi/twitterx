@@ -1,10 +1,16 @@
 # -*- coding: utf-8 -*-
-"""إدارة متصفح Playwright: بروفايل دائم لكل حساب + جلسة ضيف للمراقبة."""
+"""Browser management: Camoufox (anti-detection) + Playwright fallback."""
 import os
 import shutil
 import time
 
-from playwright.sync_api import sync_playwright
+# Try Camoufox first (stronger anti-detection), fallback to Playwright
+try:
+    from camoufox.sync_api import Camoufox as sync_playwright
+    BROWSER_ENGINE = "camoufox"
+except ImportError:
+    from playwright.sync_api import sync_playwright
+    BROWSER_ENGINE = "playwright"
 
 from . import proxies, selectors
 from .config import PROFILES_DIR, SESSIONS_DIR
