@@ -150,49 +150,57 @@ def dismiss_compose_dialog(page, human):
 def dismiss_all_modals(page, human):
     """Auto-dismiss any modal/popup/alert on page (robust multi-strategy handler)."""
     try:
-        # Strategy 1: Dismiss button (common)
-        for selector in ['button:has-text("Dismiss")', 'button:contains("Dismiss")', 'button[aria-label="Dismiss"]']:
+        # Strategy 1: Text-based dismiss buttons (most common)
+        for text in ["Dismiss", "Close", "OK", "Got it", "Confirm", "Accept", "X"]:
             try:
-                btn = page.locator(selector).first
-                if btn.count() > 0:
-                    human.pause(0.2, 0.5)
-                    btn.click()
-                    page.wait_for_timeout(600)
-                    return True
+                # Try multiple selector patterns
+                selectors = [
+                    f'button:has-text("{text}")',
+                    f'button[aria-label="{text}"]',
+                    f'[role="button"]:has-text("{text}")',
+                ]
+                for selector in selectors:
+                    try:
+                        btn = page.locator(selector).first
+                        if btn.count() > 0 and btn.is_visible():
+                            human.pause(0.3, 0.6)
+                            btn.click(force=True)
+                            page.wait_for_timeout(800)
+                            return True
+                    except Exception:
+                        pass
             except Exception:
                 pass
 
-        # Strategy 2: Close/X button (modals)
-        for selector in ['button[aria-label="Close"]', 'button[aria-label="close"]', '[role="button"][aria-label*="Close"]']:
-            try:
-                btn = page.locator(selector).first
-                if btn.count() > 0:
-                    human.pause(0.2, 0.5)
-                    btn.click()
-                    page.wait_for_timeout(600)
-                    return True
-            except Exception:
-                pass
-
-        # Strategy 3: OK/Got it buttons (alerts)
-        for text in ["Got it", "OK", "Confirm", "Accept"]:
-            try:
-                btn = page.locator(f'button:has-text("{text}")').first
-                if btn.count() > 0:
-                    human.pause(0.2, 0.5)
-                    btn.click()
-                    page.wait_for_timeout(600)
-                    return True
-            except Exception:
-                pass
-
-        # Strategy 4: Generic modal close (click overlay)
+        # Strategy 2: Close button by aria-label (modals)
         try:
-            overlay = page.locator('[role="dialog"], .modal-backdrop, [class*="modal"]').first
+            close_btn = page.locator('button[aria-label*="Close"], button[aria-label*="close"], [aria-label*="dismiss"]').first
+            if close_btn.count() > 0 and close_btn.is_visible():
+                human.pause(0.3, 0.6)
+                close_btn.click(force=True)
+                page.wait_for_timeout(800)
+                return True
+        except Exception:
+            pass
+
+        # Strategy 3: Keyboard escape (universal)
+        try:
+            page.keyboard.press("Escape")
+            page.wait_for_timeout(500)
+            # Check if modal still visible
+            modals = page.locator('[role="dialog"], [role="alertdialog"]').all()
+            if len(modals) == 0:
+                return True
+        except Exception:
+            pass
+
+        # Strategy 4: Click outside modal (overlay click)
+        try:
+            overlay = page.locator('[role="presentation"]').first
             if overlay.count() > 0:
-                # Try ESC key
-                page.keyboard.press("Escape")
-                page.wait_for_timeout(400)
+                # Click top-left corner of page to dismiss
+                page.click("body", position={"x": 50, "y": 50})
+                page.wait_for_timeout(600)
                 return True
         except Exception:
             pass
