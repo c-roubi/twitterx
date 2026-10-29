@@ -22,6 +22,23 @@ from .crypto_comments import (
 from .humanizer import build_comment
 
 
+def _detect_language(text):
+    """كشف لغة التغريدة: عربي أم إنجليزي (بناءً على الأحرف)."""
+    if not text:
+        return "en"  # افتراضي: إنجليزي
+
+    # عد الأحرف العربية و الإنجليزية
+    arabic_count = sum(1 for c in text if 'ء' <= c <= 'ي')  # نطاق الحروف العربية
+    english_count = sum(1 for c in text if 'a' <= c.lower() <= 'z')
+
+    if arabic_count > english_count * 1.5:  # عربي بقوة
+        return "ar"
+    elif english_count > arabic_count * 1.5:  # إنجليزي بقوة
+        return "en"
+    else:
+        return "mixed"  # مختلط
+
+
 def _is_sensitive_topic(tweet_text):
     """تجنب التغريدات الحساسة: حرب، كوارث، سياسة، كراهية، إلخ."""
     sensitive_keywords = [

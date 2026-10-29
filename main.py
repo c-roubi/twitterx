@@ -170,6 +170,7 @@ def cmd_monitor(args):
             if now >= next_check_at:
                 tweets, status = monitor.fetch_manager_tweets(cfg, accounts, dry_run=args.dry_run)
                 log.info(f"فحص المدير: {status} | جديد: {len(tweets)}")
+                had_immediate_engagement = False
                 if tweets:
                     seen = load_seen()
                     # تفاعل فوري مباشر (بدون جدولة)
@@ -177,7 +178,14 @@ def cmd_monitor(args):
                         tid = t["id"] if isinstance(t, dict) else t
                         if not seen.get(tid, {}).get("immediate_done"):
                             monitor.execute_immediate_engagement(tid, t.get("text", "") if isinstance(t, dict) else "", cfg, accounts)
-                next_check_at = now + _next_interval(cfg)
+                            had_immediate_engagement = True
+
+                # recheck سريع بعد تفاعل فوري (30 ثانية)، أو interval عادي (5 دقايق)
+                if had_immediate_engagement:
+                    next_check_at = now + 30  # 30 ثانية للتحقق من تغريدات جديدة
+                    log.info("⏱️ recheck سريع بعد 30 ثانية")
+                else:
+                    next_check_at = now + _next_interval(cfg)
             # 2) الجلسات اليومية + مهام المدير المستحقة
             res = routine.check_due_sessions(cfg, accounts, dry_run=args.dry_run)
             if res["sessions"]:
