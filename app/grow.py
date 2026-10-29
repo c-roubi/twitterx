@@ -297,6 +297,127 @@ def browse_crypto_search(page, acc_id, cfg, state, human, budget_s, start):
             break
 
 
+def smart_follow_engaged_users(page, acc_id, cfg, state, human, max_follows):
+    """تتابع الناس المهتمين الذين لايكوا أو علقوا على تغريدات الكريبتو.
+
+    الشروط:
+    ✅ Engaged users (liked or commented)
+    ❌ Not verified
+    ❌ Followers < 6000
+    ❌ Not already followed (globally)
+    """
+    f = cfg.get("follow", {})
+    budget = follow_budget(state, cfg)
+    if budget <= 0 or max_follows <= 0:
+        return 0, "no-budget"
+
+    log.info(f"{acc_id} | متابعة مستخدمين مهتمين (engaged users)")
+
+    # جلب الناس المهتمين من timeline
+    engaged_candidates = []
+    try:
+        # ابحث عن crypto tweets
+        ok, _ = resilience.goto_with_retry(
+            page, f"https://x.com/search?q={quote('crypto OR #crypto OR bitcoin')}&f=live", cfg
+        )
+        if not ok:
+            return 0, "goto-failed"
+
+        page.wait_for_timeout(3000)
+        human.pause(1.0, 3.0)
+
+        # جلب تغريدات
+        articles = page.locator(TWEET_ARTICLE).all()[:5]  # أول 5 تغريدات فقط
+
+        for article in articles:
+            try:
+                # جلب من اللايكات
+                like_btn = article.locator('[role="button"][aria-label*="Like"]').first
+                if like_btn.count() > 0:
+                    like_btn.click()
+                    page.wait_for_timeout(1500)
+
+                    # جلب الناس من قائمة اللايكات
+                    user_cells = page.locator(USER_CELL).all()[:10]
+                    for cell in user_cells:
+                        try:
+                            link = cell.locator('a[href]').first
+                            if link.count() > 0:
+                                href = link.get_attribute("href") or ""
+                                handle = _handle_from_href(href)
+                                if handle and handle not in engaged_candidates:
+                                    engaged_candidates.append(handle)
+                        except:
+                            pass
+
+                    # أغلق القائمة
+                    page.keyboard.press("Escape")
+                    page.wait_for_timeout(1000)
+            except:
+                pass
+
+    except Exception as e:
+        log.warning(f"{acc_id} | خطأ في جلب engaged users: {e}")
+        return 0, f"error:{e}"[:50]
+
+    # Filter و Follow
+    followed = 0
+    lo_delay, hi_delay = (int(x) for x in f.get("delay_between_s", [90, 300]))
+
+    # جلب الناس المتتبعين سابقاً (global tracking)
+    seen_handles = set(state.get("seen_users", []) or [])
+
+    for handle in engaged_candidates[:max_follows]:
+        if follow_budget(state, cfg) <= 0:
+            break
+
+        # Skip إذا تابعناهم من حساب آخر
+        if handle in seen_handles:
+            log.info(f"{acc_id} | {handle} - already followed from another account")
+            continue
+
+        try:
+            # فتح البروفايل
+            ok, status = open_profile(page, handle, cfg)
+            if not ok:
+                continue
+
+            human.pause(1.5, 3.0)
+
+            # اقرأ البروفايل
+            profile = read_profile(page, handle)
+
+            # تحقق: verified؟
+            if profile.get("verified"):
+                log.info(f"{acc_id} | {handle} - verified, skip")
+                continue
+
+            # تحقق: followers > 6000؟
+            followers = profile.get("followers", 0) or 0
+            if followers > 6000:
+                log.info(f"{acc_id} | {handle} - {followers} followers (> 6000), skip")
+                continue
+
+            # OK - Follow!
+            res, msg = follow_user(page, human, handle)
+            if res:
+                state.setdefault("followed_handles", []).append(handle)
+                state["done"]["follows"] = state["done"].get("follows", 0) + 1
+                seen_handles.add(handle)
+                state["seen_users"] = list(seen_handles)
+                followed += 1
+                log.info(f"{acc_id} | ✅ متابعة {handle} ({followers} followers)")
+
+            save_state(acc_id, state)
+            human.pause(lo_delay, hi_delay)
+
+        except Exception as e:
+            log.warning(f"{acc_id} | خطأ في متابعة {handle}: {e}")
+            continue
+
+    return followed, "ok"
+
+
 def crypto_activity(page, acc_id, cfg, state, human, budget_s):
     """النشاط الكريبتو اليومي: تصفح بحث + متابعات بطيئة، ضمن ميزانية وقت."""
     f = cfg.get("follow", {})
@@ -304,6 +425,8 @@ def crypto_activity(page, acc_id, cfg, state, human, budget_s):
     start = time.time()
     if w.get("browse_probability", 0.8) > random.random():
         browse_crypto_search(page, acc_id, cfg, state, human, budget_s * 0.5, start)
+
+    # Smart Follow (المستخدمين المهتمين) - بدل random follow
     if f.get("enabled", True) and follow_budget(state, cfg) > 0:
         per_session = f.get("per_session", [1, 3])
-        run_follow_pass(page, acc_id, cfg, state, human, randint(*per_session))
+        smart_follow_engaged_users(page, acc_id, cfg, state, human, randint(*per_session))
