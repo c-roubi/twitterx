@@ -36,9 +36,10 @@
     }
   },
   "behavior": {
+    "timezone": "Asia/Gaza",
     "active_hours": [
       "08:00",
-      "23:00"
+      "01:00"
     ],
     "max_likes_per_day": [
       8,

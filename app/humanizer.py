@@ -4,6 +4,7 @@ import random
 import re
 import time
 from datetime import datetime, timedelta
+import pytz
 
 # قوالب بصمات متصفح مختلفة لكل حساب (تم تحديث الإصدارات لتبدو طبيعية وحديثة لتجنب كشف البوت)
 VIEWPORTS = [
@@ -21,6 +22,16 @@ USER_AGENTS = [
 ]
 
 SUFFIX_POOL = ["", "", "", "", ".", "!", " 👏", " ❤️", " ✨", " 🙏", " 🔥", " ✓"]
+
+
+def get_local_time(cfg):
+    """Get current time in configured timezone (Gaza by default)."""
+    tz_name = cfg.get("behavior", {}).get("timezone", "Asia/Gaza")
+    try:
+        tz = pytz.timezone(tz_name)
+        return datetime.now(tz)
+    except Exception:
+        return datetime.now()
 
 
 class Human:
@@ -168,14 +179,17 @@ def pick_daily_caps(cfg, state=None, rest_day=False):
 
 
 def random_sessions(cfg):
-    """توليد جلسات يومية: أوقات بداية عشوائية داخل ساعات النشاط."""
+    """Generate daily sessions: random start times within active hours (using configured timezone)."""
     b = cfg["behavior"]
     start_h, start_m = map(int, b["active_hours"][0].split(":"))
     end_h, end_m = map(int, b["active_hours"][1].split(":"))
-    day_start = datetime.now().replace(hour=start_h, minute=start_m, second=0, microsecond=0)
-    day_end = datetime.now().replace(hour=end_h, minute=end_m, second=0, microsecond=0)
-    
-    # ✅ تم التعديل: حساب رياضي دقيق للعمل الليلي عبر منتصف الليل
+
+    # Use local time (Gaza timezone by default)
+    now = get_local_time(cfg)
+    day_start = now.replace(hour=start_h, minute=start_m, second=0, microsecond=0)
+    day_end = now.replace(hour=end_h, minute=end_m, second=0, microsecond=0)
+
+    # Handle late-night sessions (e.g., 08:00 to 01:00 next day)
     if day_end <= day_start:
         day_end = day_end + timedelta(days=1)
 
