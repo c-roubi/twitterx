@@ -50,6 +50,19 @@ def load_configs():
         log.error(f"[!] Config load error: {e}")
         return False
 
+def extract_tweet_id(url):
+    """Extract tweet ID from Twitter URL."""
+    if not url:
+        return None
+    # Format: https://x.com/user/status/1234567890 or https://twitter.com/user/status/1234567890
+    try:
+        parts = url.split('/status/')
+        if len(parts) == 2:
+            return parts[1].split('?')[0]
+    except:
+        pass
+    return None
+
 @app.route('/webhook/twitter', methods=['POST'])
 def twitter_webhook():
     """Receive new tweet from IFTTT."""
@@ -58,12 +71,18 @@ def twitter_webhook():
         if not data:
             return {'error': 'empty body'}, 400
 
+        # Support both tweet_id and tweet_url
         tid = data.get('tweet_id') or data.get('tweet_id_str')
+        tweet_url = data.get('tweet_url') or data.get('url')
+
+        if not tid and tweet_url:
+            tid = extract_tweet_id(tweet_url)
+
         text = data.get('text', '')
 
         if not tid:
-            log.warning(f"[!] Missing tweet_id in webhook payload: {data}")
-            return {'error': 'missing tweet_id'}, 400
+            log.warning(f"[!] Missing tweet_id/url in webhook payload: {data}")
+            return {'error': 'missing tweet_id or tweet_url'}, 400
 
         tid = str(tid)
         text = str(text)[:2000]
