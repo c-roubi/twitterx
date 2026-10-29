@@ -23,20 +23,38 @@ from .humanizer import build_comment
 
 
 def _detect_language(text):
-    """Detect tweet language: Arabic or English (based on characters)."""
+    """Detect tweet language: Arabic or English (based on characters + keywords)."""
     if not text:
         return "en"  # default: English
 
-    # Count Arabic and English characters
+    text_lower = text.lower()
+
+    # Strategy 1: Check for strong Arabic keywords
+    arabic_keywords = ['مرحبا', 'السلام', 'كيف', 'هلا', 'يا', 'ان', 'من', 'على', 'في', 'عن']
+    arabic_keyword_count = sum(1 for kw in arabic_keywords if kw in text_lower)
+
+    # Strategy 2: Check for strong English keywords (crypto-related)
+    english_keywords = ['bitcoin', 'crypto', 'ethereum', 'buy', 'sell', 'moon', 'hodl', 'pump', 'dump', 'trade', 'profit']
+    english_keyword_count = sum(1 for kw in english_keywords if kw in text_lower)
+
+    # If English keywords found, it's likely English
+    if english_keyword_count >= 2:
+        return "en"
+    # If Arabic keywords found, it's likely Arabic
+    if arabic_keyword_count >= 2:
+        return "ar"
+
+    # Strategy 3: Count Arabic and English characters
     arabic_count = sum(1 for c in text if 'ء' <= c <= 'ي')  # Arabic character range
     english_count = sum(1 for c in text if 'a' <= c.lower() <= 'z')
 
-    if arabic_count > english_count * 1.5:  # Strong Arabic
+    if arabic_count > english_count * 2:  # Strong Arabic (stricter threshold)
         return "ar"
-    elif english_count > arabic_count * 1.5:  # Strong English
+    elif english_count > arabic_count * 2:  # Strong English (stricter threshold)
         return "en"
     else:
-        return "mixed"  # Mixed
+        # Default to English for mixed (safer for crypto context)
+        return "en"
 
 
 def _is_sensitive_topic(tweet_text):
