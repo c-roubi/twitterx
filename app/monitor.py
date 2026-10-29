@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
 """مراقبة تغريدات المدير وجدولة التفاعلات المتدرجة."""
+import json
+import os
 import random
 import time
 from datetime import datetime
@@ -15,37 +17,64 @@ TWEET_URL = "https://x.com/i/web/status/{tid}"
 
 
 def fetch_manager_tweets(cfg, accounts, dry_run=False):
-    """جلب آخر تغريدات المدير. الطريقة: guest (بدون حساب) أو account (بأحد الحسابات)."""
+    """جلب آخر تغريدات المدير بـ rotation بين الحسابات (ما نستخدم نفس الحساب)."""
     handle = cfg["manager_handle"].lstrip("@")
     if not handle:
         log.warning("manager_handle فارغ - اضبطه في config.json")
         return [], "no-manager"
 
-    method = cfg["monitor"].get("method", "guest")
-    if method == "account" and cfg["monitor"].get("use_account"):
-        acc_id = cfg["monitor"]["use_account"]
-        if acc_id not in accounts:
-            log.warning(f"حساب المراقبة {acc_id} غير موجود - التحول إلى guest")
-            method = "guest"
-
     if dry_run:
         return [], "dry-run"
 
+    # جلب الحسابات المفعّلة
+    from .config import enabled_accounts
+    acc_list = [aid for aid in enabled_accounts(accounts)]
+    if not acc_list:
+        log.warning("لا حسابات مفعّلة - استخدم guest context")
+        return _fetch_guest(cfg)
+
+    # Rotation: استخدم حساب مختلف كل مرة
+    state_file = os.path.join(os.path.dirname(__file__), "..", "data", "monitor_state.json")
+    try:
+        with open(state_file, "r") as f:
+            monitor_state = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        monitor_state = {"last_account_idx": -1}
+
+    last_idx = monitor_state.get("last_account_idx", -1)
+    next_idx = (last_idx + 1) % len(acc_list)
+    acc_id = acc_list[next_idx]
+
+    # Save the next index
+    monitor_state["last_account_idx"] = next_idx
+    try:
+        os.makedirs(os.path.dirname(state_file), exist_ok=True)
+        with open(state_file, "w") as f:
+            json.dump(monitor_state, f)
+    except Exception:
+        pass
+
+    log.info(f"فحص المدير: استخدام حساب {acc_id} (rotation {next_idx + 1}/{len(acc_list)})")
+
     retries = int(cfg.get("resilience", {}).get("monitor_fetch_retries", 2))
     base = float(cfg.get("resilience", {}).get("retry_base_delay_s", 5.0))
+
+    # جرب الحساب الحالي أولاً، بعدها الحسابات الأخرى إذا فشل
     for attempt in range(retries + 1):
-        if method == "account":
-            ids, status = _fetch_with_account(cfg, accounts, acc_id)
-        else:
-            ids, status = _fetch_guest(cfg)
+        ids, status = _fetch_with_account(cfg, accounts, acc_id)
         if ids or not resilience.is_retryable(resilience.error_kind_from_msg(status)):
             return ids, status
+
+        # لو فشل: جرب حساب تاني
         if attempt < retries:
+            next_idx = (next_idx + 1) % len(acc_list)
+            acc_id = acc_list[next_idx]
             d = resilience.backoff_delay(attempt, base)
             log.warning(
-                f"فشل جلب تغريدات المدير ({status}) - إعادة المحاولة ({attempt + 2}/{retries + 1}) بعد {d:.1f} ثانية"
+                f"فشل جلب تغريدات المدير ({status}) - جرب حساب {acc_id} بعد {d:.1f} ثانية"
             )
             time.sleep(d)
+
     return [], status
 
 
