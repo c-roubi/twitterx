@@ -264,10 +264,10 @@ def like_tweet(page, human):
 
 
 def retweet_tweet(page, human):
-    """ريتويت/إعادة نشر للتغريدة المفتوحة حالياً."""
+    """Retweet/share the currently open tweet."""
     for attempt in range(MAX_ATTEMPTS):
         try:
-            # لو كنا عالقين في محرر اقتباس/مسودة من جولة سابقة: اخرج أولاً
+            # If stuck in quote composer/draft from previous round: exit first
             dismiss_compose_dialog(page, human)
             if "/compose/" in (page.url or ""):
                 return False, "in-compose"
@@ -279,7 +279,7 @@ def retweet_tweet(page, human):
             btn.hover()
             human.pause(0.8, 2.5)
             btn.click()
-            # انتظار ظهور القائمة المنبثقة (حتى 3 ثوانٍ)
+            # Wait for popup menu (up to 3 seconds)
             confirm = None
             for _ in range(6):
                 confirm = selectors.first(page, RETWEET_CONFIRM_CANDIDATES)
@@ -290,7 +290,7 @@ def retweet_tweet(page, human):
                 try:
                     for mi in page.locator('[role="menuitem"]').all()[:3]:
                         txt = (mi.inner_text() or "").lower()
-                        if any(k in txt for k in ("repost", "retweet", "إعادة نشر", "إعادة تغريد")):
+                        if any(k in txt for k in ("repost", "retweet")):
                             confirm = mi
                             break
                 except Exception:
@@ -302,7 +302,7 @@ def retweet_tweet(page, human):
             human.pause(0.5, 1.5)
             confirm.click()
             page.wait_for_timeout(2200)
-            # إن فُتح محرر اقتباس بالخطأ: نرفض المسودة فوراً ونعيد المحاولة
+            # If quote composer opened by mistake: reject draft immediately and retry
             if "/compose/" in (page.url or ""):
                 dismiss_compose_dialog(page, human)
                 if attempt < MAX_ATTEMPTS - 1:
@@ -319,7 +319,7 @@ def retweet_tweet(page, human):
 
 
 def _composer_text(page, ta):
-    """النص الموجود حالياً في محرر التعليق (أو فارغ عند أي خطأ)."""
+    """Text currently in comment composer (or empty on any error)."""
     try:
         return (ta.inner_text() or "").strip()
     except Exception:
@@ -327,20 +327,20 @@ def _composer_text(page, ta):
 
 
 def _norm_spaces(t):
-    """تطبيع المسافات للمقارنة (X قد يحوّل فواصل الأسطر/المسافات)."""
+    """Normalize spaces for comparison (X may convert line breaks/spaces)."""
     return " ".join((t or "").split())
 
 
 def _type_text_verified(page, ta, text):
-    """كتابة نص التعليق والتحقق أنه استقر فعلًا في الصندوق (وليس ضغطات ضائعة).
+    """Type comment text and verify it actually settled in the box (not lost keystrokes).
 
-    المراحل: حرفاً حرفاً (مرتين مع مسح مسبق) ← insert_text دفعة واحدة ← fill().
-    يرجع النص الموجود فعلياً في المحرر، أو سلسلة فارغة إن لم تستقر الكتابة.
+    Stages: character by character (twice with pre-clear) ← insert_text batch ← fill().
+    Returns text actually in composer, or empty string if writing didn't stick.
     """
     if not text:
         return ""
     target = _norm_spaces(text)
-    # 1) كتابة حرفاً حرفاً بعد تركيز مؤكد وتفريغ المحرر
+    # 1) Type character by character after confirmed focus and composer clear
     for _ in range(2):
         try:
             ta.click()
@@ -356,7 +356,7 @@ def _type_text_verified(page, ta, text):
                 return cur
         except Exception:
             pass
-    # 2) محاكاة لصق النص دفعة واحدة (أكثر ثباتاً حتى لو تأخر التركيز)
+    # 2) Simulate paste text batch (more stable even if focus lags)
     try:
         ta.click()
         page.wait_for_timeout(400)
@@ -369,7 +369,7 @@ def _type_text_verified(page, ta, text):
             return cur
     except Exception:
         pass
-    # 3) fill(): يضبط محتوى contenteditable مباشرة دون محاكاة لوحة مفاتيح
+    # 3) fill(): sets contenteditable content directly without keyboard simulation
     try:
         ta.fill(text)
         page.wait_for_timeout(450)
@@ -380,7 +380,7 @@ def _type_text_verified(page, ta, text):
 
 
 def _wait_send_enabled(page, timeout_ms=4000):
-    """انتظار زر النشر حتى يظهر ويكون مفعّلاً (حتى timeout_ms)."""
+    """Wait for send button to appear and be enabled (until timeout_ms)."""
     deadline = time.time() + timeout_ms / 1000.0
     send = None
     while time.time() < deadline:
@@ -396,7 +396,7 @@ def _wait_send_enabled(page, timeout_ms=4000):
 
 
 def _composer_cleared(page, ta, timeout_ms=6000):
-    """هل أُرسل التعليق فعلاً؟ (فارغ المحرر أو اختفى من الصفحة)."""
+    """Did comment actually send? (composer empty or disappeared from page)."""
     deadline = time.time() + timeout_ms / 1000.0
     while time.time() < deadline:
         try:
@@ -410,16 +410,16 @@ def _composer_cleared(page, ta, timeout_ms=6000):
 
 
 def comment_on_tweet(page, text, human):
-    """تعليق نصي على التغريدة المفتوحة حالياً (مع تنظيف أي مسودة عالقة).
+    """Text comment on currently open tweet (with cleanup of any stuck draft).
 
-    FIX-SENDBTN-V2-COMMENT: الكتابة مُتحققٌ منها (fallback: insert_text/fill)،
-    وزر النشر يُنتظر حتى يُفعَّل حتى 4 ثوانٍ، وعند فشل النقر نستخدم اختصار
-    Ctrl+Enter الرسمي في X. التحقق من النجاح = محرر فارغ/مختفٍ.
+    FIX-SENDBTN-V2-COMMENT: Writing verified (fallback: insert_text/fill),
+    send button waited until enabled up to 4 seconds, on click fail we use official
+    Ctrl+Enter shortcut in X. Success check = composer empty/disappeared.
     """
-    dismiss_compose_dialog(page, human)  # خروج آمن من أي مسودة/حوار سابق
+    dismiss_compose_dialog(page, human)  # Safe exit from any previous draft/dialog
     for attempt in range(MAX_ATTEMPTS):
         try:
-            # تمرير خفيف لإظهار منطقة الرد على صفحة التغريدة
+            # Light scroll to show reply area on tweet page
             try:
                 page.mouse.wheel(0, 300)
                 page.wait_for_timeout(600)
@@ -461,7 +461,7 @@ def comment_on_tweet(page, text, human):
                 if _composer_cleared(page, ta, timeout_ms=6000):
                     dismiss_compose_dialog(page, human)
                     return True, "commented"
-                # النقر لم يُسجّل إرسالاً: بديل اختصار النشر Ctrl+Enter
+                # Click didn't register send: fallback to Ctrl+Enter publish shortcut
                 try:
                     page.keyboard.press("Control+Enter")
                 except Exception:
@@ -470,7 +470,7 @@ def comment_on_tweet(page, text, human):
                     dismiss_compose_dialog(page, human)
                     return True, "commented"
             else:
-                # لا زر نشر ظاهر/مفعّل حتى بعد الانتظار: جرّب الاختصار المباشر
+                # No send button visible/enabled even after wait: try direct shortcut
                 try:
                     page.keyboard.press("Control+Enter")
                 except Exception:
@@ -493,7 +493,7 @@ def comment_on_tweet(page, text, human):
 
 
 def _tweet_text_of(art):
-    """استخراج نص التغريدة من عنصر المقال (أو فارغ إن لم يوجد)."""
+    """Extract tweet text from article element (or empty if not found)."""
     try:
         el = art.locator(TWEET_TEXT).first
         if el.count() > 0:
@@ -504,7 +504,7 @@ def _tweet_text_of(art):
 
 
 def extract_tweet_id(art):
-    """استخراج معرّف التغريدة من عنصر المقال (أو None)."""
+    """Extract tweet ID from article element (or None)."""
     try:
         link = art.locator(STATUS_LINK).first
         if link.count() > 0:
@@ -518,14 +518,14 @@ def extract_tweet_id(art):
 
 
 def scrape_profile_tweets(page, handle, max_scrolls=5, human=None):
-    """جلب آخر تغريدات من بروفايل: قائمة {id, text} (يعمل بجلسة ضيف أو مسجّل).
+    """Fetch latest tweets from profile: list of {id, text} (works with guest or logged session).
 
-    النص ضروري لتوليد تعليقات سياقية ذكية حسب موضوع التغريدة.
+    Text needed to generate smart contextual comments based on tweet topic.
     """
     human = human or Human(page)
     tweets = []
     try:
-        # ✅ تم التعديل: تجنب الـ Timeout أثناء فتح البروفايل
+        # Avoid timeout when opening profile
         resp = page.goto(f"https://x.com/{handle}", timeout=60000, wait_until="domcontentloaded")
     except Exception as e:
         return tweets, f"goto-error:{e}"[:100]
@@ -540,7 +540,7 @@ def scrape_profile_tweets(page, handle, max_scrolls=5, human=None):
         page.wait_for_timeout(1000)
     if wall:
         return tweets, "login-wall"
-    # صفحة فارغة أو محجوبة (مثل 403 من عناوين مراكز البيانات)
+    # Empty or blocked page (like 403 from datacenter headers)
     try:
         body_len = len((page.locator("body").inner_text() or "").strip())
     except Exception:
@@ -563,13 +563,13 @@ def scrape_profile_tweets(page, handle, max_scrolls=5, human=None):
                 continue
         human.pause(2.0, 4.5)
         page.mouse.wheel(0, random.randint(600, 1400))
-        # ✅ تم التعديل: إعطاء المتصفح مهلة لتحميل التغريدات الجديدة في DOM بعد التمرير
+        # Give browser time to load new tweets in DOM after scroll
         page.wait_for_timeout(1500) 
     return tweets[:60], "ok"
 
 
 def scroll_home(page, human, steps=4):
-    """تصفح الصفحة الرئيسية بتمرير بشري."""
+    """Browse home page with human-like scrolling."""
     for _ in range(steps):
         human.pause(1.5, 5.0)
         page.mouse.wheel(0, random.randint(500, 1500))
@@ -577,7 +577,7 @@ def scroll_home(page, human, steps=4):
 
 
 def _parse_count(text):
-    """تحويل نصوص مثل '1.2M Following' أو '12,345' إلى رقم صحيح."""
+    """Convert text like '1.2M Following' or '12,345' to integer."""
     if not text:
         return 0
     t = (text or "").strip()
@@ -601,7 +601,7 @@ def _parse_count(text):
 
 
 def _profile_loaded(page):
-    """هل اكتمل تحميل البروفايل؟ (أي مؤشر من: رابط المتابعين/يتّبع، زر متابعة، أو البايو)."""
+    """Is profile fully loaded? (any indicator: followers/following link, follow button, or bio)."""
     for cands in (FOLLOWERS_LINK_CANDIDATES, FOLLOWING_LINK_CANDIDATES,
                   FOLLOW_BTN_CANDIDATES, PROFILE_BIO_CANDIDATES):
         try:
@@ -613,7 +613,7 @@ def _profile_loaded(page):
 
 
 def _profile_unavailable(page):
-    """هل البروفايل غير متاح/محذوف؟ (حالة فارغة ظاهرة بوضوح)."""
+    """Is profile unavailable/deleted? (clearly empty state)."""
     for cands in ('[data-testid="emptyState"]', 'div[data-testid="emptyState"]'):
         try:
             if page.locator(cands).first.count() > 0:
@@ -624,7 +624,7 @@ def _profile_unavailable(page):
 
 
 def open_profile(page, handle, cfg=None):
-    """فتح بروفايل مستخدم (x.com/<handle>) مع إعادة محاولة عند أخطاء الشبكة."""
+    """Open user profile (x.com/<handle>) with retry on network errors."""
     ok, status = resilience.goto_with_retry(
         page, f"https://x.com/{handle}", cfg or {"resilience": {}}
     )
@@ -643,7 +643,7 @@ def open_profile(page, handle, cfg=None):
 
 
 def read_profile(page, handle):
-    """قراءة معلومات البروفايل: بايو، متابعين، يتّبع، موثّق؟"""
+    """Read profile info: bio, followers, following, verified?"""
     info = {"bio": "", "followers": 0, "following": 0, "verified": False}
     try:
         bio = selectors.first(page, PROFILE_BIO_CANDIDATES)
@@ -668,7 +668,7 @@ def read_profile(page, handle):
 
 
 def is_following(page, handle):
-    """هل نتابع هذا المستخدم حالياً؟"""
+    """Are we currently following this user?"""
     try:
         if selectors.has(page, unfollow_handle_candidates(handle)):
             return True
@@ -678,7 +678,7 @@ def is_following(page, handle):
 
 
 def follow_user(page, human, handle):
-    """متابعة مستخدم (بروفايله مفتوح): hover → click → تحقق من زر إلغاء المتابعة."""
+    """Follow user (profile open): hover → click → verify unfollow button."""
     for attempt in range(MAX_ATTEMPTS):
         try:
             if is_following(page, handle):

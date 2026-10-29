@@ -1,13 +1,13 @@
 # -*- coding: utf-8 -*-
-"""المحرك الموحد لتوليد التعليقات: AI → سياقي (كريبتو) → عام.
+"""Unified comment generation engine: AI → contextual (crypto) → generic.
 
-الترتيب:
-  1) AI (إن كان مفعّلاً ومتاحاً): تعليق مولّد من نص التغريدة.
-  2) سياقي: كشف موضوع التغريدة (كريبتو) واختيار قالب (إنجليزي غالباً) من مكتبة المواضيع.
-  3) عام: قوالب comments.txt العادية.
+Order:
+  1) AI (if enabled and available): comment generated from tweet text.
+  2) Contextual: detect tweet topic (crypto) and select template (usually English) from topic library.
+  3) Generic: regular comments.txt templates.
 
-نسبة التعليقات: 90% إنجليزي (comments.en_ratio) و10% عربي، وعند وجود رمز
-عملة $TICKER في التغريدة أغلب التعليقات الإنجليزية تحمل «$» + الرمز.
+Comment ratio: 90% English (comments.en_ratio) and 10% Arabic, and when $TICKER
+currency symbol exists in tweet most English comments have «$» + symbol.
 """
 import random
 
@@ -23,38 +23,35 @@ from .humanizer import build_comment
 
 
 def _detect_language(text):
-    """كشف لغة التغريدة: عربي أم إنجليزي (بناءً على الأحرف)."""
+    """Detect tweet language: Arabic or English (based on characters)."""
     if not text:
-        return "en"  # افتراضي: إنجليزي
+        return "en"  # default: English
 
-    # عد الأحرف العربية و الإنجليزية
-    arabic_count = sum(1 for c in text if 'ء' <= c <= 'ي')  # نطاق الحروف العربية
+    # Count Arabic and English characters
+    arabic_count = sum(1 for c in text if 'ء' <= c <= 'ي')  # Arabic character range
     english_count = sum(1 for c in text if 'a' <= c.lower() <= 'z')
 
-    if arabic_count > english_count * 1.5:  # عربي بقوة
+    if arabic_count > english_count * 1.5:  # Strong Arabic
         return "ar"
-    elif english_count > arabic_count * 1.5:  # إنجليزي بقوة
+    elif english_count > arabic_count * 1.5:  # Strong English
         return "en"
     else:
-        return "mixed"  # مختلط
+        return "mixed"  # Mixed
 
 
 def _is_sensitive_topic(tweet_text):
-    """تجنب التغريدات الحساسة: حرب، كوارث، سياسة، كراهية، إلخ."""
+    """Avoid sensitive tweets: war, disasters, politics, hate, etc."""
     sensitive_keywords = [
-        # حرب وعسكري
+        # War and military
         "war", "attack", "military", "ukraine", "russia", "israel", "palestine",
         "bombing", "conflict", "troops", "forces",
-        # كوارث وموت
+        # Disasters and death
         "disaster", "death", "killed", "dead", "died", "earthquake", "tsunami",
         "crash", "collapse", "accident", "fatal",
-        # سياسة حساسة
+        # Sensitive politics
         "politics", "election", "politician", "coup",
-        # عنف وكراهية
+        # Violence and hate
         "violence", "hate", "terror", "extremist", "racist",
-        # عربي
-        "الحرب", "هجوم", "عسكري", "قتل", "قتلى", "كارثة", "أزمة", "سياسة", "انتخابات",
-        "كره", "عنف", "إرهاب", "كارثة طبيعية",
     ]
     text_lower = (tweet_text or "").lower()
     return any(keyword in text_lower for keyword in sensitive_keywords)
@@ -69,20 +66,20 @@ def _unique(text, used_texts, force_unique=True):
     return text not in set(used_texts)
 
 
-# انحياز القوالب التي تحمل {TICKER} عند وجود رمز عملة في التغريدة
-# رفعناها لـ 0.95 عشان نكتسح توتير بـ $TICKER mentions
+# Bias templates that have {TICKER} when currency symbol exists in tweet
+# Raised to 0.95 to maximize Twitter with $TICKER mentions
 _TICKER_BIAS = 0.95
 
 
 def _contextual_comment(tweet_text, used, cfg=None, en_ratio=None):
-    """تعليق سياقي من مكتبة مواضيع الكريبتو (إنجليزي/عربي)، أو None إن لم يُعثر على موضوع."""
+    """Contextual comment from crypto topic library (English/Arabic), or None if no topic found."""
     topics = detect_topics(tweet_text)
     if not topics:
         return None
     pools = load_crypto_pools_from_json(COMMENTS_CRYPTO_PATH)
     ticker = extract_ticker(tweet_text)
 
-    # اختيار اللغة: نسبة إنجليزية من حساب/إعداد (en_ratio) أو الإعداد العام comments.en_ratio
+    # Choose language: English ratio from account/config (en_ratio) or general comments.en_ratio config
     if en_ratio is None:
         en_ratio = 0.9
         if cfg:
@@ -104,7 +101,7 @@ def _contextual_comment(tweet_text, used, cfg=None, en_ratio=None):
                 merged.append(tmpl)
     if not merged:
         return None
-    # عند وجود رمز عملة: أغلبية التعليقات الإنجليزية تحمل $TICKER
+    # When currency symbol exists: majority of English comments have $TICKER
     if source is EN_POOLS and ticker:
         ticker_tmpls = [t for t in merged if "{TICKER}" in t]
         if ticker_tmpls and random.random() < _TICKER_BIAS:
@@ -121,10 +118,10 @@ def _contextual_comment(tweet_text, used, cfg=None, en_ratio=None):
 
 
 def build_comment_for(tweet_text, used_texts=(), cfg=None, force_unique=True, en_ratio=None):
-    """تعليق سياقي ذكي من نص التغريدة، مع تجنب تكرار التعليقات.
+    """Smart contextual comment from tweet text, avoiding comment repetition.
 
-    تجنب التغريدات الحساسة (حرب، كوارث، سياسة) - ترجع None بدل تعليق غير مناسب."""
-    # تجنب التغريدات الحساسة
+    Avoid sensitive tweets (war, disasters, politics) - return None instead of inappropriate comment."""
+    # Avoid sensitive tweets
     if _is_sensitive_topic(tweet_text):
         return None
 
@@ -132,7 +129,7 @@ def build_comment_for(tweet_text, used_texts=(), cfg=None, force_unique=True, en
     comments_cfg = cfg.get("comments", {})
     used = set(used_texts or ())
 
-    # 1) الذكاء الاصطناعي (اختياري)
+    # 1) Artificial intelligence (optional)
     ai_cfg = comments_cfg.get("ai", {})
     if ai_cfg.get("enabled"):
         try:
@@ -144,7 +141,7 @@ def build_comment_for(tweet_text, used_texts=(), cfg=None, force_unique=True, en
         except Exception:
             pass
 
-    # 2) سياقي من موضوع التغريدة (كريبتو)
+    # 2) Contextual from tweet topic (crypto)
     if comments_cfg.get("contextual", True) and tweet_text and tweet_text.strip():
         try:
             text = _contextual_comment(tweet_text, used, cfg, en_ratio=en_ratio)
@@ -153,19 +150,19 @@ def build_comment_for(tweet_text, used_texts=(), cfg=None, force_unique=True, en
         except Exception:
             pass
 
-    # 3) عام من comments.txt (الطبقة الأخيرة مع إصلاح ثغرات الفشل)
+    # 3) Generic from comments.txt (last layer with fallback fixes)
     templates = load_comments()
-    
-    # حماية من انهيار السكربت إذا كان ملف التعليقات فارغاً
+
+    # Protect against crash if comments file is empty
     if not templates:
         return "🔥"
-        
-    # محاولة إيجاد تعليق فريد بتجربة ما يصل إلى 10 قوالب عشوائية
+
+    # Try to find unique comment by testing up to 10 random templates
     for tmpl in random.sample(templates, min(len(templates), 10)):
         text = build_comment(tmpl, used_texts=used, force_unique=force_unique)
         if text:
             return text
-            
-    # إذا كانت كل القوالب الـ 10 قد استُخدمت مسبقاً، نرسل تعليقاً عشوائياً دون فرض التفرّد
+
+    # If all 10 templates already used, send random comment without enforcing uniqueness
     fallback = build_comment(random.choice(templates), used_texts=used, force_unique=False)
     return fallback or "🔥"

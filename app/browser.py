@@ -147,7 +147,7 @@ def launch_guest(cfg, pw):
         for attempt_proxy in (guest_proxy, None):
             if attempt_proxy is None and guest_proxy is not None:
                 log.warning(
-                    f"فشل فتح سياق الضيف ({name}) بالبروكسي - إعادة المحاولة باتصال مباشر"
+                    f"Failed to open guest context ({name}) with proxy - retrying with direct connection"
                 )
             try:
                 return _launch_with_fallback(
@@ -160,17 +160,17 @@ def launch_guest(cfg, pw):
                     break
         if name != "chromium":
             log.warning(
-                f"تعذّر تشغيل {name} ({last_err}) - الرجوع إلى Chromium المرفق"
+                f"Failed to launch {name} ({last_err}) - falling back to bundled Chromium"
             )
     raise last_err
 
 
 def launch_account(account, cfg, pw=None, owned_pw=True):
-    """فتح بروفايل دائم للحساب (مسجّل الدخول مسبقاً) مع بروكسي ثابت للحساب.
+    """Open persistent profile for account (already logged in) with fixed proxy for account.
 
-    يفضّل تشغيل كروم الحقيقي المثبّت (channel=chrome) لبصمة متصفح سليمة؛
-    إن فشل يتراجع تلقائياً إلى Chromium المرفق. وإن فشل الاتصال بالبروكسي
-    تُعاد المحاولة باتصال مباشر حتى لا تتعطل الحسابات أبداً.
+    Prefers launching real installed Chrome (channel=chrome) for correct browser fingerprint;
+    if it fails, automatically falls back to bundled Chromium. If proxy connection fails,
+    retries with direct connection to ensure accounts never get stuck.
     """
     acc_id = account.get("id", "unknown")
     profile_dir = os.path.join(PROFILES_DIR, acc_id)
@@ -212,7 +212,7 @@ def launch_account(account, cfg, pw=None, owned_pw=True):
         for attempt_proxy in (account_proxy, None):
             if attempt_proxy is None and account_proxy is not None:
                 log.warning(
-                    f"{acc_id} | فشل فتح المتصفح ({name}) بالبروكسي - إعادة المحاولة باتصال مباشر"
+                    f"{acc_id} | Failed to open browser ({name}) with proxy - retrying with direct connection"
                 )
             try:
                 return _launch_with_fallback(
@@ -225,7 +225,7 @@ def launch_account(account, cfg, pw=None, owned_pw=True):
                     break
         if name != "chromium":
             log.warning(
-                f"{acc_id} | تعذّر تشغيل {name} ({last_err}) - الرجوع إلى Chromium المرفق"
+                f"{acc_id} | Failed to launch {name} ({last_err}) - falling back to bundled Chromium"
             )
     if pw_owned:
         try:
@@ -236,7 +236,7 @@ def launch_account(account, cfg, pw=None, owned_pw=True):
 
 
 def is_logged_in(page):
-    """فحص حالة تسجيل الدخول من الصفحة الحالية."""
+    """Check login status from current page."""
     for sel in LOGIN_OK_SELECTORS:
         try:
             if page.locator(sel).first.count() > 0:
@@ -257,7 +257,7 @@ def is_login_wall(page):
 
 
 def login_account(account, cfg):
-    """تسجيل دخول يدوي أول مرة: يفتح المتصفح ويستلم من المستخدم، ثم يحفظ الجلسة."""
+    """Manual login (first time): opens browser, waits for user, then saves session."""
     acc_id = account.get("id", "unknown")
     pw = sync_playwright().start()
     try:
@@ -265,28 +265,28 @@ def login_account(account, cfg):
         login_cfg["browser"] = dict(cfg.get("browser", {}))
         login_cfg["browser"]["headless"] = False
         _, context, page, _ = launch_account(account, login_cfg, pw=pw, owned_pw=False)
-        
-        # ✅ التعديل تم هنا لتسريع التحميل وتجنب الـ Timeout
+
+        # ✅ Modification made here to speed up loading and avoid Timeout
         page.goto("https://x.com/login", timeout=60000, wait_until="domcontentloaded")
-        
+
         print("=" * 60)
-        print("  سجّل الدخول يدوياً الآن في النافذة المفتوحة (اسم مستخدم + كلمة مرور / رمز تحقق).")
-        print("  بعد اكتمال الدخول والوصول للصفحة الرئيسية، ارجع للطرفية واضغط Enter.")
+        print("  Log in manually now in the opened window (username + password / verification code).")
+        print("  After login completes and you reach the home page, return to terminal and press Enter.")
         print("=" * 60)
-        input("  اضغط Enter بعد تسجيل الدخول... ")
+        input("  Press Enter after logging in... ")
         for _ in range(30):
             if is_logged_in(page):
                 break
             time.sleep(2)
         if not is_logged_in(page):
-            print("! لم يتم رصد حالة الدخول. هل أنت متأكد أنك سجّلت الدخول؟")
-            ans = input("  اكتب yes للمتابعة وحفظ الجلسة رغم ذلك: ").strip().lower()
+            print("! Login status not detected. Are you sure you logged in?")
+            ans = input("  Type yes to continue and save the session anyway: ").strip().lower()
             if ans != "yes":
-                print("تم الإلغاء.")
+                print("Cancelled.")
                 return False
         state_path = os.path.join(SESSIONS_DIR, f"{acc_id}.json")
         context.storage_state(path=state_path)
-        print(f"✓ تم حفظ الجلسة للحساب {acc_id} في {state_path}")
+        print(f"✓ Session saved for account {acc_id} at {state_path}")
         return True
     finally:
         pw.stop()
