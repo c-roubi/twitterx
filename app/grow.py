@@ -7,7 +7,7 @@ import time
 from urllib.parse import quote
 
 from .actions import (
-    TWEET_ARTICLE, LIKE_BTN, UNLIKE_BTN, STATUS_LINK, RETWEET_BTN, _parse_count_or_none,
+    TWEET_ARTICLE, LIKE_BTN, UNLIKE_BTN, STATUS_LINK, RETWEET_BTN, _parse_count_or_none, _tweet_text_of,
     follow_user, open_profile, read_profile, extract_tweet_id, dismiss_all_modals,
 )
 from .browser import is_login_wall
@@ -44,6 +44,28 @@ DEFAULT_BIO_BLOCK_WORDS = [
     "giveaway", "follow back", "followback", "f4f", "dm for", "dm me for", "vip signals",
     "guaranteed profit", "100x guaranteed", "onlyfans", "18+", "casino", "betting", "forex signals",
 ]
+DEFAULT_DISCOVERY_METHODS = ["live_search", "top_search", "home_timeline", "manager_tweets", "replies"]
+
+_CRYPTO_ASCII = (
+    r"bitcoin|btc|ethereum|eth|crypto|cryptocurrency|altcoins?|altseason|defi|web3|nfts?|tokens?|"
+    r"blockchain|binance|coinbase|solana|xrp|bnb|doge|memecoins?|airdrops?|on-?chain|hodl|"
+    r"bullish|bearish|staking|dex|etf|satoshi|wallet|layer ?2|tradingview|liquidations?|"
+    r"trading|trader|futures|perps?|leverage|breakout|support|resistance"
+)
+_CRYPTO_RE = re.compile(rf"(?<![A-Za-z0-9])({_CRYPTO_ASCII})(?![A-Za-z0-9])", re.I)
+_CASHTAG_RE = re.compile(r"(?<![A-Za-z0-9])\$[A-Za-z]{2,10}\b")
+_CRYPTO_ARABIC = ("كريبتو", "بيتكوين", "عملات رقمية", "عملة رقمية", "العملات", "تداول", "ايثريوم",
+                  "إيثريوم", "بلوكتشين", "محفظة", "سولانا", "ألت كوين")
+
+
+def is_crypto_text(text):
+    """Is this tweet about crypto? (cashtags, hashtags, English/Arabic terms)"""
+    t = text or ""
+    if not t.strip():
+        return False
+    return bool(_CASHTAG_RE.search(t) or _CRYPTO_RE.search(t) or any(w in t for w in _CRYPTO_ARABIC))
+
+
 _STATUS_RE = re.compile(r"^/([A-Za-z0-9_]{1,15})/status/(\d+)")
 
 
@@ -88,7 +110,7 @@ def _handle_from_href(href):
 
 
 def find_candidates(page, human, seen_users=(), limit=30):
-    """Handles from a people-search page (f=user): UserCell entries we haven't seen."""
+    """Handles from the UserCell entries of a user list (e.g. reposted-by) that we haven't seen."""
     seen = {str(s).lower() for s in (seen_users or ())}
     handles = []
     try:
@@ -156,7 +178,7 @@ def follow_budget(state, cfg):
 # Candidate discovery
 # X made likes private (2024), so "who liked this tweet" is no longer visible.
 # Public signals we can use: authors on the home timeline / live crypto search,
-# people replying under crypto tweets, and the people-search tab.
+# people replying under crypto tweets, and the manager's reposters.
 # ---------------------------------------------------------------------------
 _registry_lock = threading.Lock()
 _TRANSIENT = ("goto-error", "timeout", "network-error", "error:")
@@ -214,8 +236,11 @@ def _repost_count(art):
     return 0
 
 
-def _tweets_in_view(page, min_reposts=0):
-    """[(reposts, tweet_id, author)] for tweets in the DOM with at least min_reposts reposts."""
+def _tweets_in_view(page, min_reposts=0, crypto_only=False):
+    """[(reposts, tweet_id, author)] for tweets in the DOM with at least min_reposts reposts.
+
+    crypto_only keeps only tweets whose text is about crypto (used on the home timeline).
+    """
     rows = set()
     try:
         for art in page.locator(TWEET_ARTICLE).all():
@@ -228,8 +253,9 @@ def _tweets_in_view(page, min_reposts=0):
                 if not m:
                     continue
                 n = _repost_count(art)
-                if n >= min_reposts:
-                    rows.add((n, m.group(2), m.group(1)))
+                if n < min_reposts or (crypto_only and not is_crypto_text(_tweet_text_of(art))):
+                    continue
+                rows.add((n, m.group(2), m.group(1)))
             except Exception:
                 continue
     except Exception:
@@ -238,7 +264,7 @@ def _tweets_in_view(page, min_reposts=0):
 
 
 def _collect_user_cells(page, human, found, exclude, target, scrolls=4, cap=40):
-    """Scroll a user list (reposted-by / people search) and append new handles to `found`."""
+    """Scroll a user list (reposted-by) and append new handles to `found`."""
     for _ in range(scrolls):
         skip = set(exclude) | {h.lower() for h in found}
         for h in find_candidates(page, human, skip, limit=cap):
@@ -252,20 +278,29 @@ def _collect_user_cells(page, human, found, exclude, target, scrolls=4, cap=40):
 
 
 def collect_candidates(page, acc_id, cfg, human, exclude, need):
-    """Gather candidate handles from several public sources, a quota from each.
+    """Gather candidate handles using several independent discovery methods.
 
-    1. live crypto search: authors, plus the most reposted tweets and reply threads
-    2. reposted-by lists of those tweets (people who actively share crypto content)
-    3. home timeline authors
-    4. repliers under crypto tweets
-    5. people-search tab
+    Each pass runs `follow.methods_per_pass` randomly chosen methods from
+    `follow.discovery_methods`; every method contributes authors and/or tweets
+    that have reposts. The people who reposted those tweets (public
+    "reposted by" lists) are then collected, they actively share crypto.
+
+    live_search     live search on a crypto keyword: authors + reposted tweets
+    top_search      same on the Top tab (popular tweets)
+    home_timeline   home feed: authors + crypto tweets (by text) that have reposts
+    manager_tweets  the manager's own tweets that have reposts (our niche)
+    replies         people replying under crypto tweets found by the search methods
     """
     f = cfg.get("follow", {})
     min_reposts = int(f.get("min_reposts", 3))
     repost_tweets = int(f.get("retweeter_tweets", 3))
+    pool = [m for m in (f.get("discovery_methods") or DEFAULT_DISCOVERY_METHODS)
+            if m in DEFAULT_DISCOVERY_METHODS]
+    methods = random.sample(pool, min(int(f.get("methods_per_pass", 3)), len(pool)))
     quota = max(4, -(-need // 4))
-    found = []
-    reposted, reply_urls = set(), []
+    found, reposted, reply_urls = [], set(), []
+    query = pick_query(cfg)
+    log.info(f"{acc_id} | Discovery keyword {query!r} | methods: {', '.join(methods)}")
 
     def open_page(label, url):
         ok, st = resilience.goto_with_retry(page, url, cfg)
@@ -276,21 +311,17 @@ def collect_candidates(page, acc_id, cfg, human, exclude, need):
         dismiss_all_modals(page, human)
         return True
 
-    def report(label, before):
-        log.info(f"{acc_id} | Candidates from {label}: +{len(found) - before}")
-
-    # 1) live crypto search (operator query first, plain query as fallback)
-    query = pick_query(cfg)
-    log.info(f"{acc_id} | Discovery keyword: {query!r}")
-    for url in (search_url(query, True, min_reposts), search_url(query, True, 0)):
-        if not open_page("live search", url):
-            continue
+    def harvest(label, scrolls, crypto_only=False, authors=True, rows_min=None):
+        """Scroll the open page collecting authors and reposted tweets."""
         before = len(found)
-        for _ in range(3):
-            _scroll_collect(page, human, found, exclude, len(found) + quota, 1)
-            reposted |= _tweets_in_view(page, min_reposts)
-            if len(found) >= before + quota:
-                break
+        for _ in range(scrolls):
+            if authors:
+                _scroll_collect(page, human, found, exclude, len(found) + quota, 1)
+            else:
+                human.pause(1.2, 2.5)
+                page.mouse.wheel(0, random.randint(600, 1200))
+                page.wait_for_timeout(1300)
+            reposted.update(_tweets_in_view(page, min_reposts if rows_min is None else rows_min, crypto_only))
         try:
             for art in page.locator(TWEET_ARTICLE).all()[:6]:
                 href = art.locator(STATUS_LINK).first.get_attribute("href") or ""
@@ -298,41 +329,50 @@ def collect_candidates(page, acc_id, cfg, human, exclude, need):
                     reply_urls.append("https://x.com" + href.split("?")[0])
         except Exception:
             pass
-        report("live search", before)
-        if found or reposted:
-            break
+        log.info(f"{acc_id} | {label}: +{len(found) - before} authors, {len(reposted)} reposted tweets so far")
 
-    # 2) reposted-by lists of the most reposted tweets
-    for n, tid, author in sorted(reposted, reverse=True)[:repost_tweets]:
+    def search(label, live):
+        for mr in (min_reposts, 0):
+            if open_page(label, search_url(query, live, mr)):
+                harvest(label, 3)
+                if found or reposted:
+                    return
+
+    for method in methods:
+        try:
+            if method == "live_search":
+                search("live search", True)
+            elif method == "top_search":
+                search("top search", False)
+            elif method == "home_timeline":
+                if open_page("home timeline", "https://x.com/home"):
+                    harvest("home timeline", 3, crypto_only=True)
+            elif method == "manager_tweets":
+                mgr = str(cfg.get("manager_handle", "")).lstrip("@")
+                if mgr and open_page("manager profile", f"https://x.com/{mgr}"):
+                    harvest("manager tweets", 2, authors=False, rows_min=max(1, min(min_reposts, 3)))
+        except Exception as e:
+            log.warning(f"{acc_id} | Discovery method {method} failed: {e}")
+
+    # People who reposted the most reposted tweets (varied: random pick among the top ones)
+    ranked = sorted(reposted, reverse=True)
+    for n, tid, author in random.sample(ranked[:repost_tweets * 2], min(repost_tweets, len(ranked))):
         if len(found) >= need:
             break
         if not open_page(f"reposts of {tid}", f"https://x.com/{author}/status/{tid}/retweets"):
             continue
         before = len(found)
         _collect_user_cells(page, human, found, exclude, len(found) + quota)
-        log.info(f"{acc_id} | Candidates from reposts of @{author}'s tweet ({n} reposts): +{len(found) - before}")
+        log.info(f"{acc_id} | Reposted-by list of @{author}'s tweet ({n} reposts): +{len(found) - before}")
 
-    # 3) home timeline
-    if len(found) < need and open_page("home timeline", "https://x.com/home"):
-        before = len(found)
-        _scroll_collect(page, human, found, exclude, len(found) + quota, 3)
-        report("home timeline", before)
-
-    # 4) repliers
-    for url in random.sample(reply_urls, min(2, len(reply_urls))):
-        if len(found) >= need:
-            break
-        if not open_page("replies", url):
-            continue
-        before = len(found)
-        _scroll_collect(page, human, found, exclude, len(found) + quota, 3, skip_first=True)
-        report("replies", before)
-
-    # 5) people search
-    if len(found) < need and open_page("people search", search_url(pick_query(cfg), live=False) + "&f=user"):
-        before = len(found)
-        _collect_user_cells(page, human, found, exclude, need, scrolls=2)
-        report("people search", before)
+    if "replies" in methods:
+        for url in random.sample(reply_urls, min(2, len(reply_urls))):
+            if len(found) >= need:
+                break
+            if open_page("replies", url):
+                before = len(found)
+                _scroll_collect(page, human, found, exclude, len(found) + quota, 3, skip_first=True)
+                log.info(f"{acc_id} | Repliers: +{len(found) - before}")
 
     random.shuffle(found)
     return found

@@ -297,8 +297,29 @@ def _pick_browse_action(cfg, state):
     return avail[-1]
 
 
+def _has_in_article(page, art, tid, selector):
+    """Does the tweet (re-found by id, since X re-renders articles) contain `selector`?"""
+    try:
+        if tid:
+            holder = page.locator(TWEET_ARTICLE).filter(
+                has=page.locator(f'a[href*="/status/{tid}"]'))
+            return holder.locator(selector).count() > 0
+        return art.locator(selector).count() > 0
+    except Exception:
+        return False
+
+
+def _wait_has(page, art, tid, selector, tries=6, step_ms=500):
+    for _ in range(tries):
+        if _has_in_article(page, art, tid, selector):
+            return True
+        page.wait_for_timeout(step_ms)
+    return False
+
+
 def _like_one_random(page, articles, acc_id, state, human, liked_ids=None):
-    """Like one random tweet within daily limit."""
+    """Like one random tweet within daily limit. Counted only when X shows it as liked."""
+    checked = 0
     for art in random.sample(articles, min(len(articles), 5)):
         try:
             tid = extract_tweet_id(art)
@@ -311,22 +332,28 @@ def _like_one_random(page, articles, acc_id, state, human, liked_ids=None):
             like_btn = art.locator(LIKE_BTN).first
             if like_btn.count() == 0 or not like_btn.is_visible():
                 continue
+            checked += 1
             like_btn.hover()
             human.pause(0.7, 2.0)
             like_btn.click()
-            page.wait_for_timeout(1200)
+            if not _wait_has(page, art, tid, UNLIKE_BTN, tries=5):
+                log.warning(f"{acc_id} | Like not confirmed on tweet {tid} - not counted")
+                continue
             if tid and liked_ids is not None:
                 liked_ids.add(tid)
             _mark_done(state, "likes")
             log.info(f"{acc_id} | Random like #{state['done']['likes']}")
             return True
-        except Exception:
+        except Exception as e:
+            log.warning(f"{acc_id} | Like attempt failed: {str(e)[:80]}")
             continue
+    log.info(f"{acc_id} | No like done ({checked} likeable tweets tried)")
     return False
 
 
 def _retweet_one_random(page, articles, acc_id, state, human, retweeted_ids=None):
-    """Retweet one random tweet within daily limit."""
+    """Retweet one random tweet within daily limit. Counted only when X shows it as reposted."""
+    checked = 0
     for art in random.sample(articles, min(len(articles), 5)):
         try:
             tid = extract_tweet_id(art)
@@ -339,26 +366,39 @@ def _retweet_one_random(page, articles, acc_id, state, human, retweeted_ids=None
             rt = art.locator(RETWEET_BTN).first
             if rt.count() == 0 or not rt.is_visible():
                 continue
+            checked += 1
             rt.hover()
             human.pause(0.8, 2.2)
             rt.click()
-            page.wait_for_timeout(1200)
-            confirm = selectors_first(page, RETWEET_CONFIRM_CANDIDATES)
-            if confirm is not None:
-                confirm.click()
-                page.wait_for_timeout(1500)
-                if "/compose/" in (page.url or ""):
-                    dismiss_compose_dialog(page, human)
-                    log.warning(f"{acc_id} | Quote editor opened by mistake - closed without saving")
-                    return False
-                if tid and retweeted_ids is not None:
-                    retweeted_ids.add(tid)
-                _mark_done(state, "retweets")
-                log.info(f"{acc_id} | Random retweet #{state['done']['retweets']}")
-                return True
-            page.keyboard.press("Escape")
-        except Exception:
+            confirm = None
+            for _ in range(8):  # the repost menu can take a moment to open
+                confirm = selectors_first(page, RETWEET_CONFIRM_CANDIDATES)
+                if confirm is not None:
+                    break
+                page.wait_for_timeout(400)
+            if confirm is None:
+                log.warning(f"{acc_id} | Repost menu did not appear for tweet {tid}")
+                page.keyboard.press("Escape")
+                continue
+            human.pause(0.4, 1.2)
+            confirm.click()
+            page.wait_for_timeout(1500)
+            if "/compose/" in (page.url or ""):
+                dismiss_compose_dialog(page, human)
+                log.warning(f"{acc_id} | Quote editor opened by mistake - closed without saving")
+                return False
+            if not _wait_has(page, art, tid, UNRETWEET_BTN):
+                log.warning(f"{acc_id} | Repost not confirmed on tweet {tid} - not counted")
+                continue
+            if tid and retweeted_ids is not None:
+                retweeted_ids.add(tid)
+            _mark_done(state, "retweets")
+            log.info(f"{acc_id} | Random retweet #{state['done']['retweets']}")
+            return True
+        except Exception as e:
+            log.warning(f"{acc_id} | Retweet attempt failed: {str(e)[:80]}")
             continue
+    log.info(f"{acc_id} | No retweet done ({checked} repostable tweets tried)")
     return False
 
 
@@ -369,6 +409,7 @@ def _browse_and_interact(page, acc_id, cfg, state, human, session_secs, session_
     scrolls = 0
     liked_ids = set()
     retweeted_ids = set()
+    stats = {"like": [0, 0], "retweet": [0, 0], "comment": [0, 0]}  # [ok, failed]
     dismiss_compose_dialog(page, human)  # Clean up any editor/dialog from previous round
     while time.time() - session_start < session_secs:
         save_state(acc_id, state)  # Save progress on each turn
@@ -410,9 +451,11 @@ def _browse_and_interact(page, acc_id, cfg, state, human, session_secs, session_
         last_action = action
 
         if action == "like":
-            _like_one_random(page, articles, acc_id, state, human, liked_ids)
+            ok = _like_one_random(page, articles, acc_id, state, human, liked_ids)
+            stats["like"][0 if ok else 1] += 1
         elif action == "retweet":
-            _retweet_one_random(page, articles, acc_id, state, human, retweeted_ids)
+            ok = _retweet_one_random(page, articles, acc_id, state, human, retweeted_ids)
+            stats["retweet"][0 if ok else 1] += 1
         else:  # comment
             try:
                 art = random.choice(articles)
@@ -422,7 +465,10 @@ def _browse_and_interact(page, acc_id, cfg, state, human, session_secs, session_
                     if href.startswith("/"):
                         href = "https://x.com" + href
                     if _open_and_comment(page, href, acc_id, state, human, cfg=cfg, en_ratio=en_ratio):
+                        stats["comment"][0] += 1
                         log.info(f"{acc_id} | Random comment #{state['done']['comments']}")
+                    else:
+                        stats["comment"][1] += 1
                 # Return to home after comment (success or failure)
                 try:
                     # Fix: add wait_until to prevent session crash on slow connection
@@ -433,6 +479,12 @@ def _browse_and_interact(page, acc_id, cfg, state, human, session_secs, session_
             except Exception:
                 pass
         save_state(acc_id, state)
+    log.info(f"{acc_id} | Browse actions (done/failed) - likes {stats['like'][0]}/{stats['like'][1]}, "
+             f"retweets {stats['retweet'][0]}/{stats['retweet'][1]}, "
+             f"comments {stats['comment'][0]}/{stats['comment'][1]} | "
+             f"daily caps left: likes {state['caps']['likes'] - state['done']['likes']}, "
+             f"retweets {state['caps']['retweets'] - state['done']['retweets']}, "
+             f"comments {state['caps']['comments'] - state['done']['comments']}")
 
 
 # FIX-MIX-V1

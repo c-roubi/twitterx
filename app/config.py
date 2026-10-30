@@ -77,7 +77,8 @@ DEFAULT_CONFIG = {
         "skip_verified": True,
         "visit_only_chance": 0.25,
         "min_reposts": 3,
-        "retweeter_tweets": 3
+        "retweeter_tweets": 3,
+        "methods_per_pass": 3
     },
     "warmup": {
         "enabled": True,

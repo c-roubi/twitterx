@@ -195,6 +195,7 @@ def main():
         cfg2 = {"follow": {"enabled": True, "skip_verified": True, "require_bio": True,
                            "min_followers": 50, "max_followers": 150000,
                            "visit_only_chance": 0, "delay_between_s": [1, 1],
+                           "discovery_methods": ["home_timeline", "live_search"], "methods_per_pass": 2,
                            "queries": ["bitcoin"]},
                 "manager_handle": "mgr", "resilience": {"network_retries": 0}}
         state = {"caps": {"follows": 5}, "done": {"follows": 0}, "seen_users": [],
@@ -253,9 +254,10 @@ def main():
         rows = _tweets_in_view(page, 3)
         check("reposted tweets ranked from aria-label counts",
               sorted(rows, reverse=True) == [(25, "111", "popular"), (4, "222", "midtweet")], rows)
-        cfg3 = {"follow": {"min_reposts": 3, "retweeter_tweets": 2, "queries": ["bitcoin"]},
+        cfg3 = {"follow": {"min_reposts": 3, "retweeter_tweets": 2, "queries": ["bitcoin"],
+                           "discovery_methods": ["live_search", "home_timeline"], "methods_per_pass": 2},
                 "resilience": {"network_retries": 0}}
-        found = collect_candidates(page, "acc_x", cfg3, fh, {"ownacct"}, need=8)
+        found = collect_candidates(page, "acc_x", cfg3, fh, {"ownacct"}, need=14)
         check("handles collected from reposted-by lists", {"rt_a", "rt_b", "rt_c", "rt_d"} <= set(found), found)
         check("excluded handles never returned", "ownacct" not in found, found)
         check("no duplicates", len(found) == len(set(found)), found)
@@ -279,6 +281,82 @@ def main():
         check("giveaway bio rejected", ineligible_reason({**base2, "bio": "Daily GIVEAWAY!! follow back"}, cfg) == "spam-bio")
         check("follow-bot ratio rejected", ineligible_reason({**base2, "followers": 400, "following": 7500}, cfg) == "follow-spam")
         check("normal profile still eligible", ineligible_reason(base2, cfg) is None)
+
+
+        print("10) retweet / like verification (menu delay, failures, no false count):")
+        from app import routine
+        page.unroute_all()
+
+        def tweet_page(mode):
+            # mode: ok | slow | nomenu | noflip
+            return f"""<html><body><article data-testid="tweet">
+<a href="/guy/status/777">t</a><div data-testid="tweetText">$BTC</div>
+<button id="rt" data-testid="retweet" aria-label="Repost">RT</button>
+<button id="lk" data-testid="like" aria-label="Like">Like</button></article>
+<script>
+var mode="{mode}";
+document.getElementById('rt').onclick=function(){{
+  if(mode==='nomenu') return;
+  setTimeout(function(){{
+    var m=document.createElement('div'); m.setAttribute('role','menuitem'); m.setAttribute('data-testid','repostConfirm'); m.textContent='Repost';
+    m.onclick=function(){{ if(mode!=='noflip') document.getElementById('rt').setAttribute('data-testid','unretweet'); m.remove(); }};
+    document.body.appendChild(m);
+  }}, mode==='slow' ? 1800 : 100);
+}};
+document.getElementById('lk').onclick=function(){{ if(mode!=='noflip') this.setAttribute('data-testid','unlike'); }};
+</script></body></html>"""
+
+        def run_rt(mode):
+            page.set_content(tweet_page(mode))
+            st = {"done": {"likes": 0, "retweets": 0}, "caps": {}}
+            arts = page.locator('article[data-testid="tweet"]').all()
+            r = routine._retweet_one_random(page, arts, "acc_t", st, fh, set())
+            l = routine._like_one_random(page, arts, "acc_t", st, fh, set())
+            return r, l, st["done"]
+
+        r, l, d = run_rt("ok")
+        check("normal retweet + like counted", r and l and d == {"likes": 1, "retweets": 1}, d)
+        r, l, d = run_rt("slow")
+        check("slow repost menu (1.8s) still works", r and d["retweets"] == 1, (r, d))
+        r, l, d = run_rt("nomenu")
+        check("repost menu never opens -> not counted", (not r) and d["retweets"] == 0, (r, d))
+        r, l, d = run_rt("noflip")
+        check("click without effect -> neither counted", (not r) and (not l) and d == {"likes": 0, "retweets": 0}, (r, l, d))
+
+        print("11) discovery methods (home timeline crypto filter, manager tweets, no people tab):")
+        from app.grow import is_crypto_text
+
+        def art2(author, tid, n, text):
+            return (f'<article data-testid="tweet"><div data-testid="User-Name"><a href="/{author}">{author}</a></div>'
+                    f'<a href="/{author}/status/{tid}">t</a><div data-testid="tweetText">{text}</div>'
+                    f'<button data-testid="retweet" aria-label="{n} reposts. Repost">{n}</button></article>')
+
+        pages2 = {
+            "home": "<html><body>" + art2("cryptoguy", 901, 9, "$BTC breakout above resistance") +
+                    art2("footballfan", 902, 80, "What a goal last night") + "</body></html>",
+            "mgr": "<html><body>" + art2("mgr", 911, 5, "ETH update") + "</body></html>",
+            "cryptoguy/status/901/retweets": cells("home_rt1", "home_rt2"),
+            "mgr/status/911/retweets": cells("mgr_rt1"),
+            "footballfan/status/902/retweets": cells("football_rt"),
+        }
+
+        def handler3(route):
+            path = route.request.url.split("x.com", 1)[1].split("?")[0].strip("/")
+            route.fulfill(status=200, content_type="text/html",
+                          body=pages2.get(path, "<html><body></body></html>"))
+
+        page.route("https://x.com/**", handler3)
+        cfg4 = {"follow": {"min_reposts": 3, "retweeter_tweets": 3, "methods_per_pass": 2,
+                           "discovery_methods": ["home_timeline", "manager_tweets"], "queries": ["bitcoin"]},
+                "manager_handle": "mgr", "resilience": {"network_retries": 0}}
+        found = collect_candidates(page, "acc_x", cfg4, fh, set(), need=10)
+        check("reposters of crypto timeline tweets collected", {"home_rt1", "home_rt2"} <= set(found), found)
+        check("reposters of the manager's tweets collected", "mgr_rt1" in found, found)
+        check("popular non-crypto tweet ignored", "football_rt" not in found, found)
+        check("crypto text detection", is_crypto_text("Loading $SOL up") and is_crypto_text("كريبتو اليوم")
+              and not is_crypto_text("What a goal last night"))
+        import inspect
+        check("people-search tab removed", "f=user" not in inspect.getsource(collect_candidates))
 
         browser.close()
 
