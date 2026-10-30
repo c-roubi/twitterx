@@ -76,7 +76,8 @@ DEFAULT_CONFIG = {
         "max_followers": 150000,
         "skip_verified": True,
         "visit_only_chance": 0.25,
-        "queries": ["bitcoin", "crypto", "altcoins", "ethereum", "solana", "$BTC", "crypto trading", "#crypto", "diamond hands", "altseason"]
+        "min_reposts": 3,
+        "retweeter_tweets": 3
     },
     "warmup": {
         "enabled": True,

@@ -216,6 +216,70 @@ def main():
         state3 = {"caps": {"follows": 5}, "done": {"follows": 0}, "follow_blocked_until": time.time() + 600}
         check("blocked-until pauses follows", grow.follow_budget(state3, cfg2) == 0)
 
+
+        print("9) discovery: reposted-by lists + keywords + spam filters:")
+        from app.grow import (DEFAULT_QUERIES, pick_query, search_url, _tweets_in_view,
+                              collect_candidates)
+        page.unroute_all()
+
+        def rt_article(author, tid, n):
+            label = f"{n} reposts. Repost" if n else "Repost"
+            return (f'<article data-testid="tweet"><div data-testid="User-Name"><a href="/{author}">{author}</a></div>'
+                    f'<a href="/{author}/status/{tid}">time</a>'
+                    f'<button data-testid="retweet" aria-label="{label}">{n or ""}</button></article>')
+
+        search_html = "<html><body><main>" + "".join([
+            rt_article("popular", 111, 25), rt_article("midtweet", 222, 4),
+            rt_article("lowtweet", 333, 1), rt_article("quiet", 444, 0)]) + "</main></body></html>"
+
+        def cells(*hs):
+            return "<html><body>" + "".join(
+                f'<div data-testid="UserCell"><a href="/{h}">{h}</a></div>' for h in hs) + "</body></html>"
+
+        pages = {
+            "search": search_html,
+            "popular/status/111/retweets": cells("rt_a", "rt_b", "ownacct", "rt_c"),
+            "midtweet/status/222/retweets": cells("rt_d", "rt_a"),
+            "home": "<html><body><main>" + tweet("tl_guy") + "</main></body></html>",
+        }
+
+        def handler2(route):
+            path = route.request.url.split("x.com", 1)[1].split("?")[0].strip("/")
+            route.fulfill(status=200, content_type="text/html",
+                          body=pages.get(path, "<html><body></body></html>"))
+
+        page.route("https://x.com/**", handler2)
+        page.goto("https://x.com/search?q=x")
+        rows = _tweets_in_view(page, 3)
+        check("reposted tweets ranked from aria-label counts",
+              sorted(rows, reverse=True) == [(25, "111", "popular"), (4, "222", "midtweet")], rows)
+        cfg3 = {"follow": {"min_reposts": 3, "retweeter_tweets": 2, "queries": ["bitcoin"]},
+                "resilience": {"network_retries": 0}}
+        found = collect_candidates(page, "acc_x", cfg3, fh, {"ownacct"}, need=8)
+        check("handles collected from reposted-by lists", {"rt_a", "rt_b", "rt_c", "rt_d"} <= set(found), found)
+        check("excluded handles never returned", "ownacct" not in found, found)
+        check("no duplicates", len(found) == len(set(found)), found)
+        check("authors from live search/timeline also included", {"popular", "tl_guy"} & set(found), found)
+
+        print("   keywords:")
+        check("keyword list is broad (>=30 incl. cashtags + Arabic)",
+              len(DEFAULT_QUERIES) >= 30 and any(q.startswith("$") for q in DEFAULT_QUERIES)
+              and any("كريبتو" in q for q in DEFAULT_QUERIES))
+        seq = [pick_query({"follow": {"queries": ["a", "b", "c", "d", "e", "f"]}}, avoid=[]) for _ in range(1)]
+        recent = []
+        picks = [pick_query({"follow": {"queries": list("abcdef")}}, avoid=recent) for _ in range(12)]
+        check("no immediate keyword repeat", all(picks[i] != picks[i + 1] for i in range(len(picks) - 1)), picks)
+        u = search_url("$BTC", True, 5)
+        check("live search url: spam excludes + min_retweets", "-giveaway" in u.replace("%20-", " -").replace("%2D", "-") or "giveaway" in u)
+        check("min_retweets operator present", "min_retweets%3A5" in u, u)
+        check("people tab has no excludes", "giveaway" not in search_url("bitcoin", live=False))
+
+        print("   spam filters:")
+        base2 = {"bio": "crypto trader", "followers": 500, "following": 300, "verified": False, "protected": False}
+        check("giveaway bio rejected", ineligible_reason({**base2, "bio": "Daily GIVEAWAY!! follow back"}, cfg) == "spam-bio")
+        check("follow-bot ratio rejected", ineligible_reason({**base2, "followers": 400, "following": 7500}, cfg) == "follow-spam")
+        check("normal profile still eligible", ineligible_reason(base2, cfg) is None)
+
         browser.close()
 
     print(f"\nResult: {PASS} passed / {FAIL} failed")

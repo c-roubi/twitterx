@@ -7,7 +7,7 @@ import time
 from urllib.parse import quote
 
 from .actions import (
-    TWEET_ARTICLE, LIKE_BTN, UNLIKE_BTN, STATUS_LINK,
+    TWEET_ARTICLE, LIKE_BTN, UNLIKE_BTN, STATUS_LINK, RETWEET_BTN, _parse_count_or_none,
     follow_user, open_profile, read_profile, extract_tweet_id, dismiss_all_modals,
 )
 from .browser import is_login_wall
@@ -21,9 +21,30 @@ from . import resilience
 log = get_logger("grow")
 
 DEFAULT_QUERIES = [
-    "bitcoin", "crypto", "altcoins", "ethereum", "solana",
-    "crypto trading", "#crypto", "diamond hands", "altseason",
+    # majors / cashtags
+    "bitcoin", "ethereum", "solana", "$BTC", "$ETH", "$SOL", "$BNB", "$XRP", "$LINK", "$SUI",
+    # general
+    "crypto", "altcoins", "altseason", "#crypto", "#bitcoin", "#altcoins", "crypto market",
+    # trading
+    "crypto trading", "technical analysis crypto", "price action crypto", "support and resistance crypto",
+    "crypto breakout", "swing trading crypto", "crypto futures", "bitcoin ETF",
+    # defi / web3 / on-chain
+    "defi", "web3", "onchain analysis", "layer 2 crypto", "memecoin", "airdrop hunters",
+    # community
+    "diamond hands", "hodl", "bull run crypto", "crypto twitter",
+    # arabic
+    "كريبتو", "عملات رقمية", "بيتكوين", "تداول العملات الرقمية", "تحليل فني كريبتو", "العملات البديلة",
 ]
+
+# Spam terms excluded from every live search.
+_SEARCH_EXCLUDES = ' -giveaway -"follow back" -f4f'
+_recent_queries = []
+
+DEFAULT_BIO_BLOCK_WORDS = [
+    "giveaway", "follow back", "followback", "f4f", "dm for", "dm me for", "vip signals",
+    "guaranteed profit", "100x guaranteed", "onlyfans", "18+", "casino", "betting", "forex signals",
+]
+_STATUS_RE = re.compile(r"^/([A-Za-z0-9_]{1,15})/status/(\d+)")
 
 
 def crypto_queries(cfg):
@@ -33,10 +54,25 @@ def crypto_queries(cfg):
     return [str(q).strip() for q in qs if q is not None and str(q).strip()]
 
 
-def pick_query(cfg):
-    """Pick a random crypto query."""
+def pick_query(cfg, avoid=None):
+    """Pick a random crypto query, avoiding the ones used most recently."""
     qs = crypto_queries(cfg)
-    return random.choice(qs) if qs else "bitcoin"
+    if not qs:
+        return "bitcoin"
+    recent = _recent_queries if avoid is None else avoid
+    pool = [q for q in qs if q not in recent] or qs
+    q = random.choice(pool)
+    recent.append(q)
+    del recent[:-max(1, min(8, len(qs) // 2))]
+    return q
+
+
+def search_url(query, live=True, min_reposts=0):
+    """X search URL; live tab excludes spam terms, optional min_retweets operator."""
+    q = query + _SEARCH_EXCLUDES if live else query
+    if min_reposts:
+        q += f" min_retweets:{int(min_reposts)}"
+    return f"https://x.com/search?q={quote(q)}" + ("&f=live" if live else "")
 
 
 def _handle_from_href(href):
@@ -83,7 +119,14 @@ def ineligible_reason(profile, cfg):
         return "verified"
     if f.get("require_bio", True) and not (profile.get("bio") or "").strip():
         return "no-bio"
+    bio = (profile.get("bio") or "").lower()
+    blocked = f.get("bio_block_words", DEFAULT_BIO_BLOCK_WORDS)
+    if any(str(w).lower() in bio for w in blocked if str(w).strip()):
+        return "spam-bio"
     followers = profile.get("followers")
+    following = profile.get("following")
+    if followers is not None and following is not None and following > 5000 and followers * 5 < following:
+        return "follow-spam"
     if followers is not None:  # unknown count is not treated as 0
         if followers < int(f.get("min_followers", 50)):
             return "followers-too-few"
@@ -156,59 +199,140 @@ def _scroll_collect(page, human, found, exclude, need, scrolls, skip_first=False
         page.wait_for_timeout(1500)
 
 
+def _repost_count(art):
+    """Repost count shown on a tweet (0 if none/unreadable)."""
+    try:
+        btn = art.locator(RETWEET_BTN).first
+        if btn.count() == 0:
+            return 0
+        for raw in (btn.get_attribute("aria-label") or "", btn.inner_text() or ""):
+            n = _parse_count_or_none(raw)
+            if n is not None:
+                return n
+    except Exception:
+        pass
+    return 0
+
+
+def _tweets_in_view(page, min_reposts=0):
+    """[(reposts, tweet_id, author)] for tweets in the DOM with at least min_reposts reposts."""
+    rows = set()
+    try:
+        for art in page.locator(TWEET_ARTICLE).all():
+            try:
+                m = None
+                for a in art.locator(STATUS_LINK).all()[:3]:
+                    m = _STATUS_RE.match((a.get_attribute("href") or "").split("?")[0])
+                    if m:
+                        break
+                if not m:
+                    continue
+                n = _repost_count(art)
+                if n >= min_reposts:
+                    rows.add((n, m.group(2), m.group(1)))
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return rows
+
+
+def _collect_user_cells(page, human, found, exclude, target, scrolls=4, cap=40):
+    """Scroll a user list (reposted-by / people search) and append new handles to `found`."""
+    for _ in range(scrolls):
+        skip = set(exclude) | {h.lower() for h in found}
+        for h in find_candidates(page, human, skip, limit=cap):
+            if h not in found:
+                found.append(h)
+        if len(found) >= target:
+            return
+        human.pause(1.2, 2.5)
+        page.mouse.wheel(0, random.randint(600, 1200))
+        page.wait_for_timeout(1300)
+
+
 def collect_candidates(page, acc_id, cfg, human, exclude, need):
-    """Gather candidate handles from several public sources until `need` is reached."""
+    """Gather candidate handles from several public sources, a quota from each.
+
+    1. live crypto search: authors, plus the most reposted tweets and reply threads
+    2. reposted-by lists of those tweets (people who actively share crypto content)
+    3. home timeline authors
+    4. repliers under crypto tweets
+    5. people-search tab
+    """
+    f = cfg.get("follow", {})
+    min_reposts = int(f.get("min_reposts", 3))
+    repost_tweets = int(f.get("retweeter_tweets", 3))
+    quota = max(4, -(-need // 4))
     found = []
-    query = pick_query(cfg)
-    sources = [
-        ("home timeline", "https://x.com/home", 3),
-        ("live crypto search", f"https://x.com/search?q={quote(query)}&f=live", 3),
-    ]
-    reply_urls = []
-    for label, url, scrolls in sources:
-        if len(found) >= need:
-            break
+    reposted, reply_urls = set(), []
+
+    def open_page(label, url):
         ok, st = resilience.goto_with_retry(page, url, cfg)
         if not ok:
             log.warning(f"{acc_id} | Candidates: cannot open {label} ({st})")
-            continue
+            return False
         page.wait_for_timeout(3000)
         dismiss_all_modals(page, human)
-        before = len(found)
-        _scroll_collect(page, human, found, exclude, need, scrolls)
-        if label.startswith("live"):
-            try:
-                for art in page.locator(TWEET_ARTICLE).all()[:6]:
-                    href = art.locator(STATUS_LINK).first.get_attribute("href") or ""
-                    if re.search(r"/status/\d+", href):
-                        reply_urls.append("https://x.com" + href.split("?")[0])
-            except Exception:
-                pass
+        return True
+
+    def report(label, before):
         log.info(f"{acc_id} | Candidates from {label}: +{len(found) - before}")
 
+    # 1) live crypto search (operator query first, plain query as fallback)
+    query = pick_query(cfg)
+    log.info(f"{acc_id} | Discovery keyword: {query!r}")
+    for url in (search_url(query, True, min_reposts), search_url(query, True, 0)):
+        if not open_page("live search", url):
+            continue
+        before = len(found)
+        for _ in range(3):
+            _scroll_collect(page, human, found, exclude, len(found) + quota, 1)
+            reposted |= _tweets_in_view(page, min_reposts)
+            if len(found) >= before + quota:
+                break
+        try:
+            for art in page.locator(TWEET_ARTICLE).all()[:6]:
+                href = art.locator(STATUS_LINK).first.get_attribute("href") or ""
+                if re.search(r"/status/\d+", href):
+                    reply_urls.append("https://x.com" + href.split("?")[0])
+        except Exception:
+            pass
+        report("live search", before)
+        if found or reposted:
+            break
+
+    # 2) reposted-by lists of the most reposted tweets
+    for n, tid, author in sorted(reposted, reverse=True)[:repost_tweets]:
+        if len(found) >= need:
+            break
+        if not open_page(f"reposts of {tid}", f"https://x.com/{author}/status/{tid}/retweets"):
+            continue
+        before = len(found)
+        _collect_user_cells(page, human, found, exclude, len(found) + quota)
+        log.info(f"{acc_id} | Candidates from reposts of @{author}'s tweet ({n} reposts): +{len(found) - before}")
+
+    # 3) home timeline
+    if len(found) < need and open_page("home timeline", "https://x.com/home"):
+        before = len(found)
+        _scroll_collect(page, human, found, exclude, len(found) + quota, 3)
+        report("home timeline", before)
+
+    # 4) repliers
     for url in random.sample(reply_urls, min(2, len(reply_urls))):
         if len(found) >= need:
             break
-        ok, _ = resilience.goto_with_retry(page, url, cfg)
-        if not ok:
+        if not open_page("replies", url):
             continue
-        page.wait_for_timeout(3000)
-        dismiss_all_modals(page, human)
         before = len(found)
-        _scroll_collect(page, human, found, exclude, need, 3, skip_first=True)
-        log.info(f"{acc_id} | Candidates from replies: +{len(found) - before}")
+        _scroll_collect(page, human, found, exclude, len(found) + quota, 3, skip_first=True)
+        report("replies", before)
 
-    if len(found) < need:
-        ok, _ = resilience.goto_with_retry(
-            page, f"https://x.com/search?q={quote(query)}&f=user", cfg)
-        if ok:
-            page.wait_for_timeout(3000)
-            dismiss_all_modals(page, human)
-            before = len(found)
-            for h in find_candidates(page, human, exclude, limit=need):
-                if h not in found:
-                    found.append(h)
-            log.info(f"{acc_id} | Candidates from people search: +{len(found) - before}")
+    # 5) people search
+    if len(found) < need and open_page("people search", search_url(pick_query(cfg), live=False) + "&f=user"):
+        before = len(found)
+        _collect_user_cells(page, human, found, exclude, need, scrolls=2)
+        report("people search", before)
 
     random.shuffle(found)
     return found
@@ -327,7 +451,7 @@ def follow_pass(page, acc_id, cfg, state, human, max_follows):
 def browse_crypto_search(page, acc_id, cfg, state, human, budget_s, start):
     """Browse latest crypto tweets (f=live) with light liking within daily limits."""
     ok, gstatus = resilience.goto_with_retry(
-        page, f"https://x.com/search?q={quote(pick_query(cfg))}&f=live", cfg
+        page, search_url(pick_query(cfg), True), cfg
     )
     if not ok:
         log.warning(f"{acc_id} | Failed to open crypto search: {gstatus}")
