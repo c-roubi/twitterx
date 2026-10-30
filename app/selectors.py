@@ -158,21 +158,44 @@ UNFOLLOW_BTN_CANDIDATES = [
 UNFOLLOW_BTN = ", ".join(UNFOLLOW_BTN_CANDIDATES)
 
 
+# The data-testid of these buttons is "<numeric user id>-follow", never the
+# handle, so the matching is done by aria-label (handle) or generic testid
+# suffix filtered to the profile header (see actions._profile_action_button).
 def follow_handle_candidates(handle):
-    """محددات زر المتابعة الخاص بحساب معيّن (الأدق أولاً)."""
+    """Follow button of this exact profile (aria-label carries the handle)."""
     return [
-        f'button[data-testid="{handle}-follow"]',
-        f'div[role="button"][data-testid="{handle}-follow"]',
-        f'button[aria-label*="@{handle}"]',
+        f'button[aria-label="Follow @{handle}" i]',
+        f'button[aria-label^="Follow" i][aria-label$="@{handle}" i]',
     ]
 
 
 def unfollow_handle_candidates(handle):
-    """محددات زر إلغاء المتابعة الخاص بحساب معيّن (الأدق أولاً)."""
+    """Following/unfollow button of this exact profile."""
     return [
-        f'button[data-testid="{handle}-unfollow"]',
-        f'div[role="button"][data-testid="{handle}-unfollow"]',
+        f'button[aria-label="Following @{handle}" i]',
+        f'button[aria-label^="Following" i][aria-label$="@{handle}" i]',
     ]
+
+
+# Any follow/unfollow/pending button by testid suffix (locale independent).
+FOLLOW_TESTID_SUFFIX = '[data-testid$="-follow"]'
+UNFOLLOW_TESTID_SUFFIX = '[data-testid$="-unfollow"]'
+PENDING_TESTID_SUFFIX = '[data-testid$="-cancel"]'
+# Buttons inside these containers belong to other users, not the open profile.
+FOREIGN_BUTTON_CONTAINERS = '[data-testid="UserCell"], [data-testid="sidebarColumn"], [data-testid="tweet"], article'
+
+# Toasts / dialogs X shows when follow is rate-limited or blocked.
+FOLLOW_BLOCK_TEXT_PATTERNS = [
+    "unable to follow", "can't follow", "cannot follow", "follow limit",
+    "try again later", "suspicious activity", "account is locked",
+    "temporarily restricted",
+    "لا يمكنك متابعة", "غير قادر على متابعة", "حاول مرة أخرى لاحقا",
+]
+TOAST_CANDIDATES = [
+    '[data-testid="toast"]',
+    '[role="alert"]',
+    '[data-testid="confirmationSheetDialog"]',
+]
 
 
 # ---------------------------------------------------------------------------
@@ -191,24 +214,48 @@ PROFILE_BIO_CANDIDATES = [
 ]
 PROFILE_BIO = ", ".join(PROFILE_BIO_CANDIDATES)
 
+# The badge is only trusted INSIDE the profile header name block. Searching the
+# whole page matches verified accounts in the timeline / "Who to follow" and
+# makes nearly every profile look verified.
+PROFILE_NAME_BLOCK = '[data-testid="UserName"]'
 VERIFIED_ICON_CANDIDATES = [
-    '[data-testid="icon-verified"]',
-    '[data-testid="icon-verified-badge"]',
-    'svg[aria-label="Verified account"]',
+    f'{PROFILE_NAME_BLOCK} [data-testid="icon-verified"]',
+    f'{PROFILE_NAME_BLOCK} [data-testid="icon-verified-badge"]',
+    f'{PROFILE_NAME_BLOCK} svg[aria-label*="Verified"]',
+    f'{PROFILE_NAME_BLOCK} svg[aria-label*="موثق"]',
 ]
 VERIFIED_ICON = ", ".join(VERIFIED_ICON_CANDIDATES)
 
+PROTECTED_ICON_CANDIDATES = [
+    f'{PROFILE_NAME_BLOCK} [data-testid="icon-lock"]',
+    f'{PROFILE_NAME_BLOCK} svg[aria-label*="Protected"]',
+    f'{PROFILE_NAME_BLOCK} svg[aria-label*="محمي"]',
+]
+
 FOLLOWING_LINK_CANDIDATES = [
     'a[href$="/following"]',
-    'a[href*="/following"]',
 ]
 FOLLOWING_LINK = ", ".join(FOLLOWING_LINK_CANDIDATES)
 
+# Current X profiles link the "Followers" count to /<handle>/verified_followers;
+# older ones use /<handle>/followers. Never match "followers_you_follow".
 FOLLOWERS_LINK_CANDIDATES = [
+    'a[href$="/verified_followers"]',
     'a[href$="/followers"]',
-    'a[href*="/followers"]',
 ]
 FOLLOWERS_LINK = ", ".join(FOLLOWERS_LINK_CANDIDATES)
+
+
+def followers_link_candidates(handle):
+    """Followers-count link of this exact profile (case-insensitive href)."""
+    return [
+        f'a[href="/{handle}/verified_followers" i]',
+        f'a[href="/{handle}/followers" i]',
+    ]
+
+
+def following_link_candidates(handle):
+    return [f'a[href="/{handle}/following" i]']
 
 TWEET_TEXT_CANDIDATES = [
     'div[data-testid="tweetText"]',

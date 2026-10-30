@@ -11,6 +11,7 @@ ACCOUNTS_PATH = os.path.join(DATA_DIR, "accounts.json")
 COMMENTS_PATH = os.path.join(DATA_DIR, "comments.txt")
 COMMENTS_CRYPTO_PATH = os.path.join(DATA_DIR, "comments_crypto.json")
 SEEN_PATH = os.path.join(DATA_DIR, "seen.json")
+FOLLOWED_GLOBAL_PATH = os.path.join(DATA_DIR, "followed_global.json")
 PROFILES_DIR = os.path.join(DATA_DIR, "profiles")
 SESSIONS_DIR = os.path.join(DATA_DIR, "sessions")
 STATE_DIR = os.path.join(DATA_DIR, "state")
@@ -232,6 +233,19 @@ def load_seen():
 
 def save_seen(seen):
     _atomic_save(seen, SEEN_PATH)
+
+
+def load_global_followed():
+    """Lower-cased handles already followed by ANY of our accounts (avoid identical follow patterns)."""
+    try:
+        with open(FOLLOWED_GLOBAL_PATH, encoding="utf-8") as f:
+            return {str(h).lower() for h in json.load(f)}
+    except Exception:
+        return set()
+
+
+def save_global_followed(handles):
+    _atomic_save(sorted({str(h).lower() for h in handles})[-20000:], FOLLOWED_GLOBAL_PATH)
 
 
 def state_path(acc_id):

@@ -2,15 +2,18 @@
 """Daily growth and warmup: discover crypto enthusiasts + slow random follows + crypto search browse."""
 import random
 import re
+import threading
 import time
 from urllib.parse import quote
 
 from .actions import (
-    TWEET_ARTICLE, LIKE_BTN, UNLIKE_BTN, USER_CELL,
-    follow_user, open_profile, read_profile, extract_tweet_id,
+    TWEET_ARTICLE, LIKE_BTN, UNLIKE_BTN, STATUS_LINK,
+    follow_user, open_profile, read_profile, extract_tweet_id, dismiss_all_modals,
 )
 from .browser import is_login_wall
-from .config import save_state
+from .config import (
+    load_accounts, load_global_followed, save_global_followed, save_state,
+)
 from .humanizer import Human, randint
 from .logger import get_logger
 from . import resilience
@@ -49,17 +52,17 @@ def _handle_from_href(href):
 
 
 def find_candidates(page, human, seen_users=(), limit=30):
-    """Collect candidates from people search results (f=user) — unique handles we haven't seen."""
-    seen = set(seen_users or ())
+    """Handles from a people-search page (f=user): UserCell entries we haven't seen."""
+    seen = {str(s).lower() for s in (seen_users or ())}
     handles = []
     try:
-        for cell in page.locator(USER_CELL).all():
+        for cell in page.locator('[data-testid="UserCell"]').all():
             if len(handles) >= limit:
                 break
             try:
                 for link in cell.locator("a[href]").all():
                     handle = _handle_from_href(link.get_attribute("href") or "")
-                    if handle and handle not in seen and handle not in handles:
+                    if handle and handle.lower() not in seen and handle not in handles:
                         handles.append(handle)
                         break
             except Exception:
@@ -69,37 +72,169 @@ def find_candidates(page, human, seen_users=(), limit=30):
     return handles
 
 
-def profile_eligible(profile, cfg):
-    """Profile eligibility conditions for following (pure function for testing)."""
+def ineligible_reason(profile, cfg):
+    """Why a profile must not be followed (None = eligible). Pure function for testing."""
     f = cfg.get("follow", {})
     if not f.get("enabled", True):
-        return False
+        return "follow-disabled"
+    if profile.get("protected"):
+        return "protected"
     if f.get("skip_verified", True) and profile.get("verified"):
-        return False
+        return "verified"
     if f.get("require_bio", True) and not (profile.get("bio") or "").strip():
-        return False
-    followers = profile.get("followers", 0) or 0
-    if followers < int(f.get("min_followers", 50)):
-        return False
-    if followers > int(f.get("max_followers", 150000)):
-        return False
-    return True
+        return "no-bio"
+    followers = profile.get("followers")
+    if followers is not None:  # unknown count is not treated as 0
+        if followers < int(f.get("min_followers", 50)):
+            return "followers-too-few"
+        if followers > int(f.get("max_followers", 150000)):
+            return "followers-too-many"
+    return None
+
+
+def profile_eligible(profile, cfg):
+    """Profile eligibility conditions for following (pure function for testing)."""
+    return ineligible_reason(profile, cfg) is None
 
 
 def follow_budget(state, cfg):
-    """How many follows are left today?"""
+    """How many follows are left today? 0 while X has recently blocked following."""
     f = cfg.get("follow", {})
     if not f.get("enabled", True):
+        return 0
+    if time.time() < float(state.get("follow_blocked_until", 0) or 0):
         return 0
     caps = state.get("caps", {})
     done = state.get("done", {})
     return max(0, int(caps.get("follows", 0)) - int(done.get("follows", 0)))
 
 
-def _follow_one(page, human, handle, cfg, state, acc_id):
-    """Visit profile, check eligibility, and maybe follow (visit-only ratio from config)."""
+# ---------------------------------------------------------------------------
+# Candidate discovery
+# X made likes private (2024), so "who liked this tweet" is no longer visible.
+# Public signals we can use: authors on the home timeline / live crypto search,
+# people replying under crypto tweets, and the people-search tab.
+# ---------------------------------------------------------------------------
+_registry_lock = threading.Lock()
+_TRANSIENT = ("goto-error", "timeout", "network-error", "error:")
+
+
+def _authors_in_view(page):
+    """Ordered handles of tweet authors currently in the DOM (ads skipped)."""
+    out = []
+    try:
+        for art in page.locator(TWEET_ARTICLE).all():
+            try:
+                if art.locator('xpath=.//span[normalize-space(text())="Ad"]').count() > 0:
+                    continue
+                link = art.locator('[data-testid="User-Name"] a[href^="/"]').first
+                handle = _handle_from_href(link.get_attribute("href") or "") if link.count() else None
+                if handle and handle not in out:
+                    out.append(handle)
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return out
+
+
+def _scroll_collect(page, human, found, exclude, need, scrolls, skip_first=False):
+    """Scroll the current page, appending new eligible-looking handles to `found`."""
+    first_seen = None
+    for _ in range(scrolls):
+        authors = _authors_in_view(page)
+        if skip_first and authors and first_seen is None:
+            first_seen = authors[0]  # original poster of the conversation
+        for h in authors:
+            if h == first_seen or h.lower() in exclude or h in found:
+                continue
+            found.append(h)
+        if len(found) >= need:
+            return
+        human.pause(1.5, 3.5)
+        page.mouse.wheel(0, random.randint(700, 1400))
+        page.wait_for_timeout(1500)
+
+
+def collect_candidates(page, acc_id, cfg, human, exclude, need):
+    """Gather candidate handles from several public sources until `need` is reached."""
+    found = []
+    query = pick_query(cfg)
+    sources = [
+        ("home timeline", "https://x.com/home", 3),
+        ("live crypto search", f"https://x.com/search?q={quote(query)}&f=live", 3),
+    ]
+    reply_urls = []
+    for label, url, scrolls in sources:
+        if len(found) >= need:
+            break
+        ok, st = resilience.goto_with_retry(page, url, cfg)
+        if not ok:
+            log.warning(f"{acc_id} | Candidates: cannot open {label} ({st})")
+            continue
+        page.wait_for_timeout(3000)
+        dismiss_all_modals(page, human)
+        before = len(found)
+        _scroll_collect(page, human, found, exclude, need, scrolls)
+        if label.startswith("live"):
+            try:
+                for art in page.locator(TWEET_ARTICLE).all()[:6]:
+                    href = art.locator(STATUS_LINK).first.get_attribute("href") or ""
+                    if re.search(r"/status/\d+", href):
+                        reply_urls.append("https://x.com" + href.split("?")[0])
+            except Exception:
+                pass
+        log.info(f"{acc_id} | Candidates from {label}: +{len(found) - before}")
+
+    for url in random.sample(reply_urls, min(2, len(reply_urls))):
+        if len(found) >= need:
+            break
+        ok, _ = resilience.goto_with_retry(page, url, cfg)
+        if not ok:
+            continue
+        page.wait_for_timeout(3000)
+        dismiss_all_modals(page, human)
+        before = len(found)
+        _scroll_collect(page, human, found, exclude, need, 3, skip_first=True)
+        log.info(f"{acc_id} | Candidates from replies: +{len(found) - before}")
+
+    if len(found) < need:
+        ok, _ = resilience.goto_with_retry(
+            page, f"https://x.com/search?q={quote(query)}&f=user", cfg)
+        if ok:
+            page.wait_for_timeout(3000)
+            dismiss_all_modals(page, human)
+            before = len(found)
+            for h in find_candidates(page, human, exclude, limit=need):
+                if h not in found:
+                    found.append(h)
+            log.info(f"{acc_id} | Candidates from people search: +{len(found) - before}")
+
+    random.shuffle(found)
+    return found
+
+
+def _exclusions(cfg, state):
+    """Handles that must never be followed: our own accounts, the manager, already seen/followed."""
+    ex = {str(h).lower() for h in (state.get("seen_users") or [])}
+    ex |= {str(h).lower() for h in (state.get("followed_handles") or [])}
+    try:
+        ex |= {str(a.get("handle", "")).lstrip("@").lower() for a in load_accounts().values()}
+    except Exception:
+        pass
+    ex.add(str(cfg.get("manager_handle", "")).lstrip("@").lower())
+    with _registry_lock:
+        ex |= load_global_followed()
+    ex.discard("")
+    return ex
+
+
+# ---------------------------------------------------------------------------
+# Follow pass
+# ---------------------------------------------------------------------------
+def _follow_one(page, human, handle, cfg, acc_id):
+    """Visit a profile, check eligibility, follow. Returns (followed_handle|None, status)."""
     f = cfg.get("follow", {})
-    visit_only = random.random() < float(f.get("visit_only_chance", 0.25))
     ok, status = open_profile(page, handle, cfg)
     if not ok:
         log.info(f"{acc_id} | Skip @{handle}: {status}")
@@ -108,135 +243,84 @@ def _follow_one(page, human, handle, cfg, state, acc_id):
     page.mouse.wheel(0, random.randint(200, 700))
     human.pause(1.5, 4.0)
     profile = read_profile(page, handle)
-    if visit_only:
+    reason = ineligible_reason(profile, cfg)
+    if reason:
+        fol = profile.get("followers")
+        log.info(f"{acc_id} | Skip @{handle}: {reason} (followers={'?' if fol is None else fol})")
+        return None, f"skip:{reason}"
+    if random.random() < float(f.get("visit_only_chance", 0.25)):
         log.info(f"{acc_id} | Visit only @{handle} (no follow)")
         return None, "visit-only"
-    if not profile_eligible(profile, cfg):
-        reason = "verified" if profile.get("verified") else (
-            "no-bio" if not (profile.get("bio") or "").strip() else "followers-range")
-        log.info(f"{acc_id} | Skip @{handle}: not eligible ({reason})")
-        return None, f"not-eligible:{reason}"
     human.mouse_wander(page)
     res, msg = follow_user(page, human, handle)
-    if res:
-        log.info(f"{acc_id} | ✓ Followed @{handle}")
+    if res and msg == "followed":
+        log.info(f"{acc_id} | ✓ Followed @{handle} (followers={profile.get('followers')})")
         return handle, msg
+    if res:  # already-following: counts as seen, not as a new follow
+        log.info(f"{acc_id} | @{handle}: {msg}")
+        return None, msg
     log.warning(f"{acc_id} | ✗ Follow @{handle} failed: {msg}")
-    return None, f"follow-failed:{msg}"
+    return None, msg
 
 
-def _get_likers_on_tweet(page, human):
-    """Fetch people who liked the currently open tweet."""
-    likers = []
-    try:
-        # Find the like count and click it
-        like_count = page.locator('a[href*="/likes"], [role="button"]:has-text("Like")').first
-        if like_count.count() > 0:
-            like_count.click()
-            page.wait_for_timeout(2000)
-
-            # Fetch people from the likes list
-            user_cells = page.locator(USER_CELL).all()
-            for cell in user_cells[:15]:  # First 15 people
-                try:
-                    link = cell.locator("a[href]").first
-                    if link.count() > 0:
-                        href = link.get_attribute("href") or ""
-                        handle = _handle_from_href(href)
-                        if handle:
-                            likers.append(handle)
-                except:
-                    pass
-
-        # Close the list
-        page.keyboard.press("Escape")
-        page.wait_for_timeout(1000)
-    except:
-        pass
-    return likers
-
-
-def run_follow_pass(page, acc_id, cfg, state, human, max_follows):
-    """Smart follows: follow people who like crypto tweets (engaged users)."""
+def follow_pass(page, acc_id, cfg, state, human, max_follows):
+    """Find active crypto accounts and follow up to `max_follows` of them. Returns (followed, status)."""
     f = cfg.get("follow", {})
     budget = follow_budget(state, cfg)
-    if budget <= 0 or max_follows <= 0:
+    want = min(int(max_follows), budget)
+    if want <= 0:
         return 0, "no-budget"
+    log.info(f"{acc_id} | Follow pass: target {want} (budget left today: {budget})")
 
-    log.info(f"{acc_id} | Follow active people (likes/comments) (remaining: {budget})")
-
-    # New strategy: fetch crypto tweets and search for active people
-    query = pick_query(cfg)
-    ok, gstatus = resilience.goto_with_retry(
-        page, f"https://x.com/search?q={quote(query)}", cfg
-    )
-    if not ok:
-        log.warning(f"{acc_id} | Failed to open search: {gstatus}")
-        return 0, f"goto-error:{gstatus}"
-    page.wait_for_timeout(3500)
-
-    human.pause(2.0, 5.0)
-    seen_users = set(state.get("seen_users", []) or [])
-    candidates = []
-
-    # Fetch people from search results (likes and comments)
-    try:
-        articles = page.locator(TWEET_ARTICLE).all()
-        for art in articles[:8]:  # First 8 tweets
-            try:
-                link = art.locator('a[href*="/status/"]').first
-                if link.count() > 0:
-                    art.click()
-                    page.wait_for_timeout(2000)
-
-                    # Fetch people who liked
-                    likers = _get_likers_on_tweet(page, human)
-                    candidates.extend(likers)
-
-                    page.keyboard.press("Escape")
-                    page.wait_for_timeout(1500)
-            except:
-                continue
-    except:
-        pass
-
-    # Clean from duplicates and previously seen
-    candidates = list(set(c for c in candidates if c not in seen_users))
-    random.shuffle(candidates)
-    followed = 0
-    lo_delay, hi_delay = (int(x) for x in f.get("delay_between_s", [90, 300]))
-
+    exclude = _exclusions(cfg, state)
+    candidates = collect_candidates(page, acc_id, cfg, human, exclude, need=max(want * 6, 15))
     if not candidates:
-        log.info(f"{acc_id} | No active people found to follow - fallback to regular search")
-        # fallback للاستراتيجية القديمة إذا ما اشتغلت الجديدة
-        return 0, "no-active-users"
+        log.info(f"{acc_id} | No follow candidates found")
+        return 0, "no-candidates"
+    log.info(f"{acc_id} | {len(candidates)} candidates collected")
 
-    log.info(f"{acc_id} | Found {len(candidates)} active people - starting follows")
+    lo_delay, hi_delay = (int(x) for x in f.get("delay_between_s", [90, 300]))
+    stats, followed = {}, 0
+    seen = set(state.get("seen_users") or [])
+    max_visits = max(want * 6, 12)  # hard cap on profile visits per pass
 
-    for handle in candidates[:max_follows]:
-        if follow_budget(state, cfg) <= 0:
+    for visits, handle in enumerate(candidates):
+        if followed >= want or follow_budget(state, cfg) <= 0 or visits >= max_visits:
             break
         try:
-            got, msg = _follow_one(page, human, handle, cfg, state, acc_id)
-            seen_users.add(handle)
-            if got:
-                state.setdefault("followed_handles", []).append(handle)
-                state["done"]["follows"] += 1
-                followed += 1
-                log.info(f"{acc_id} | ✓ Followed @{handle} (active)")
-
-            # Save state
-            seen_list = list(seen_users)
-            if len(seen_list) > 3000:
-                seen_list = seen_list[-3000:]
-            state["seen_users"] = sorted(seen_list)
-            save_state(acc_id, state)
-            human.pause(max(20, int(lo_delay * 0.6)), hi_delay)
+            got, status = _follow_one(page, human, handle, cfg, acc_id)
         except Exception as e:
             log.warning(f"{acc_id} | Error following @{handle}: {e}")
-            continue
+            got, status = None, "error"
+        key = status if status.startswith("skip:") else status.split(":")[0]
+        stats[key] = stats.get(key, 0) + 1
 
-    log.info(f"{acc_id} | Smart follow pass: +{followed} (total today {state['done']['follows']})")
+        if not status.startswith(_TRANSIENT) and status != "error":
+            seen.add(handle)
+        if status == "follow-blocked":
+            state["follow_blocked_until"] = time.time() + 6 * 3600
+            log.error(f"{acc_id} | X is blocking follows - pausing follows for 6h")
+            save_state(acc_id, state)
+            break
+        if status in ("login-wall", "challenge"):
+            log.error(f"{acc_id} | Session problem while following ({status}) - stopping pass")
+            break
+        if got:
+            followed += 1
+            state.setdefault("followed_handles", []).append(got)
+            state["done"]["follows"] = state["done"].get("follows", 0) + 1
+            with _registry_lock:
+                reg = load_global_followed()
+                reg.add(got.lower())
+                save_global_followed(reg)
+            human.pause(max(20, int(lo_delay * 0.6)), hi_delay)
+        else:
+            human.pause(3, 9)  # cheap pause after skipped profiles
+        state["seen_users"] = sorted(seen)[-3000:]
+        save_state(acc_id, state)
+
+    summary = ", ".join(f"{k}={v}" for k, v in sorted(stats.items())) or "none"
+    log.info(f"{acc_id} | Follow pass done: +{followed} (today {state['done'].get('follows', 0)}) | {summary}")
     return followed, "ok"
 
 
@@ -297,131 +381,6 @@ def browse_crypto_search(page, acc_id, cfg, state, human, budget_s, start):
             break
 
 
-def smart_follow_engaged_users(page, acc_id, cfg, state, human, max_follows):
-    """Follow people interested in crypto who liked or commented on crypto tweets.
-
-    Conditions:
-    ✅ Engaged users (liked or commented)
-    ❌ Not verified
-    ❌ Followers < 6000
-    ❌ Not already followed (globally)
-    """
-    f = cfg.get("follow", {})
-    budget = follow_budget(state, cfg)
-    if budget <= 0 or max_follows <= 0:
-        return 0, "no-budget"
-
-    log.info(f"{acc_id} | Follow interested users (engaged users)")
-
-    # Fetch interested people from Home Timeline (recent, not top)
-    engaged_candidates = []
-    try:
-        # Open Home Timeline
-        ok, _ = resilience.goto_with_retry(
-            page, "https://x.com/home", cfg
-        )
-        if not ok:
-            return 0, "goto-failed"
-
-        page.wait_for_timeout(3000)
-        human.pause(1.0, 3.0)
-
-        # Scroll a bit to fetch recent tweets
-        page.mouse.wheel(0, 500)
-        page.wait_for_timeout(1500)
-
-        # Fetch recent tweets
-        articles = page.locator(TWEET_ARTICLE).all()[:8]  # First 8 recent tweets
-
-        for article in articles:
-            try:
-                # Fetch from likes
-                like_btn = article.locator('[role="button"][aria-label*="Like"]').first
-                if like_btn.count() > 0:
-                    like_btn.click()
-                    page.wait_for_timeout(1500)
-
-                    # Fetch people from likes list
-                    user_cells = page.locator(USER_CELL).all()[:10]
-                    for cell in user_cells:
-                        try:
-                            link = cell.locator('a[href]').first
-                            if link.count() > 0:
-                                href = link.get_attribute("href") or ""
-                                handle = _handle_from_href(href)
-                                if handle and handle not in engaged_candidates:
-                                    engaged_candidates.append(handle)
-                        except:
-                            pass
-
-                    # Close the list
-                    page.keyboard.press("Escape")
-                    page.wait_for_timeout(1000)
-            except:
-                pass
-
-    except Exception as e:
-        log.warning(f"{acc_id} | Error fetching engaged users: {e}")
-        return 0, f"error:{e}"[:50]
-
-    # Filter and Follow
-    followed = 0
-    lo_delay, hi_delay = (int(x) for x in f.get("delay_between_s", [90, 300]))
-
-    # Fetch previously followed people (global tracking)
-    seen_handles = set(state.get("seen_users", []) or [])
-
-    for handle in engaged_candidates[:max_follows]:
-        if follow_budget(state, cfg) <= 0:
-            break
-
-        # Skip if already followed from another account
-        if handle in seen_handles:
-            log.info(f"{acc_id} | {handle} - already followed from another account")
-            continue
-
-        try:
-            # Open profile
-            ok, status = open_profile(page, handle, cfg)
-            if not ok:
-                continue
-
-            human.pause(1.5, 3.0)
-
-            # Read profile
-            profile = read_profile(page, handle)
-
-            # Check: verified?
-            if profile.get("verified"):
-                log.info(f"{acc_id} | {handle} - verified, skip")
-                continue
-
-            # Check: followers > 6000?
-            followers = profile.get("followers", 0) or 0
-            if followers > 6000:
-                log.info(f"{acc_id} | {handle} - {followers} followers (> 6000), skip")
-                continue
-
-            # OK - Follow!
-            res, msg = follow_user(page, human, handle)
-            if res:
-                state.setdefault("followed_handles", []).append(handle)
-                state["done"]["follows"] = state["done"].get("follows", 0) + 1
-                seen_handles.add(handle)
-                state["seen_users"] = list(seen_handles)
-                followed += 1
-                log.info(f"{acc_id} | ✅ Followed {handle} ({followers} followers)")
-
-            save_state(acc_id, state)
-            human.pause(lo_delay, hi_delay)
-
-        except Exception as e:
-            log.warning(f"{acc_id} | Error following {handle}: {e}")
-            continue
-
-    return followed, "ok"
-
-
 def crypto_activity(page, acc_id, cfg, state, human, budget_s):
     """Daily crypto activity: search browse + slow follows, within time budget."""
     f = cfg.get("follow", {})
@@ -430,7 +389,6 @@ def crypto_activity(page, acc_id, cfg, state, human, budget_s):
     if w.get("browse_probability", 0.8) > random.random():
         browse_crypto_search(page, acc_id, cfg, state, human, budget_s * 0.5, start)
 
-    # Smart Follow (interested users) - instead of random follow
     if f.get("enabled", True) and follow_budget(state, cfg) > 0:
         per_session = f.get("per_session", [1, 3])
-        smart_follow_engaged_users(page, acc_id, cfg, state, human, randint(*per_session))
+        follow_pass(page, acc_id, cfg, state, human, randint(*per_session))

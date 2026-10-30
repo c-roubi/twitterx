@@ -22,6 +22,10 @@ from .selectors import (
     FOLLOWING_LINK_CANDIDATES, FOLLOWERS_LINK_CANDIDATES,
     TWEET_TEXT_CANDIDATES,
     follow_handle_candidates, unfollow_handle_candidates,
+    followers_link_candidates, following_link_candidates,
+    PROTECTED_ICON_CANDIDATES, PROFILE_NAME_BLOCK,
+    FOLLOW_TESTID_SUFFIX, UNFOLLOW_TESTID_SUFFIX, PENDING_TESTID_SUFFIX,
+    FOREIGN_BUTTON_CONTAINERS, FOLLOW_BLOCK_TEXT_PATTERNS, TOAST_CANDIDATES,
 )
 
 MAX_ATTEMPTS = 2
@@ -147,68 +151,70 @@ def dismiss_compose_dialog(page, human):
 # FIX-SAVEPOST-V2-DISMISS
 
 
-def dismiss_all_modals(page, human):
-    """Auto-dismiss any modal/popup/alert on page (robust multi-strategy handler)."""
+_DISMISS_LABELS = re.compile(
+    r"^\s*(dismiss|close|ok|got it|not now|maybe later|skip for now|"
+    r"تجاهل|إغلاق|حسنا|حسناً|فهمت|ليس الآن|ليس الان)\s*$", re.I)
+_COOKIE_LABELS = re.compile(
+    r"^\s*(refuse non-essential cookies|accept all cookies|"
+    r"رفض ملفات تعريف الارتباط غير الضرورية|قبول جميع ملفات تعريف الارتباط)\s*$", re.I)
+_DIALOGS = '[role="dialog"], [role="alertdialog"], [data-testid="sheetDialog"]'
+
+
+def _count(loc):
     try:
-        # Strategy 1: Text-based dismiss buttons (most common)
-        for text in ["Dismiss", "Close", "OK", "Got it", "Confirm", "Accept", "X"]:
-            try:
-                # Try multiple selector patterns
-                selectors = [
-                    f'button:has-text("{text}")',
-                    f'button[aria-label="{text}"]',
-                    f'[role="button"]:has-text("{text}")',
-                ]
-                for selector in selectors:
-                    try:
-                        btn = page.locator(selector).first
-                        if btn.count() > 0 and btn.is_visible():
-                            human.pause(0.3, 0.6)
-                            btn.click(force=True)
-                            page.wait_for_timeout(800)
-                            return True
-                    except Exception:
-                        pass
-            except Exception:
-                pass
+        return loc.count()
+    except Exception:
+        return 0
 
-        # Strategy 2: Close button by aria-label (modals)
-        try:
-            close_btn = page.locator('button[aria-label*="Close"], button[aria-label*="close"], [aria-label*="dismiss"]').first
-            if close_btn.count() > 0 and close_btn.is_visible():
-                human.pause(0.3, 0.6)
-                close_btn.click(force=True)
-                page.wait_for_timeout(800)
-                return True
-        except Exception:
-            pass
 
-        # Strategy 3: Keyboard escape (universal)
-        try:
-            page.keyboard.press("Escape")
-            page.wait_for_timeout(500)
-            # Check if modal still visible
-            modals = page.locator('[role="dialog"], [role="alertdialog"]').all()
-            if len(modals) == 0:
-                return True
-        except Exception:
-            pass
+def dismiss_all_modals(page, human):
+    """Close blocking popups (Views, notifications prompt, alerts, cookie banner).
 
-        # Strategy 4: Click outside modal (overlay click)
-        try:
-            overlay = page.locator('[role="presentation"]').first
-            if overlay.count() > 0:
-                # Click top-left corner of page to dismiss
-                page.click("body", position={"x": 50, "y": 50})
+    Only buttons INSIDE an open dialog (matched by exact accessible name) are
+    clicked, so nothing on the normal page can be hit by accident. Escape is
+    pressed only when a non-composer dialog is actually open. Returns True when
+    something was closed.
+    """
+    closed = False
+    try:
+        # Cookie banner (bottom bar, not a dialog) - refuse optional cookies.
+        for _ in range(2):
+            btn = page.get_by_role("button", name=_COOKIE_LABELS).first
+            if _count(btn) and btn.is_visible():
+                human.pause(0.3, 0.8)
+                btn.click()
                 page.wait_for_timeout(600)
-                return True
-        except Exception:
-            pass
+                closed = True
+            else:
+                break
 
+        for _ in range(3):  # stacked dialogs
+            dialogs = page.locator(_DIALOGS)
+            if _count(dialogs) == 0:
+                break
+            dlg = dialogs.last
+            if _count(dlg.locator(TEXTAREA)) > 0:
+                break  # composer: owned by dismiss_compose_dialog
+            before = _count(dialogs)
+
+            btn = dlg.get_by_role("button", name=_DISMISS_LABELS).first
+            if not (_count(btn) and btn.is_visible()):
+                btn = dlg.locator(
+                    '[data-testid="app-bar-close"], button[aria-label="Close"], '
+                    'button[aria-label="إغلاق"]').first
+            if _count(btn) and btn.is_visible():
+                human.pause(0.3, 0.8)
+                btn.click()
+            else:
+                page.keyboard.press("Escape")
+            page.wait_for_timeout(700)
+            if _count(page.locator(_DIALOGS)) < before:
+                closed = True
+            else:
+                break  # could not close it; don't loop forever
     except Exception:
         pass
-
-    return False
+    return closed
 
 
 def open_tweet(page, url):
@@ -610,34 +616,44 @@ def scroll_home(page, human, steps=4):
         human.pause(0.8, 3.0)
 
 
+_ARABIC_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩٫٬،", "0123456789.,,")
+_COUNT_SUFFIX = {
+    "K": 1_000, "ألف": 1_000, "الف": 1_000,
+    "M": 1_000_000, "مليون": 1_000_000,
+    "B": 1_000_000_000, "مليار": 1_000_000_000,
+}
+
+
 def _parse_count(text):
-    """Convert text like '1.2M Following' or '12,345' to integer."""
+    """Convert '1.2M Following', '12,345', '٣٫٢ ألف متابع' ... to int (0 if unparsable)."""
+    n = _parse_count_or_none(text)
+    return n if n is not None else 0
+
+
+def _parse_count_or_none(text):
+    """Like _parse_count but returns None when no number can be found (unknown != 0)."""
     if not text:
-        return 0
-    t = (text or "").strip()
-    t = re.sub(r"(?i)(followers|following|likes|views|posts|monthly|\bx\b)", "", t)
-    t = t.replace(",", "").replace(" ", "")
-    m = re.match(r"^([\d.]+)\s*([KMB])?$", t, re.I)
+        return None
+    t = str(text).translate(_ARABIC_DIGITS)
+    # Drop label words first: adjacent spans give "350Following" with no separator.
+    t = re.sub(r"(?i)followers?|following|likes?|views?|posts?|monthly|"
+               r"متابعون|متابعين|متابع|يتابع|مشاهدات|إعجابات", " ", t)
+    m = re.search(r"(\d[\d,]*(?:\.\d+)?)\s*(K|M|B|ألف|الف|مليون|مليار)?(?![A-Za-z])", t, re.I)
     if not m:
-        try:
-            return int(float(t))
-        except Exception:
-            return 0
-    num = float(m.group(1))
-    suf = (m.group(2) or "").upper()
-    if suf == "K":
-        num *= 1_000
-    elif suf == "M":
-        num *= 1_000_000
-    elif suf == "B":
-        num *= 1_000_000_000
-    return int(num)
+        return None
+    try:
+        num = float(m.group(1).replace(",", ""))
+    except ValueError:
+        return None
+    suf = m.group(2) or ""
+    mult = _COUNT_SUFFIX.get(suf.upper() if suf.isascii() else suf, 1)
+    return int(num * mult)
 
 
 def _profile_loaded(page):
-    """Is profile fully loaded? (any indicator: followers/following link, follow button, or bio)."""
-    for cands in (FOLLOWERS_LINK_CANDIDATES, FOLLOWING_LINK_CANDIDATES,
-                  FOLLOW_BTN_CANDIDATES, PROFILE_BIO_CANDIDATES):
+    """Is the profile rendered? (header name block, bio, or follower counts)."""
+    for cands in ([PROFILE_NAME_BLOCK], PROFILE_BIO_CANDIDATES,
+                  FOLLOWERS_LINK_CANDIDATES, FOLLOWING_LINK_CANDIDATES):
         try:
             if selectors.has(page, cands):
                 return True
@@ -647,79 +663,152 @@ def _profile_loaded(page):
 
 
 def _profile_unavailable(page):
-    """Is profile unavailable/deleted? (clearly empty state)."""
-    for cands in ('[data-testid="emptyState"]', 'div[data-testid="emptyState"]'):
-        try:
-            if page.locator(cands).first.count() > 0:
-                return True
-        except Exception:
-            continue
-    return False
+    """Deleted / suspended / non-existent profile (X shows an empty state)."""
+    try:
+        return page.locator('[data-testid="emptyState"]').first.count() > 0
+    except Exception:
+        return False
 
 
 def open_profile(page, handle, cfg=None):
-    """Open user profile (x.com/<handle>) with retry on network errors."""
+    """Open x.com/<handle>. Returns (ok, status); status explains every failure."""
     ok, status = resilience.goto_with_retry(
         page, f"https://x.com/{handle}", cfg or {"resilience": {}}
     )
     if not ok:
         return False, f"goto-error:{status}"
-    page.wait_for_timeout(3000)
+    page.wait_for_timeout(2500)
+    try:
+        dismiss_all_modals(page, Human(page))
+    except Exception:
+        pass
     for _ in range(20):
-        if _profile_loaded(page):
-            return True, "ok"
+        url = (page.url or "").lower()
+        if "/i/flow/login" in url or url.rstrip("/").endswith("/login"):
+            return False, "login-wall"
+        if "/account/access" in url or "/i/flow/" in url:
+            return False, "challenge"
         if _profile_unavailable(page):
             return False, "no-profile"
+        if _profile_loaded(page):
+            return True, "ok"
         if selectors.has(page, LOGIN_WALL):
             return False, "login-wall"
         page.wait_for_timeout(1000)
     return False, "no-profile"
 
 
+def _read_count(page, handle, handle_cands, generic_cands):
+    """Count from the profile's own link; None when it cannot be read."""
+    for cands in (handle_cands, generic_cands):
+        el = selectors.first(page, cands, visible=False)
+        if el is None:
+            continue
+        for raw in ((el.inner_text() or ""), (el.get_attribute("aria-label") or "")):
+            n = _parse_count_or_none(raw)
+            if n is not None:
+                return n
+    return None
+
+
 def read_profile(page, handle):
-    """Read profile info: bio, followers, following, verified?"""
-    info = {"bio": "", "followers": 0, "following": 0, "verified": False}
+    """Read profile info. followers/following are None when unknown (not 0).
+
+    Verified/protected badges are looked up ONLY inside the profile header
+    name block, never on the whole page.
+    """
+    info = {"bio": "", "followers": None, "following": None,
+            "verified": False, "protected": False}
+    # Counts render slightly after the header; give them a moment.
+    for _ in range(6):
+        if selectors.has(page, followers_link_candidates(handle) + FOLLOWERS_LINK_CANDIDATES):
+            break
+        page.wait_for_timeout(1000)
     try:
         bio = selectors.first(page, PROFILE_BIO_CANDIDATES)
         if bio is not None:
             info["bio"] = (bio.inner_text() or "").strip()[:300]
     except Exception:
         pass
-    for key, cands in (("followers", FOLLOWERS_LINK_CANDIDATES), ("following", FOLLOWING_LINK_CANDIDATES)):
-        try:
-            el = selectors.first(page, cands, visible=False)
-            if el is not None:
-                label = el.get_attribute("aria-label") or ""
-                info[key] = _parse_count(label or (el.inner_text() or ""))
-        except Exception:
-            pass
     try:
-        if selectors.has(page, VERIFIED_ICON_CANDIDATES):
-            info["verified"] = True
+        info["followers"] = _read_count(page, handle, followers_link_candidates(handle), FOLLOWERS_LINK_CANDIDATES)
+        info["following"] = _read_count(page, handle, following_link_candidates(handle), FOLLOWING_LINK_CANDIDATES)
+    except Exception:
+        pass
+    try:
+        info["verified"] = selectors.has(page, VERIFIED_ICON_CANDIDATES)
+        info["protected"] = selectors.has(page, PROTECTED_ICON_CANDIDATES)
     except Exception:
         pass
     return info
 
 
-def is_following(page, handle):
-    """Are we currently following this user?"""
+def _action_button(page, handle, kind):
+    """Follow / unfollow / pending button that belongs to the OPEN profile.
+
+    X's testid is "<user id>-follow" (not the handle), so: try the handle-bearing
+    aria-label first, then the testid suffix, skipping buttons inside user cells,
+    the sidebar ("Who to follow") and tweets, which belong to other accounts.
+    """
+    named = {"follow": follow_handle_candidates(handle),
+             "unfollow": unfollow_handle_candidates(handle),
+             "pending": []}[kind]
+    btn = selectors.first(page, named)
+    if btn is not None:
+        return btn
+    suffix = {"follow": FOLLOW_TESTID_SUFFIX, "unfollow": UNFOLLOW_TESTID_SUFFIX,
+              "pending": PENDING_TESTID_SUFFIX}[kind]
     try:
-        if selectors.has(page, unfollow_handle_candidates(handle)):
-            return True
+        for el in page.locator(f"button{suffix}, div[role='button']{suffix}").all():
+            try:
+                if not el.is_visible():
+                    continue
+                if el.evaluate("(e, sel) => !!e.closest(sel)", FOREIGN_BUTTON_CONTAINERS):
+                    continue
+                return el
+            except Exception:
+                continue
     except Exception:
         pass
-    return False
+    return None
+
+
+def is_following(page, handle):
+    """Are we currently following the open profile?"""
+    return _action_button(page, handle, "unfollow") is not None
+
+
+def _follow_block_reason(page):
+    """Text of a rate-limit / restriction toast or dialog shown after a follow click."""
+    url = (page.url or "").lower()
+    if "/account/access" in url or "/i/flow/" in url:
+        return "challenge-page"
+    for sel in TOAST_CANDIDATES:
+        try:
+            for el in page.locator(sel).all()[:3]:
+                txt = (el.inner_text() or "").strip().lower()
+                if txt and any(p in txt for p in FOLLOW_BLOCK_TEXT_PATTERNS):
+                    return txt[:80]
+        except Exception:
+            continue
+    return None
 
 
 def follow_user(page, human, handle):
-    """Follow user (profile open): hover → click → verify unfollow button."""
+    """Follow the open profile and verify it. Returns (ok, status).
+
+    Statuses: followed | already-following | pending-request | no-follow-button |
+    follow-blocked | unconfirmed | timeout | network-error | error:...
+    A follow button is never clicked twice blindly: state is re-read first.
+    """
     for attempt in range(MAX_ATTEMPTS):
         try:
+            dismiss_all_modals(page, human)
             if is_following(page, handle):
                 return True, "already-following"
-            btn = selectors.first(page, follow_handle_candidates(handle))
-            if btn is None:
-                btn = selectors.first(page, FOLLOW_BTN_CANDIDATES)
+            if _action_button(page, handle, "pending") is not None:
+                return False, "pending-request"
+            btn = _action_button(page, handle, "follow")
             if btn is None:
                 return False, "no-follow-button"
             human.mouse_wander(page)
@@ -727,8 +816,16 @@ def follow_user(page, human, handle):
             human.pause(1.0, 2.6)
             btn.click()
             page.wait_for_timeout(2200)
-            if is_following(page, handle):
-                return True, "followed"
+            reason = _follow_block_reason(page)
+            if reason:
+                log.warning(f"Follow blocked by X after clicking @{handle}: {reason}")
+                return False, "follow-blocked"
+            for _ in range(3):
+                if is_following(page, handle):
+                    return True, "followed"
+                if _action_button(page, handle, "pending") is not None:
+                    return False, "pending-request"
+                page.wait_for_timeout(800)
         except Exception as e:
             if attempt == MAX_ATTEMPTS - 1:
                 return False, _err_status(e)
