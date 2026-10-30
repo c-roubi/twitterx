@@ -19,11 +19,12 @@ from .selectors import RETWEET_CONFIRM_CANDIDATES, TWEET_TEXT, first as selector
 from .comments import build_comment_for
 from .config import (
     SESSIONS_DIR, enabled_accounts, load_accounts, load_config,
-    load_seen, load_state, save_state,
+    load_seen, load_state, save_seen, save_state, seen_lock,
 )
 from .grow import crypto_activity
 from .humanizer import (
-    Human, is_rest_day, pick_daily_caps, pick_daily_follow_target,
+    Human, active_window, in_active_hours, is_rest_day, offset_minutes,
+    pick_daily_caps, pick_daily_follow_target, plan_day,
     random_sessions, randint, randfloat,
 )
 from .logger import get_logger
@@ -31,20 +32,20 @@ from .logger import get_logger
 log = get_logger("routine")
 
 
-def _today():
-    return datetime.now().strftime("%Y-%m-%d")
+def _today(cfg):
+    return plan_day(cfg)
 
 
 def ensure_daily_plan(acc_id, cfg):
     """Create random daily plan for account if not already created for today."""
     state = load_state(acc_id)
-    if state.get("date") == _today():
+    if state.get("date") == _today(cfg):
         return state
     rest_day = is_rest_day(cfg, state)
     caps = pick_daily_caps(cfg, state, rest_day=rest_day)
     caps["follows"] = pick_daily_follow_target(cfg, state, rest_day=rest_day)
     state = {
-        "date": _today(),
+        "date": _today(cfg),
         "caps": caps,
         "rest_day": rest_day,
         "done": {"likes": 0, "retweets": 0, "comments": 0, "follows": 0},
@@ -65,19 +66,10 @@ def ensure_daily_plan(acc_id, cfg):
 
 
 def _random_warmup_time(cfg):
-    """Random warmup time within activity hours (at least 30 minutes before end)."""
-    ah = cfg.get("behavior", {}).get("active_hours", ["08:00", "23:00"])
-    try:
-        h0, m0 = map(int, ah[0].split(":"))
-        h1, m1 = map(int, ah[1].split(":"))
-    except Exception:
-        h0, m0, h1, m1 = 8, 0, 23, 0
-    start_min = h0 * 60 + m0
-    end_min = h1 * 60 + m1
-    if end_min <= start_min + 30:
-        end_min = start_min + 60
-    w = randint(start_min, end_min - 30)
-    return f"{w // 60:02d}:{w % 60:02d}"
+    """Random warmup time inside the active window (leaves at least 30 min before it closes)."""
+    start, length = active_window(cfg)
+    t = (start + randint(0, max(0, length - 30))) % 1440
+    return f"{t // 60:02d}:{t % 60:02d}"
 
 
 def _can_do(state, action):
@@ -108,6 +100,22 @@ def _account_en_ratio(acc):
         return None
 
 
+def _begin_job(acc_id, state):
+    """Provisional cooldown: any early return/crash still leaves a pause before the next try."""
+    state["last_job_end"] = time.time()
+    state["next_session_after"] = time.time() + 600
+    save_state(acc_id, state)
+
+
+def _end_job(acc_id, state, cfg, gap_key="session_gap_min", default=(20, 45)):
+    """Human-like random rest before this account starts anything else."""
+    lo, hi = cfg.get("behavior", {}).get(gap_key, list(default))
+    state["last_job_end"] = time.time()
+    state["next_session_after"] = time.time() + randint(int(lo), int(hi)) * 60
+    state["last_session_end"] = datetime.now().isoformat(timespec="seconds")
+    state["needs_relogin"] = False
+
+
 def run_session(acc_id, cfg, accounts, dry_run=False):
     """One full session for account: browsing + random interactions + crypto activity + due manager tasks."""
     acc = dict(accounts[acc_id])
@@ -119,6 +127,7 @@ def run_session(acc_id, cfg, accounts, dry_run=False):
     if dry_run:
         _dry_run_session(acc_id, cfg, state)
         return
+    _begin_job(acc_id, state)
 
     pw, ctx, page, pw_owned = None, None, None, False
     try:
@@ -160,8 +169,7 @@ def run_session(acc_id, cfg, accounts, dry_run=False):
         _run_due_manager_tasks(page, acc_id, cfg, state, human, acc=acc)
 
         state["sessions_run"] += 1
-        state["last_session_end"] = datetime.now().isoformat(timespec="seconds")
-        state["needs_relogin"] = False
+        _end_job(acc_id, state, cfg)
         save_state(acc_id, state)
         log.info(f"{acc_id} | Session ended | likes {state['done']['likes']} / retweets {state['done']['retweets']} / comments {state['done']['comments']}")
     except Exception as e:
@@ -199,6 +207,7 @@ def run_warmup(acc_id, cfg, accounts, dry_run=False):
     if dry_run:
         _dry_run_session(acc_id, cfg, state)
         return {"acc_id": acc_id, "status": "dry-run"}
+    _begin_job(acc_id, state)
 
     pw, ctx, page, pw_owned = None, None, None, False
     try:
@@ -228,8 +237,7 @@ def run_warmup(acc_id, cfg, accounts, dry_run=False):
         human.mouse_wander(page)
         crypto_activity(page, acc_id, cfg, state, human, budget_s)
 
-        state["last_session_end"] = datetime.now().isoformat(timespec="seconds")
-        state["needs_relogin"] = False
+        _end_job(acc_id, state, cfg, default=(15, 30))
         state["warmup_done"] = True
         save_state(acc_id, state)
         log.info(f"{acc_id} | Warmup ended | likes {state['done']['likes']} / follows {state['done']['follows']}")
@@ -251,33 +259,16 @@ def run_warmup(acc_id, cfg, accounts, dry_run=False):
 
 
 def warmup_due(state, cfg=None):
-    """Is it warmup time for this account today?"""
+    """Is it warmup time for this account today? (local time, active window)"""
     if not state or not state.get("warmup_at"):
         return False
-    if state.get("warmup_done"):
+    if state.get("warmup_done") or state.get("needs_relogin"):
         return False
-    if state.get("needs_relogin"):
-        return False
+    cfg = cfg or load_config()
     try:
-        h, m = map(int, state["warmup_at"].split(":"))
+        return offset_minutes(cfg, state["warmup_at"]) <= offset_minutes(cfg)
     except Exception:
         return False
-    now = datetime.now()
-    return (now.hour, now.minute) >= (h, m)
-
-
-def check_due_warmups(cfg, accounts, dry_run=False):
-    """Run daily warmup for accounts due. Returns dict with results."""
-    results = {"warmups": 0}
-    if not cfg.get("warmup", {}).get("enabled", True):
-        return results
-    for acc_id in enabled_accounts(accounts):
-        state = ensure_daily_plan(acc_id, cfg)
-        if warmup_due(state, cfg):
-            res = run_warmup(acc_id, cfg, accounts, dry_run=dry_run)
-            results["warmups"] += 1
-            results.setdefault("details", []).append(res)
-    return results
 
 
 # FIX-MIX-V1-STATE
@@ -378,7 +369,6 @@ def _browse_and_interact(page, acc_id, cfg, state, human, session_secs, session_
     scrolls = 0
     liked_ids = set()
     retweeted_ids = set()
-    last_manager_check = session_start
     dismiss_compose_dialog(page, human)  # Clean up any editor/dialog from previous round
     while time.time() - session_start < session_secs:
         save_state(acc_id, state)  # Save progress on each turn
@@ -402,14 +392,6 @@ def _browse_and_interact(page, acc_id, cfg, state, human, session_secs, session_
 
         if scrolls % 3 == 0:
             human.pause(4.0, 12.0)  # pause for "reading"
-
-        # Every 5 minutes: check manager tweets from the session
-        if time.time() - last_manager_check >= 300:
-            try:
-                _check_and_engage_manager_tweets_during_session(page, acc_id, cfg, state, human)
-                last_manager_check = time.time()
-            except Exception as e:
-                log.warning(f"{acc_id} | Error checking manager during session: {e}")
 
         articles = page.locator(TWEET_ARTICLE).all()
         if not articles:
@@ -451,92 +433,6 @@ def _browse_and_interact(page, acc_id, cfg, state, human, session_secs, session_
             except Exception:
                 pass
         save_state(acc_id, state)
-
-
-def _check_and_engage_manager_tweets_during_session(page, acc_id, cfg, state, human):
-    """Check manager tweets during session and engage from same session."""
-    try:
-        tweets, _ = monitor.fetch_manager_tweets(cfg, {}, dry_run=False)
-        if not tweets:
-            return
-
-        seen = load_seen()
-        engaged_count = 0
-        for t in tweets:
-            tid = t["id"] if isinstance(t, dict) else t
-            if not seen.get(tid, {}).get("immediate_done"):
-                # تفاعل من الـ session الحالية
-                tweet_text = t.get("text", "") if isinstance(t, dict) else ""
-                _engage_on_manager_tweet_from_session(page, tid, tweet_text, acc_id, cfg, state, human)
-                seen[tid] = seen.get(tid, {})
-                seen[tid]["immediate_done"] = True
-                engaged_count += 1
-
-        if engaged_count > 0:
-            from .config import save_seen
-            save_seen(seen)
-            log.info(f"{acc_id} | ⚡ Engaged with {engaged_count} manager tweets during session")
-    except Exception:
-        pass
-
-
-def _engage_on_manager_tweet_from_session(page, tid, tweet_text, acc_id, cfg, state, human):
-    """Engage with manager tweet from current session (like + retweet + comment)."""
-    try:
-        url = f"https://x.com/i/web/status/{tid}"
-        ok, _ = resilience.goto_with_retry(page, url, cfg)
-        if not ok:
-            return
-
-        page.wait_for_timeout(2000)
-        actions.dismiss_all_modals(page, human)
-
-        # Like
-        try:
-            like_btn = page.locator(LIKE_BTN).first
-            if like_btn.count() > 0:
-                like_btn.click()
-                state["done"]["likes"] += 1
-                page.wait_for_timeout(800)
-        except Exception:
-            pass
-
-        # Retweet
-        try:
-            rt_btn = page.locator(RETWEET_BTN).first
-            if rt_btn.count() > 0:
-                rt_btn.click()
-                page.wait_for_timeout(800)
-                confirm = page.locator("button:has-text('Retweet')").first
-                if confirm.count() > 0:
-                    confirm.click()
-                    state["done"]["retweets"] += 1
-                page.wait_for_timeout(800)
-        except Exception:
-            pass
-
-        # Comment
-        try:
-            if _can_do(state, "comments"):
-                used = {c for t, e in load_seen().items() for c in e.get("comments_used", [])}
-                en_ratio = _account_en_ratio({"en_ratio": cfg.get("comments", {}).get("en_ratio", 0.9)})
-                text = build_comment_for(tweet_text, used_texts=used, cfg=cfg, en_ratio=en_ratio)
-                if text and comment_on_tweet(page, text, human):
-                    state["done"]["comments"] += 1
-                    if tid not in load_seen():
-                        load_seen()[tid] = {}
-                    load_seen()[tid]["comments_used"] = list(used | {text})
-        except Exception:
-            pass
-
-        # الرجوع للرئيسية
-        try:
-            page.goto("https://x.com/home", timeout=30000, wait_until="domcontentloaded")
-            page.wait_for_timeout(1000)
-        except Exception:
-            pass
-    except Exception:
-        pass
 
 
 # FIX-MIX-V1
@@ -651,16 +547,16 @@ def _comments_used_for(tid):
 
 
 def _record_comment(url, text, tid=None):
-    seen = load_seen()
-    key = None
-    for k, v in seen.items():
-        if v.get("url") == url or (tid and k == tid):
-            key = k
-            break
-    if key and key in seen:
-        seen[key].setdefault("comments_used", []).append(text)
-        from .config import save_seen
-        save_seen(seen)
+    with seen_lock:
+        seen = load_seen()
+        key = None
+        for k, v in seen.items():
+            if v.get("url") == url or (tid and k == tid):
+                key = k
+                break
+        if key and key in seen:
+            seen[key].setdefault("comments_used", []).append(text)
+            save_seen(seen)
 
 
 def _dry_run_session(acc_id, cfg, state):
@@ -684,147 +580,6 @@ def _dry_run_session(acc_id, cfg, state):
         print("  - No manager tasks due currently")
 
 
-def execute_single_account_immediate(acc_id, tid, tweet_text, cfg, accounts, delay):
-    """Execute immediate engagement for single account on tweet (direct without scheduling).
-
-    Opens account, waits for delay, then does like + retweet + comment on tweet.
-    """
-    from playwright.sync_api import sync_playwright
-
-    acc = dict(accounts[acc_id])
-    acc["id"] = acc_id
-
-    pw = sync_playwright().start()
-    try:
-        _, ctx, page, pw_owned = browser.launch_account(acc, cfg, pw=pw, owned_pw=False)
-        human = Human(page)
-
-        # Prepare page state: open Home first (same as regular routine)
-        log.info(f"{acc_id} | Preparing page by opening Home")
-        ok_home, _ = resilience.goto_with_retry(page, "https://x.com/home", cfg)
-        page.wait_for_timeout(2000)
-
-        # Dismiss any modals
-        actions.dismiss_all_modals(page, human)
-
-        # Wait briefly (random 10-45 seconds)
-        time.sleep(delay)
-
-        # فتح التغريدة
-        tweet_url = f"https://x.com/i/web/status/{tid}"
-        ok, status = open_tweet_with_retry(page, tweet_url, cfg)
-        if not ok:
-            log.warning(f"{acc_id} | Opening tweet {tid} failed: {status}")
-            return
-
-        human.pause(1.5, 3.0)
-
-        # Find the tweet on page
-        articles = page.locator(TWEET_ARTICLE).all()
-        if not articles:
-            log.warning(f"{acc_id} | Didn't find tweet {tid} on page")
-            return
-
-        article = articles[0]
-        state = load_state(acc_id)
-        seen = load_seen()
-
-        # تحديث seen لـ track التفاعلات (prevent duplicates)
-        if tid not in seen:
-            seen[tid] = {}
-        tweet_entry = seen[tid]
-        if "engaged_by" not in tweet_entry:
-            tweet_entry["engaged_by"] = {}
-
-        # Like
-        try:
-            # Check: did we engage with it before?
-            if tid in tweet_entry.get("engaged_by", {}).get(acc_id, {}).get("liked", False):
-                log.info(f"{acc_id} | ✓ Previous like on {tid} - skip")
-            elif article.locator(UNLIKE_BTN).first.count() == 0:
-                like_btn = article.locator(LIKE_BTN).first
-                if like_btn.count() > 0:
-                    like_btn.hover()
-                    human.pause(0.5, 1.5)
-                    like_btn.click()
-                    state["done"]["likes"] = state["done"].get("likes", 0) + 1
-
-                    # Save engagement
-                    if "engaged_by" not in tweet_entry:
-                        tweet_entry["engaged_by"] = {}
-                    if acc_id not in tweet_entry["engaged_by"]:
-                        tweet_entry["engaged_by"][acc_id] = {}
-                    tweet_entry["engaged_by"][acc_id]["liked"] = True
-
-                    log.info(f"{acc_id} | ❤️ Liked tweet {tid}")
-                    human.pause(1.0, 2.5)
-        except Exception as e:
-            log.warning(f"{acc_id} | Error in like: {e}")
-
-        # Retweet
-        try:
-            # Check: did we engage with it before?
-            if tweet_entry.get("engaged_by", {}).get(acc_id, {}).get("retweeted", False):
-                log.info(f"{acc_id} | ✓ Previous retweet on {tid} - skip")
-            elif article.locator(UNRETWEET_BTN).first.count() == 0:
-                rt_btn = article.locator(RETWEET_BTN).first
-                if rt_btn.count() > 0:
-                    rt_btn.hover()
-                    human.pause(0.5, 1.5)
-                    rt_btn.click()
-                    page.wait_for_timeout(1200)
-
-                    # Confirm retweet
-                    confirm = selectors_first(page, RETWEET_CONFIRM_CANDIDATES)
-                    if confirm:
-                        human.pause(0.3, 0.8)
-                        confirm.click()
-                        state["done"]["retweets"] = state["done"].get("retweets", 0) + 1
-
-                        # Save engagement
-                        if acc_id not in tweet_entry["engaged_by"]:
-                            tweet_entry["engaged_by"][acc_id] = {}
-                        tweet_entry["engaged_by"][acc_id]["retweeted"] = True
-
-                        log.info(f"{acc_id} | 🔄 Retweeted tweet {tid}")
-                    human.pause(1.0, 2.5)
-        except Exception as e:
-            log.warning(f"{acc_id} | Error in retweet: {e}")
-
-        # Save seen
-        save_seen(seen)
-
-        # Comment - use same function as Home
-        try:
-            comment = build_comment_for(tweet_text, cfg=cfg)
-            if comment:
-                log.info(f"{acc_id} | Generated comment: {comment[:50]}")
-                ok, status = comment_on_tweet(page, comment, human)
-                if ok:
-                    state["done"]["comments"] = state["done"].get("comments", 0) + 1
-                    log.info(f"{acc_id} | 💬 Commented on tweet {tid} ✓")
-                else:
-                    log.warning(f"{acc_id} | comment_on_tweet failed: {status}")
-            else:
-                log.warning(f"{acc_id} | No comment generated")
-        except Exception as e:
-            log.warning(f"{acc_id} | Error in comment: {e}")
-
-        save_state(acc_id, state)
-
-    except Exception as e:
-        log.error(f"{acc_id} | Error in immediate engagement: {e}")
-    finally:
-        try:
-            browser.close_ctx(pw, ctx, pw_owned)
-        except Exception:
-            pass
-        try:
-            pw.stop()
-        except Exception:
-            pass
-
-
 _CRASH_COOLDOWN_S = 300  # Safety cooldown after session crash: don't retry during it
 
 
@@ -837,83 +592,78 @@ def _is_fatal_session_error(msg):
     ))
 
 
-def get_active_accounts():
-    """Get list of currently active accounts (in session or queue)."""
-    state_file = os.path.join(SESSIONS_DIR, "_parallel_queue.json")
-    try:
-        with open(state_file, "r") as f:
-            parallel_state = json.load(f)
-            return parallel_state.get("active", []) + parallel_state.get("queue", [])
-    except (FileNotFoundError, json.JSONDecodeError):
+def _tasks_runnable(state, tasks):
+    """Manager tasks that can still make progress today (caps not exhausted, not a rest day)."""
+    if state.get("rest_day"):
+        return False
+    return any(_can_do(state, _cap_key(a)) for t in tasks for a in t["remaining"])
+
+
+def due_jobs(cfg, accounts, busy=()):
+    """Work due right now as [(acc_id, kind, reason)], most urgent first.
+
+    kind is "session" or "warmup". Nothing is due outside the active hours
+    (configured timezone). Each account rests between jobs, a missed planned
+    session is skipped instead of replayed in a burst, and busy accounts are never returned.
+    """
+    if not in_active_hours(cfg):
         return []
+    now = time.time()
+    cur = offset_minutes(cfg)
+    manager_jobs, planned, warmups = [], [], []
+    for acc_id in enabled_accounts(accounts):
+        if acc_id in busy:
+            continue
+        state = ensure_daily_plan(acc_id, cfg)
+        if state.get("needs_relogin"):
+            continue
+        crash_at = float(state.get("last_session_crash") or 0)
+        if crash_at and now - crash_at < _CRASH_COOLDOWN_S:
+            continue
+        since_last = now - float(state.get("last_job_end") or 0)
+
+        tasks = monitor.due_tasks_for(acc_id)
+        if tasks and since_last >= 300 and _tasks_runnable(state, tasks):
+            manager_jobs.append((acc_id, "session", "manager-tweet tasks"))
+            continue
+        if now < float(state.get("next_session_after") or 0):
+            continue
+
+        sessions = state.get("sessions", [])
+        offs = [offset_minutes(cfg, x["start"]) for x in sessions]
+        idx = int(state.get("sessions_run", 0))
+        moved = False
+        while idx + 1 < len(sessions) and offs[idx + 1] <= cur:
+            idx += 1  # skip missed sessions, run only the latest passed one
+            moved = True
+        if moved:
+            state["sessions_run"] = idx
+            save_state(acc_id, state)
+        if idx < len(sessions) and offs[idx] <= cur:
+            planned.append((acc_id, "session", "planned session"))
+        elif cfg.get("warmup", {}).get("enabled", True) and warmup_due(state, cfg):
+            warmups.append((acc_id, "warmup", "daily warmup"))
+    random.shuffle(planned)
+    random.shuffle(warmups)
+    return manager_jobs + planned + warmups
 
 
 def check_due_sessions(cfg, accounts, dry_run=False):
-    """Run due account sessions (only 2 in parallel) + manager tasks.
-
-    optimization: run max 2 accounts at same time to save resources.
-    Other accounts wait in queue.
-    """
+    """Run every due session one after another (used by `monitor --once`)."""
     results = {"sessions": 0, "tasks": 0}
-    state_file = os.path.join(SESSIONS_DIR, "_parallel_queue.json")
-
-    # Load queue of running accounts
-    try:
-        with open(state_file, "r") as f:
-            parallel_state = json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        parallel_state = {"active": [], "queue": []}
-
-    now = time.time()
-    # Clean up finished accounts from active list
-    parallel_state["active"] = [
-        a for a in parallel_state.get("active", [])
-        if (now - a.get("started_at", 0)) < 1800  # 30 minute timeout
-    ]
-
-    # Add due accounts to queue
-    for acc_id in enabled_accounts(accounts):
-        if acc_id in parallel_state["active"] or acc_id in parallel_state.get("queue", []):
-            continue  # Already in queue or running
-
-        state = ensure_daily_plan(acc_id, cfg)
-        crash_at = float(state.get("last_session_crash") or 0)
-        if crash_at and time.time() - crash_at < _CRASH_COOLDOWN_S:
-            continue
-
-        due_tasks = monitor.due_tasks_for(acc_id)
-        session_due = False
-        for s in state["sessions"]:
-            h, m = map(int, s["start"].split(":"))
-            now_dt = datetime.now()
-            if (now_dt.hour, now_dt.minute) >= (h, m) and state["sessions_run"] < len(state["sessions"]):
-                session_due = True
-                break
-
-        if session_due or due_tasks:
-            parallel_state["queue"].append(acc_id)
-
-    # Run only 2 accounts from queue
-    while len(parallel_state["active"]) < 2 and parallel_state.get("queue"):
-        acc_id = parallel_state["queue"].pop(0)
-        if not dry_run:
-            log.info(f"{acc_id} | Starting session (active accounts: {len(parallel_state['active']) + 1}/2)")
-            parallel_state["active"].append({"id": acc_id, "started_at": now})
-            try:
-                run_session(acc_id, cfg, accounts, dry_run=False)
-            except Exception as e:
-                log.error(f"{acc_id} | Session error: {e}")
+    for acc_id, kind, _ in due_jobs(cfg, accounts):
+        if kind == "session":
+            run_session(acc_id, cfg, accounts, dry_run=dry_run)
             results["sessions"] += 1
-        else:
-            run_session(acc_id, cfg, accounts, dry_run=True)
-            results["sessions"] += 1
+    return results
 
-    # Save queue
-    try:
-        os.makedirs(SESSIONS_DIR, exist_ok=True)
-        with open(state_file, "w") as f:
-            json.dump(parallel_state, f, indent=2)
-    except Exception:
-        pass
 
+def check_due_warmups(cfg, accounts, dry_run=False):
+    """Run every due warmup one after another (used by `monitor --once`)."""
+    results = {"warmups": 0}
+    for acc_id, kind, _ in due_jobs(cfg, accounts):
+        if kind == "warmup":
+            res = run_warmup(acc_id, cfg, accounts, dry_run=dry_run)
+            results["warmups"] += 1
+            results.setdefault("details", []).append(res)
     return results

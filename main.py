@@ -28,6 +28,7 @@ from app.config import (
 )
 from app.logger import get_logger
 from app import monitor, routine
+from app.runner import Runner
 
 log = get_logger("main")
 
@@ -99,12 +100,8 @@ def cmd_check(args):
         snippet = (t.get("text", "") if isinstance(t, dict) else "").replace("\n", " ")[:70]
         print(f"  - {tid}  [{known}]" + (f"  | {snippet}" if snippet else ""))
     if tweets and not args.no_schedule:
-        # تفاعل فوري مباشر على التغريدات الجديدة (بدون جدولة)
-        for t in tweets:
-            tid = t["id"] if isinstance(t, dict) else t
-            text = t.get("text", "") if isinstance(t, dict) else ""
-            if not seen.get(tid, {}).get("immediate_done"):
-                monitor.execute_immediate_engagement(tid, text, cfg, accounts)
+        res = monitor.process_manager_tweets(tweets, cfg, accounts)
+        print(f"Scheduled: {res['scheduled']} | already known: {res['known']} | too old: {res['stale']}")
 
 
 # FIX-WEDGE-V1: Fatal Playwright error patterns that break the entire monitor process.
@@ -182,8 +179,8 @@ def cmd_monitor(args):
 
                     def engage():
                         try:
-                            monitor.execute_immediate_engagement(tid, text, cfg, accounts)
-                            log.info(f"✅ Webhook engagement completed")
+                            monitor.process_manager_tweets([{"id": tid, "text": text}], cfg, accounts)
+                            log.info("✅ Webhook tweet scheduled")
                         except Exception as e:
                             log.error(f"❌ Engagement error: {e}")
 
@@ -199,8 +196,8 @@ def cmd_monitor(args):
             def health():
                 return {'status': 'running', 'webhooks': len(webhook_log)}, 200
 
-            log.info("🚀 Webhook Server running on http://0.0.0.0:8000")
-            app.run(host='0.0.0.0', port=8000, debug=False, use_reloader=False, threaded=True)
+            log.info("🚀 Webhook Server running on http://127.0.0.1:8000")
+            app.run(host='127.0.0.1', port=8000, debug=False, use_reloader=False, threaded=True)
         except Exception as e:
             log.error(f"❌ Webhook Server error: {e}")
 
@@ -220,124 +217,34 @@ def cmd_monitor(args):
         print(f"✓ Cycle executed: {res['sessions']} sessions | {res['warmups']} warmups | {res['scheduled']} tweets scheduled")
         return
 
-    print("🚀 Starting continuous operation (Ctrl+C to stop) - full automation for all accounts")
+    print("🚀 Continuous operation (Ctrl+C to stop)")
+    print("   - manager check runs on its own schedule, independent of sessions")
+    print("   - sessions follow each account's daily plan inside the active hours (not all at once)")
     if args.dry_run:
         print("   DRY-RUN mode: no browser will be opened and no engagement will be executed")
+    try:
+        Runner(dry_run=args.dry_run, on_fatal=_handle_fatal).run()
+    except KeyboardInterrupt:
+        print("\n⏹ Stopping")
 
-    next_check_at = 0
-    while True:
-        try:
-            now = time.time()
 
-            # 1) Manager tweet check (smart exponential backoff)
-            if now >= next_check_at:
-                tweets, status = monitor.fetch_manager_tweets(cfg, accounts, dry_run=args.dry_run)
-                had_tweets = len(tweets) > 0
-                log.info(f"Manager check: {status} | new: {len(tweets)}")
-
-                if had_tweets:
-                    seen = load_seen()
-                    for t in tweets:
-                        tid = t["id"] if isinstance(t, dict) else t
-                        if not seen.get(tid, {}).get("immediate_done"):
-                            monitor.execute_immediate_engagement(tid, t.get("text", "") if isinstance(t, dict) else "", cfg, accounts)
-
-                next_check_at = now + _next_interval(cfg, last_had_tweets=had_tweets)
-                interval_min = int(_next_interval(cfg, last_had_tweets=had_tweets) / 60)
-                log.info(f"⏱️ Next manager check in {interval_min} minute(s)")
-
-            # 2) Execute daily sessions for ALL enabled accounts (comprehensive mode)
-            res = routine.check_due_sessions(cfg, accounts, dry_run=args.dry_run)
-            if res["sessions"]:
-                log.info(f"Sessions executed: {res['sessions']}")
-
-            # 3) Execute warmups for ALL enabled accounts (comprehensive mode)
-            wres = routine.check_due_warmups(cfg, accounts, dry_run=args.dry_run)
-            if wres["warmups"]:
-                log.info(f"Warmups executed: {wres['warmups']}")
-
-            # 4) For comprehensive mode: run immediate daily sessions every 2 hours for active accounts
-            #    This ensures continuous engagement across all accounts
-            last_immediate = getattr(cmd_monitor, '_last_immediate_session', 0)
-            if now - last_immediate >= 7200:  # Every 2 hours
-                enabled = [aid for aid, acc in accounts.items() if acc.get("enabled", True)]
-                if enabled and not args.dry_run:
-                    log.info(f"Running immediate daily sessions for {len(enabled)} account(s)")
-                    # Run sessions sequentially (max 2 at once via config)
-                    for acc_id in enabled[:2]:
-                        try:
-                            routine.run_session(acc_id, cfg, accounts, dry_run=False)
-                        except Exception as e:
-                            log.warning(f"Immediate session error for {acc_id}: {e}")
-                    cmd_monitor._last_immediate_session = now
-
-        except KeyboardInterrupt:
-            print("\n⏹ Stopping")
-            break
-        except Exception as e:
-            log.error(f"Monitor cycle error: {e}")
-            if _is_deadlock_error(e):
-                _self_restart(str(e)[:200])
-
-        time.sleep(60)
+def _handle_fatal(err):
+    if _is_deadlock_error(err):
+        _self_restart(str(err)[:200])
 
 
 def _run_full_pass(cfg, accounts, dry_run=False):
     """One complete cycle: manager check + schedule new + due sessions + due warmups."""
     res = {"sessions": 0, "warmups": 0, "scheduled": 0}
     tweets, status = monitor.fetch_manager_tweets(cfg, accounts, dry_run=dry_run)
-    log.info(f"Manager check: {status} | new: {len(tweets)}")
-    if tweets:
-        seen = load_seen()
-        # Direct immediate engagement (no scheduling)
-        for t in tweets:
-            tid = t["id"] if isinstance(t, dict) else t
-            if not seen.get(tid, {}).get("immediate_done"):
-                monitor.execute_immediate_engagement(tid, t.get("text", "") if isinstance(t, dict) else "", cfg, accounts)
-                res["scheduled"] += 1
+    if tweets and not dry_run:
+        res["scheduled"] = monitor.process_manager_tweets(tweets, cfg, accounts)["scheduled"]
+    log.info(f"Manager check: {status} | scraped {len(tweets)} | new {res['scheduled']}")
     sres = routine.check_due_sessions(cfg, accounts, dry_run=dry_run)
     wres = routine.check_due_warmups(cfg, accounts, dry_run=dry_run)
     res["sessions"] = sres["sessions"]
     res["warmups"] = wres["warmups"]
     return res
-
-
-def _next_interval(cfg, last_had_tweets=False):
-    """Smart exponential backoff: reduce polling when there are no new tweets."""
-    state_file = os.path.join(os.path.dirname(__file__), "data", "monitor_state.json")
-    try:
-        with open(state_file, "r") as f:
-            state = json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        state = {"checks_without_tweets": 0}
-
-    if last_had_tweets:
-        state["checks_without_tweets"] = 0  # reset when new tweets arrive
-    else:
-        state["checks_without_tweets"] = state.get("checks_without_tweets", 0) + 1
-
-    # Save state
-    try:
-        os.makedirs(os.path.dirname(state_file), exist_ok=True)
-        with open(state_file, "w") as f:
-            json.dump(state, f)
-    except Exception:
-        pass
-
-    # Use config interval as base (60-120 minutes)
-    # Without exponential backoff (webhook = primary)
-    lo, hi = cfg["monitor"]["interval_min"]
-
-    # If last check had tweets → use base interval
-    if state["checks_without_tweets"] == 0:
-        return (lo + (hi - lo) * __import__("random").random()) * 60
-
-    # If no tweets → increase interval (but not more than 120 minutes)
-    multiplier = min(2, state["checks_without_tweets"] * 0.5)  # max 2x
-    base_minutes = (lo + hi) / 2
-    final_minutes = min(120, base_minutes * multiplier)
-
-    return final_minutes * 60
 
 
 def cmd_daily(args):

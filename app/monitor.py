@@ -8,12 +8,38 @@ from datetime import datetime
 
 from . import browser, humanizer, resilience
 from .actions import scrape_profile_tweets
-from .config import load_accounts, load_seen, save_seen
+from .config import load_accounts, load_seen, load_state, save_seen, seen_lock
+from .runtime import account_lock
 from .logger import get_logger
 
 log = get_logger("monitor")
 
 TWEET_URL = "https://x.com/i/web/status/{tid}"
+
+
+def _locked(fn):
+    """Serialize read-modify-write cycles on seen.json across threads."""
+    import functools
+
+    @functools.wraps(fn)
+    def wrapper(*a, **k):
+        with seen_lock:
+            return fn(*a, **k)
+    return wrapper
+
+
+def _pick_free_account(acc_list, last_idx):
+    """Next account after last_idx that is idle and logged in (None if none)."""
+    n = len(acc_list)
+    for step in range(1, n + 1):
+        idx = (last_idx + step) % n
+        acc_id = acc_list[idx]
+        if account_lock(acc_id).locked():
+            continue
+        if load_state(acc_id).get("needs_relogin"):
+            continue
+        return idx
+    return None
 
 
 def fetch_manager_tweets(cfg, accounts, dry_run=False):
@@ -33,7 +59,8 @@ def fetch_manager_tweets(cfg, accounts, dry_run=False):
         log.warning("No enabled accounts - using guest context")
         return _fetch_guest(cfg)
 
-    # Rotation: استخدم حساب مختلف كل مرة
+    # Rotation over accounts that are logged in and not busy with a session
+    # (a browser profile cannot be opened twice).
     state_file = os.path.join(os.path.dirname(__file__), "..", "data", "monitor_state.json")
     try:
         with open(state_file, "r") as f:
@@ -41,11 +68,12 @@ def fetch_manager_tweets(cfg, accounts, dry_run=False):
     except (FileNotFoundError, json.JSONDecodeError):
         monitor_state = {"last_account_idx": -1}
 
-    last_idx = monitor_state.get("last_account_idx", -1)
-    next_idx = (last_idx + 1) % len(acc_list)
+    next_idx = _pick_free_account(acc_list, monitor_state.get("last_account_idx", -1))
+    if next_idx is None:
+        log.info("Manager check postponed: all accounts are busy or need re-login")
+        return [], "accounts-busy"
     acc_id = acc_list[next_idx]
 
-    # Save the next index
     monitor_state["last_account_idx"] = next_idx
     try:
         os.makedirs(os.path.dirname(state_file), exist_ok=True)
@@ -67,7 +95,10 @@ def fetch_manager_tweets(cfg, accounts, dry_run=False):
 
         # If failed: try another account
         if attempt < retries:
-            next_idx = (next_idx + 1) % len(acc_list)
+            nxt = _pick_free_account(acc_list, next_idx)
+            if nxt is None:
+                break
+            next_idx = nxt
             acc_id = acc_list[next_idx]
             d = resilience.backoff_delay(attempt, base)
             log.warning(
@@ -111,6 +142,9 @@ def _fetch_with_account(cfg, accounts, acc_id):
 
     acc = dict(accounts[acc_id])
     acc["id"] = acc_id
+    lock = account_lock(acc_id)
+    if not lock.acquire(blocking=False):
+        return [], "account-busy"
     pw = sync_playwright().start()
     try:
         _, ctx, page, pw_owned = browser.launch_account(acc, cfg, pw=pw, owned_pw=False)
@@ -134,6 +168,7 @@ def _fetch_with_account(cfg, accounts, acc_id):
             pw.stop()
         except Exception:
             pass
+        lock.release()
 
 
 def _detect_consecutive_tweets(seen):
@@ -169,46 +204,55 @@ def _detect_consecutive_tweets(seen):
     return None, None
 
 
-def execute_immediate_engagement(tid, text="", cfg=None, accounts=None):
-    """Immediate direct engagement on tweet (non-blocking, queue-based).
+_TWITTER_EPOCH_MS = 1288834974657
 
-    Add tweet to queue with high priority.
-    Each account engages from its own session (non-blocking).
+
+def tweet_age_hours(tid):
+    """Age of a tweet in hours, derived from its snowflake id (None if not numeric)."""
+    try:
+        posted_ms = (int(tid) >> 22) + _TWITTER_EPOCH_MS
+    except (TypeError, ValueError):
+        return None
+    return max(0.0, (time.time() * 1000 - posted_ms) / 3_600_000)
+
+
+def process_manager_tweets(tweets, cfg, accounts):
+    """Schedule engagement for genuinely new, recent manager tweets.
+
+    Already-known tweets are ignored; tweets older than monitor.max_tweet_age_hours
+    (pinned / old ones seen on first run) are recorded as stale and never engaged.
+    Engagement itself is spread over time by schedule_for_tweet (human-like).
+    Returns {"scheduled": n, "stale": n, "known": n}.
     """
-    seen = load_seen()
-    if tid in seen and seen[tid].get("immediate_done"):
-        return None
-
-    enabled = [
-        aid for aid, a in accounts.items()
-        if a.get("enabled", True)
-    ]
-    if not enabled:
-        log.warning("No enabled accounts for immediate engagement")
-        return None
-
-    lo, hi = cfg["engagement"]["accounts_per_tweet"]
-    lo = min(lo, len(enabled))
-    n = random.randint(lo, min(hi, len(enabled)))
-    chosen = random.sample(enabled, n)
-
-    log.info(f"⚡ Immediate engagement for tweet {tid}: added to queue ({len(chosen)} accounts)")
-
-    # Save tweet as immediately engaged
-    seen[tid] = {
-        "tweet_id": tid,
-        "url": TWEET_URL.format(tid=tid),
-        "text": (text or "")[:2000],
-        "detected_at": datetime.now().isoformat(timespec="seconds"),
-        "immediate_done": True,
-        "mode": "immediate",
-        "accounts": chosen,
-        "priority": True,  # High priority flag
-    }
-    save_seen(seen)
-    return seen[tid]
+    max_age = float(cfg.get("monitor", {}).get("max_tweet_age_hours", 3))
+    out = {"scheduled": 0, "stale": 0, "known": 0}
+    fresh = []
+    with seen_lock:
+        seen = load_seen()
+        changed = False
+        for t in tweets or []:
+            tid = str(t["id"] if isinstance(t, dict) else t)
+            text = t.get("text", "") if isinstance(t, dict) else ""
+            if tid in seen:
+                out["known"] += 1
+                continue
+            age = tweet_age_hours(tid)
+            if age is not None and age > max_age:
+                seen[tid] = {"tweet_id": tid, "stale": True,
+                             "detected_at": datetime.now().isoformat(timespec="seconds")}
+                out["stale"] += 1
+                changed = True
+                continue
+            fresh.append((tid, text))
+        if changed:
+            save_seen(seen)
+    for tid, text in reversed(fresh):  # profile order is newest first; engage oldest first
+        if schedule_for_tweet(tid, text, cfg, accounts):
+            out["scheduled"] += 1
+    return out
 
 
+@_locked
 def schedule_for_tweet(tid, text="", cfg=None, accounts=None, is_priority=False):
     """Select random account group and distribute tasks with graduated schedule.
 
@@ -318,6 +362,7 @@ def due_tasks_for(acc_id, seen=None):
     return tasks
 
 
+@_locked
 def mark_done(tid, acc_id, action):
     seen = load_seen()
     entry = seen.get(tid)
@@ -334,6 +379,7 @@ def mark_done(tid, acc_id, action):
     save_seen(seen)
 
 
+@_locked
 def mark_tweet_deleted(tid):
     """Mark tweet as deleted by manager and remove from schedule permanently."""
     seen = load_seen()
@@ -346,6 +392,7 @@ def mark_tweet_deleted(tid):
     log.info(f"Tweet {tid} deleted by manager - removed from task schedule")
 
 
+@_locked
 def record_tweet_open_attempt(tid):
     """Increment tweet open attempt counter (for troubleshooting)."""
     seen = load_seen()
@@ -356,6 +403,7 @@ def record_tweet_open_attempt(tid):
     save_seen(seen)
 
 
+@_locked
 def record_action_attempt(tid, acc_id, action):
     """Record attempt to execute action on manager tweet for specific account."""
     seen = load_seen()
@@ -369,6 +417,7 @@ def record_action_attempt(tid, acc_id, action):
     save_seen(seen)
 
 
+@_locked
 def give_up_action(tid, acc_id, action):
     """Final abandonment of action after exceeding retry limit (skip and continue)."""
     seen = load_seen()

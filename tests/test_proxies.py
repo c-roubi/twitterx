@@ -9,7 +9,14 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app import proxies
+from datetime import datetime
+
+import pytz
+
+from app import humanizer, proxies
+
+# Fixed clock: 12:00 Gaza time (window 08:00-01:00 => offset 240 min).
+humanizer.get_local_time = lambda cfg: pytz.timezone("Asia/Gaza").localize(datetime(2026, 10, 30, 12, 0))
 from app.config import load_config, save_state, state_path
 from app.routine import (
     _random_warmup_time, check_due_warmups, ensure_daily_plan, warmup_due,
@@ -130,30 +137,25 @@ def test_guest_proxy():
 def test_warmup_time():
     print("6) وقت الإحماء العشوائي (_random_warmup_time):")
     cfg = load_config()
-    for _ in range(30):
+    _, length = humanizer.active_window(cfg)
+    for _ in range(60):
         t = _random_warmup_time(cfg)
-        h, m = map(int, t.split(":"))
-        total = h * 60 + m
-        ok = 8 * 60 <= total <= 22 * 60 + 30
-        if not ok:
+        off = humanizer.offset_minutes(cfg, t)
+        if not (0 <= off <= length - 30):
             check(f"الوقت {t} ضمن ساعات النشاط", False)
             return
-    check("30 عينة ضمن ساعات النشاط [08:00-22:30]", True)
+    check("60 عينة ضمن نافذة النشاط (قبل نهايتها بـ 30 دقيقة)", True)
 
 
 def test_warmup_due():
     print("7) استحقاق الإحماء (warmup_due):")
     check("لا موعد -> غير مستحق", not warmup_due({}, None))
-    check("تم سابقاً -> غير مستحق", not warmup_due({"warmup_at": "00:00", "warmup_done": True}, None))
-    check("وقت في الماضي -> مستحق", warmup_due({"warmup_at": "00:00", "warmup_done": False, "needs_relogin": False}, None))
+    check("تم سابقاً -> غير مستحق", not warmup_due({"warmup_at": "08:00", "warmup_done": True}, None))
+    check("وقت في الماضي -> مستحق", warmup_due({"warmup_at": "08:00", "warmup_done": False, "needs_relogin": False}, None))
     check("يحتاج إعادة دخول -> غير مستحق",
-          not warmup_due({"warmup_at": "00:00", "warmup_done": False, "needs_relogin": True}, None))
+          not warmup_due({"warmup_at": "08:00", "warmup_done": False, "needs_relogin": True}, None))
     check("صيغة خاطئة -> غير مستحق", not warmup_due({"warmup_at": "xyz", "warmup_done": False}, None))
-    from datetime import datetime
-    now = datetime.now()
-    mins = now.hour * 60 + now.minute
-    future = min(mins + 30, 23 * 60 + 59)
-    later = f"{future // 60:02d}:{future % 60:02d}"
+    later = "15:30"  # after the fixed 12:00 clock
     check("وقت مستقبلي -> غير مستحق",
           not warmup_due({"warmup_at": later, "warmup_done": False, "needs_relogin": False}, None))
 
@@ -183,8 +185,9 @@ def test_check_due_warmups():
     try:
         cfg = load_config()
         state = ensure_daily_plan(aid, cfg)
-        state["warmup_at"] = "00:00"
+        state["warmup_at"] = "08:00"
         state["warmup_done"] = False
+        state["sessions"] = []  # no planned session competes with the warmup
         save_state(aid, state)
         accounts = {aid: {"enabled": True, "handle": "test"}}
         res = check_due_warmups(cfg, accounts, dry_run=True)

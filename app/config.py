@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """إدارة ملفات الإعدادات والحسابات (مع حماية البيانات بالكتابة الذرية)."""
 import json
+import threading
 import os
 import sys
 
@@ -22,7 +23,9 @@ DEFAULT_CONFIG = {
     "monitor": {
         "method": "guest",
         "interval_min": [6, 14],
-        "use_account": None
+        "use_account": None,
+        "max_parallel": 2,
+        "max_tweet_age_hours": 3
     },
     "resilience": {
         "network_retries": 2,
@@ -50,7 +53,9 @@ DEFAULT_CONFIG = {
         }
     },
     "behavior": {
+        "timezone": "Asia/Gaza",
         "active_hours": ["08:00", "23:00"],
+        "session_gap_min": [20, 45],
         "max_likes_per_day": [25, 45],
         "max_retweets_per_day": [2, 6],
         "max_comments_per_day": [1, 4],
@@ -168,7 +173,7 @@ def _atomic_save(data, path):
     يحفظ البيانات في ملف مؤقت أولاً، ثم يستبدل الملف الأصلي فجأة.
     بهذه الطريقة لو انقطعت الكهرباء أو تم إيقاف السكربت، لا يتلف الملف الأصلي.
     """
-    tmp_path = path + ".tmp"
+    tmp_path = f"{path}.{threading.get_ident()}.tmp"
     try:
         with open(tmp_path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
@@ -221,6 +226,10 @@ def load_comments():
         return lines or DEFAULT_COMMENTS.strip().splitlines()
     except Exception:
         return DEFAULT_COMMENTS.strip().splitlines()
+
+
+# Reentrant lock for read-modify-write cycles on seen.json (watcher + session threads).
+seen_lock = threading.RLock()
 
 
 def load_seen():

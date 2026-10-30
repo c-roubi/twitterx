@@ -34,6 +34,42 @@ def get_local_time(cfg):
         return datetime.now()
 
 
+def _hm_to_min(hhmm):
+    h, m = map(int, str(hhmm).split(":"))
+    return h * 60 + m
+
+
+def active_window(cfg):
+    """(start_minute_of_day, length_minutes) of the daily active window (may cross midnight)."""
+    ah = cfg.get("behavior", {}).get("active_hours", ["08:00", "23:00"])
+    try:
+        start, end = _hm_to_min(ah[0]), _hm_to_min(ah[1])
+    except Exception:
+        start, end = 8 * 60, 23 * 60
+    return start, ((end - start) % 1440) or 1440
+
+
+def offset_minutes(cfg, hhmm=None):
+    """Minutes since the active window opened (configured timezone). hhmm=None means now."""
+    start, _ = active_window(cfg)
+    if hhmm is None:
+        n = get_local_time(cfg)
+        cur = n.hour * 60 + n.minute + n.second / 60.0
+    else:
+        cur = _hm_to_min(hhmm)
+    return (cur - start) % 1440
+
+
+def in_active_hours(cfg):
+    return offset_minutes(cfg) <= active_window(cfg)[1]
+
+
+def plan_day(cfg):
+    """Date key of the current plan: the day rolls over when the active window opens, not at midnight."""
+    start, _ = active_window(cfg)
+    return (get_local_time(cfg) - timedelta(minutes=start)).strftime("%Y-%m-%d")
+
+
 class Human:
     """أداة تأخيرات بشرية بسيطة (يمكن تمرير page لاستخدام wait_for_timeout)."""
 
@@ -179,29 +215,20 @@ def pick_daily_caps(cfg, state=None, rest_day=False):
 
 
 def random_sessions(cfg):
-    """Generate daily sessions: random start times within active hours (using configured timezone)."""
+    """Daily sessions spread across the active window: one random start inside each equal slice."""
     b = cfg["behavior"]
-    start_h, start_m = map(int, b["active_hours"][0].split(":"))
-    end_h, end_m = map(int, b["active_hours"][1].split(":"))
-
-    # Use local time (Gaza timezone by default)
-    now = get_local_time(cfg)
-    day_start = now.replace(hour=start_h, minute=start_m, second=0, microsecond=0)
-    day_end = now.replace(hour=end_h, minute=end_m, second=0, microsecond=0)
-
-    # Handle late-night sessions (e.g., 08:00 to 01:00 next day)
-    if day_end <= day_start:
-        day_end = day_end + timedelta(days=1)
-
-    n = randint(*b["sessions_per_day"])
+    start, length = active_window(cfg)
+    n = max(1, randint(*b["sessions_per_day"]))
+    slice_len = length / n
     sessions = []
-    for _ in range(n):
-        span = (day_end - day_start).total_seconds()
-        start = day_start + timedelta(seconds=randint(0, int(span)))
+    for i in range(n):
         minutes = randint(*b["session_minutes"])
-        sessions.append({"start": start.strftime("%H:%M"), "minutes": minutes})
-    
-    sessions.sort(key=lambda s: s["start"])
+        lo = int(i * slice_len)
+        hi = max(lo, int((i + 1) * slice_len) - minutes)
+        off = min(randint(lo, hi), max(0, length - minutes))
+        t = (start + off) % 1440
+        sessions.append({"start": f"{t // 60:02d}:{t % 60:02d}", "minutes": minutes})
+    sessions.sort(key=lambda x: offset_minutes(cfg, x["start"]))
     return sessions
 
 
