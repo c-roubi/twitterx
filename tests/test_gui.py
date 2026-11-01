@@ -15,7 +15,8 @@ _TMP = tempfile.mkdtemp(prefix="se_test_")
 os.environ["SMARTENGAGE_DATA"] = _TMP
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app import server, telegram_bot  # noqa: E402
+from app import ai_comments as _ai_mod, server, telegram_bot  # noqa: E402
+_ai_mod.DISCOVERY_ENABLED = False  # الاختبارات بلا شبكة؛ اختبارات الاكتشاف تفعّله صراحة
 from app.config import load_config  # noqa: E402
 
 
@@ -467,6 +468,9 @@ class AITests(unittest.TestCase):
         from app import ai_comments
         self.ai = ai_comments
         ai_comments._last_call = 0.0
+        ai_comments.reset_cache()
+        if os.path.exists(ai_comments.STATE_PATH):
+            os.remove(ai_comments.STATE_PATH)
         self.cfg = {"provider": "gemini", "api_key": "KEY", "model": "", "min_interval_s": 30}
 
     def gem(self, text):
@@ -483,7 +487,7 @@ class AITests(unittest.TestCase):
         self.assertEqual(out, "Nice $BTC breakout!")
         self.assertNotIn("KEY", seen["url"])  # المفتاح في الترويسة لا في الرابط
         self.assertEqual(seen["headers"]["x-goog-api-key"], "KEY")
-        self.assertIn("gemini-2.5-flash-lite", seen["url"])  # الأسرع أولاً
+        self.assertIn(self.ai.GEMINI_FALLBACKS[0], seen["url"])  # الأسرع أولاً
 
     def test_model_404_falls_back(self):
         from unittest import mock
@@ -504,7 +508,96 @@ class AITests(unittest.TestCase):
             urls.append(url); return self.gem("fine")
         with mock.patch.object(self.ai, "_call_api", side_effect=fake):
             self.assertEqual(self.ai.generate_ai_comment("x", dict(self.cfg, model="gemini-1.5-flash")), "fine")
-        self.assertIn("gemini-2.5-flash-lite", urls[0])
+        self.assertIn(self.ai.GEMINI_FALLBACKS[0], urls[0])
+
+    # ---- اكتشاف النماذج (حالة المستخدم: 2.5 تُرجع 404 للمستخدمين الجدد) ----
+    LISTING = {"models": [
+        {"name": "models/gemini-2.5-flash", "supportedGenerationMethods": ["generateContent"]},
+        {"name": "models/gemini-2.5-flash-lite", "supportedGenerationMethods": ["generateContent"]},
+        {"name": "models/gemini-3.5-flash", "supportedGenerationMethods": ["generateContent"]},
+        {"name": "models/gemini-3.5-flash-lite", "supportedGenerationMethods": ["generateContent"]},
+        {"name": "models/gemini-3.1-flash-lite", "supportedGenerationMethods": ["generateContent"]},
+        {"name": "models/gemini-3.8-flash", "supportedGenerationMethods": ["generateContent"]},
+        {"name": "models/gemini-flash-latest", "supportedGenerationMethods": ["generateContent"]},
+        {"name": "models/gemini-3.5-flash-lite-image", "supportedGenerationMethods": ["generateContent"]},
+        {"name": "models/gemini-2.5-flash-preview-tts", "supportedGenerationMethods": ["generateContent"]},
+        {"name": "models/gemini-embedding-2", "supportedGenerationMethods": ["embedContent"]},
+        {"name": "models/gemini-3.8-flash-tts", "supportedGenerationMethods": ["generateContent"]},
+        {"name": "models/gemini-3.1-pro-preview", "supportedGenerationMethods": ["generateContent"]},
+    ], "nextPageToken": "p2"}
+
+    def test_rank_models_prefers_newest_lite_then_flash_and_skips_specialised(self):
+        names = [m["name"].replace("models/", "") for m in self.LISTING["models"]]
+        self.assertEqual(self.ai.rank_models(names), ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-2.5-flash-lite",
+                                                      "gemini-3.8-flash", "gemini-3.5-flash", "gemini-2.5-flash", "gemini-flash-latest"])
+
+    def test_discovery_paginates_and_filters_by_generate_support(self):
+        from unittest import mock
+        pages = iter([self.LISTING, {"models": [{"name": "models/gemini-3.9-flash-lite", "supportedGenerationMethods": ["generateContent"]},
+                                                 {"name": "models/gemini-4-flash-lite", "supportedGenerationMethods": ["embedContent"]}]}])
+        with mock.patch.object(self.ai, "_call_api", side_effect=lambda *a, **k: next(pages)):
+            found = self.ai.discover_gemini_models("AIzaKEY", None)
+        self.assertEqual(found[0], "gemini-3.9-flash-lite")      # من الصفحة الثانية
+        self.assertNotIn("gemini-4-flash-lite", found)           # لا يدعم التوليد
+
+    def test_deprecated_models_404_then_discovered_model_works_and_is_remembered(self):
+        """سيناريو المستخدم: 2.5 تُرجع 404 «لم يعد متاحاً»، والحساب يدعم 3.5."""
+        from unittest import mock
+        self.ai.DISCOVERY_ENABLED = True
+        self.addCleanup(setattr, self.ai, "DISCOVERY_ENABLED", False)
+        posted = []
+        def fake(url, headers, body, ctx, timeout=40, method="POST"):
+            if method == "GET":
+                return self.LISTING if "pageToken" not in url else {"models": []}
+            model = url.split("models/")[1].split(":")[0]
+            posted.append(model)
+            if model.startswith("gemini-2.5"):
+                raise self.ai.AIError("HTTP 404: This model is no longer available to new users")
+            return self.gem("fresh comment " + model)
+        with mock.patch.object(self.ai, "_call_api", side_effect=fake):
+            out = self.ai.generate_ai_comment("BTC up", self.cfg, ignore_interval=True)
+            self.assertEqual(out, "fresh comment gemini-3.5-flash-lite")
+            self.assertEqual(posted, ["gemini-3.5-flash-lite"])          # الأفضل مباشرة، دون المرور على 2.5
+            posted.clear()
+            self.ai.generate_ai_comment("BTC up", self.cfg, ignore_interval=True)
+            self.assertEqual(posted, ["gemini-3.5-flash-lite"])          # تذكّر النموذج الناجح
+        self.assertEqual(self.ai._recall(self.cfg["api_key"]), "gemini-3.5-flash-lite")
+
+    def test_user_model_replaced_only_on_404(self):
+        from unittest import mock
+        posted = []
+        def fake(url, headers, body, ctx, timeout=40, method="POST"):
+            model = url.split("models/")[1].split(":")[0]
+            posted.append(model)
+            if model == "gemini-2.5-flash":
+                raise self.ai.AIError("HTTP 404: no longer available")
+            return self.gem("ok")
+        with mock.patch.object(self.ai, "_call_api", side_effect=fake):
+            self.ai.generate_ai_comment("x", dict(self.cfg, model="gemini-2.5-flash"), ignore_interval=True)
+        self.assertEqual(posted[:2], ["gemini-2.5-flash", self.ai.GEMINI_FALLBACKS[0]])      # 404 فقط يستبدله
+        posted.clear()
+        with mock.patch.object(self.ai, "_call_api", side_effect=lambda *a, **k: (posted.append(1) or (_ for _ in ()).throw(self.ai.AIError("TIMEOUT: x")))):
+            self.assertIsNone(self.ai.generate_ai_comment("x", dict(self.cfg, model="gemini-3.5-flash"), ignore_interval=True))
+        self.assertEqual(len(posted), 1)                                                       # مهلة نموذج اختاره المستخدم: لا استبدال
+
+    def test_thinking_config_dropped_when_model_rejects_it(self):
+        from unittest import mock
+        bodies = []
+        def fake(url, headers, body, ctx, timeout=40, method="POST"):
+            bodies.append(dict(body["generationConfig"]))
+            if "thinkingConfig" in body["generationConfig"]:
+                raise self.ai.AIError("HTTP 400: Unknown name thinkingLevel: thinking config not supported")
+            return self.gem("works without thinking cfg")
+        with mock.patch.object(self.ai, "_call_api", side_effect=fake):
+            self.assertEqual(self.ai.generate_ai_comment("x", self.cfg, ignore_interval=True), "works without thinking cfg")
+        self.assertIn("thinkingConfig", bodies[0])
+        self.assertNotIn("thinkingConfig", bodies[1])
+
+    def test_thinking_cfg_per_family(self):
+        self.assertEqual(self.ai._thinking_cfg("gemini-2.5-flash-lite"), {"thinkingBudget": 0})
+        self.assertEqual(self.ai._thinking_cfg("gemini-3.5-flash-lite"), {"thinkingLevel": "minimal"})
+        self.assertEqual(self.ai._thinking_cfg("gemini-flash-latest"), {"thinkingLevel": "minimal"})
+        self.assertIsNone(self.ai._thinking_cfg("gemini-2.5-pro"))
 
     def test_timeout_moves_to_next_model_then_reports_clearly(self):
         from unittest import mock
@@ -517,7 +610,7 @@ class AITests(unittest.TestCase):
         with mock.patch.object(self.ai, "_call_api", side_effect=slow_then_ok):
             self.assertEqual(self.ai.generate_ai_comment("BTC up", self.cfg, ignore_interval=True), "fast comment")
         self.assertEqual([m for m, _ in tried], self.ai.GEMINI_FALLBACKS[:2])
-        self.assertEqual(tried[0][1], {"thinkingBudget": 0})              # flash-lite/flash: بلا تفكير طويل
+        self.assertEqual(tried[0][1], {"thinkingLevel": "minimal"})       # نماذج 3.x: أقل تفكير ممكن
         with mock.patch.object(self.ai, "_call_api", side_effect=self.ai.AIError("TIMEOUT: لم يردّ المزوّد")) as c:
             with self.assertRaises(self.ai.AIError) as ex:
                 self.ai.generate_ai_comment("BTC up", self.cfg, raise_errors=True, ignore_interval=True)

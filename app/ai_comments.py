@@ -8,8 +8,11 @@
 
 أي خطأ في الشبكة أو المفتاح -> إرجاع None ليقع المحرك على البديل السياقي المحلي.
 """
+import hashlib
 import http.client
 import json
+import os
+import re
 import random
 import socket
 import ssl
@@ -19,6 +22,7 @@ import urllib.parse
 import urllib.request
 
 from . import net
+from .config import DATA_DIR, _atomic_save
 from .logger import get_logger
 
 log = get_logger("ai")
@@ -26,12 +30,12 @@ log = get_logger("ai")
 # نماذج Gemini القديمة (1.5) أُوقفت؛ نجرّب بالترتيب عند خطأ 404 إن لم يحدّد المستخدم نموذجاً
 RETIRED_GEMINI = ("gemini-1.5", "gemini-pro", "gemini-1.0")
 # الأسرع أولاً (flash-lite لا «يفكّر» طويلاً: مناسب لتعليق من سطر واحد)؛ ننتقل للتالي عند 404 أو مهلة أو ازدحام
-GEMINI_FALLBACKS = ["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-flash-latest"]
+GEMINI_FALLBACKS = ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-flash-lite-latest", "gemini-3.5-flash", "gemini-flash-latest"]
 RETRY_NEXT_MODEL = ("HTTP 404", "HTTP 429", "HTTP 500", "HTTP 503", "TIMEOUT")
 REQUEST_TIMEOUT_S = 40
 
 DEFAULT_MODELS = {
-    "gemini": "gemini-2.5-flash-lite",
+    "gemini": "gemini-3.5-flash-lite",
     "openai": "gpt-4o-mini",
     "groq": "llama-3.1-8b-instant",
 }
@@ -99,6 +103,130 @@ def check_key_format(provider, key):
     if seen and seen != provider:
         raise AIError("هذا المفتاح يبدو مفتاح {} وأنت مختار المزوّد «{}». غيّر المزوّد إلى «{}» أو ضع مفتاحاً من المزوّد المختار.".format(
             PROVIDER_NAMES[seen], PROVIDER_NAMES.get(provider, provider), PROVIDER_NAMES[seen]))
+
+
+# ------------------------------------------------------------------ اكتشاف نماذج Gemini المتاحة للحساب
+# Google تُقاعد النماذج للمستخدمين الجدد (404) فلا نعتمد على أسماء ثابتة: نسأل حسابنا عمّا هو متاح ونرتّبه (الأسرع أولاً).
+STATE_PATH = os.path.join(DATA_DIR, "ai_state.json")
+DISCOVERY_ENABLED = True
+DISC_TTL_S = 6 * 3600
+_PLAIN = re.compile(r"^gemini-(\d+(?:\.\d+)?)-flash(-lite)?$")
+_ALIASES = ("gemini-flash-lite-latest", "gemini-flash-latest")
+_disc_cache = {}   # بصمة المفتاح -> (وقت، قائمة)
+_good_model = {}   # بصمة المفتاح -> آخر نموذج نجح
+
+
+def _fp(key):
+    return hashlib.sha1((key or "").encode("utf-8")).hexdigest()[:12]
+
+
+def reset_cache():
+    _disc_cache.clear()
+    _good_model.clear()
+
+
+def _recall(key):
+    fp = _fp(key)
+    if fp in _good_model:
+        return _good_model[fp]
+    try:
+        with open(STATE_PATH, encoding="utf-8") as f:
+            return (json.load(f) or {}).get(fp)
+    except (OSError, ValueError):
+        return None
+
+
+def _remember(key, model):
+    fp = _fp(key)
+    if _good_model.get(fp) == model:
+        return
+    _good_model[fp] = model
+    try:
+        try:
+            with open(STATE_PATH, encoding="utf-8") as f:
+                data = json.load(f) or {}
+        except (OSError, ValueError):
+            data = {}
+        data[fp] = model
+        os.makedirs(os.path.dirname(STATE_PATH), exist_ok=True)
+        _atomic_save(data, STATE_PATH)
+    except OSError:
+        pass
+
+
+def rank_models(names):
+    """يرتّب أسماء النماذج الصالحة للتعليقات: flash-lite الأحدث أولاً ثم flash الأحدث ثم الأسماء المستعارة (latest)."""
+    names = set(names)
+    lite, flash = [], []
+    for n in names:
+        m = _PLAIN.match(n)
+        if m:
+            (lite if m.group(2) else flash).append((float(m.group(1)), n))
+    return [n for _, n in sorted(lite, reverse=True)] + [n for _, n in sorted(flash, reverse=True)] + [a for a in _ALIASES if a in names]
+
+
+def _gemini_get(url, api_key, ctx, timeout):
+    try:
+        return _call_api(url, {"x-goog-api-key": api_key}, None, ctx, timeout=timeout, method="GET")
+    except AIError as e:
+        if not str(e).startswith(("HTTP 400", "HTTP 401", "HTTP 403")):
+            raise
+    sep = "&" if "?" in url else "?"
+    return _call_api(url + sep + "key=" + urllib.parse.quote(api_key, safe=""), {}, None, ctx, timeout=timeout, method="GET")
+
+
+def discover_gemini_models(api_key, ctx, timeout=15):
+    """النماذج التي تدعم generateContent عند هذا المفتاح، مرتّبة بالأفضلية."""
+    found, token = [], None
+    for _ in range(4):
+        url = "https://generativelanguage.googleapis.com/v1beta/models?pageSize=100"
+        if token:
+            url += "&pageToken=" + urllib.parse.quote(token, safe="")
+        r = _gemini_get(url, api_key, ctx, timeout)
+        for m in r.get("models") or []:
+            if "generateContent" in (m.get("supportedGenerationMethods") or []):
+                found.append((m.get("name") or "").replace("models/", ""))
+        token = r.get("nextPageToken")
+        if not token:
+            break
+    return rank_models(found)
+
+
+def candidate_models(api_key, ctx, user_model=""):
+    """ترتيب التجربة: اختيار المستخدم، ثم آخر نموذج نجح، ثم المكتشف من الحساب، ثم الاحتياطي الثابت."""
+    order = [user_model] if user_model else []
+    good = _recall(api_key)
+    if good:
+        order.append(good)
+    if DISCOVERY_ENABLED:
+        fp = _fp(api_key)
+        hit = _disc_cache.get(fp)
+        if hit and time.time() - hit[0] < DISC_TTL_S:
+            found = hit[1]
+        else:
+            try:
+                found = discover_gemini_models(api_key, ctx)
+                _disc_cache[fp] = (time.time(), found)
+            except Exception as e:
+                log.info("تعذّر اكتشاف نماذج Gemini ({}) - يُستخدم الاحتياطي".format(str(e)[:80]))
+                found = []
+        order += found[:4]
+    order += GEMINI_FALLBACKS
+    seen, out = set(), []
+    for m in order:
+        if m and m not in seen:
+            seen.add(m)
+            out.append(m)
+    return out
+
+
+def _thinking_cfg(model):
+    """تعطيل/تقليل «التفكير» لأن التعليق سطر واحد (نماذج 2.5 تأخذ ميزانية، و3.x تأخذ مستوى)."""
+    if model.startswith("gemini-2.5-flash"):
+        return {"thinkingBudget": 0}
+    if re.match(r"gemini-(3|flash|flash-lite)", model):
+        return {"thinkingLevel": "minimal"}
+    return None
 
 
 class AIError(Exception):
@@ -289,24 +417,38 @@ def generate_ai_comment(tweet_text, ai_cfg, net_cfg=None, raise_errors=False, ig
 
     try:
         if provider == "gemini":
-            models = [user_model] if (user_model or single_model) else GEMINI_FALLBACKS
+            models = [user_model] if single_model and user_model else candidate_models(api_key, ctx, user_model)
             if single_model and not user_model:
-                models = [DEFAULT_MODELS['gemini']]
+                models = models[:1]
             resp = None
             for i, model in enumerate(models):
                 url = "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent".format(model)
-                body = {"contents": [{"parts": [{"text": "{}\n\n{}".format(system, user_msg)}]}],
-                        "generationConfig": {"temperature": 0.9, "maxOutputTokens": 200}}
-                if model.startswith("gemini-2.5-flash"):
-                    body["generationConfig"]["thinkingConfig"] = {"thinkingBudget": 0}  # بدون «تفكير» طويل: أسرع وأرخص
+                gen = {"temperature": 0.9, "maxOutputTokens": 400}
+                think = _thinking_cfg(model)
+                if think:
+                    gen["thinkingConfig"] = think
+
+                def post():
+                    return _gemini_call(url, api_key, {"contents": [{"parts": [{"text": "{}\n\n{}".format(system, user_msg)}]}],
+                                                       "generationConfig": gen}, ctx, timeout=timeout)
                 try:
-                    resp = _gemini_call(url, api_key, body, ctx, timeout=timeout)
+                    try:
+                        resp = post()
+                    except AIError as e:
+                        if think and str(e).startswith("HTTP 400") and "think" in str(e).lower():
+                            gen.pop("thinkingConfig", None)   # النموذج لا يقبل هذا الإعداد: أعد بدونه
+                            resp = post()
+                        else:
+                            raise
+                    _remember(api_key, model)
                     break
                 except AIError as e:
-                    if i < len(models) - 1 and str(e).startswith(RETRY_NEXT_MODEL):
-                        log.info("نموذج {} لم ينجح ({}) - تجربة التالي".format(model, str(e)[:60]))
-                        continue
-                    raise
+                    msg = str(e)
+                    strict_user = bool(user_model) and i == 0          # اختيار المستخدم: لا نستبدله إلا إن لم يعد موجوداً (404)
+                    retry = msg.startswith("HTTP 404") if strict_user else msg.startswith(RETRY_NEXT_MODEL)
+                    if single_model or i == len(models) - 1 or not retry:
+                        raise
+                    log.info("نموذج {} لم ينجح ({}) - تجربة التالي".format(model, msg[:70]))
         else:
             url = {
                 "openai": "https://api.openai.com/v1/chat/completions",

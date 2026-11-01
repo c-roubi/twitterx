@@ -124,7 +124,7 @@ def run(provider, api_key, model="", net_cfg=None):
 
     def listing():
         if provider == "gemini":
-            url, hdr = "https://{}/v1beta/models?pageSize=1".format(host), {"x-goog-api-key": key}
+            url, hdr = "https://{}/v1beta/models?pageSize=100".format(host), {"x-goog-api-key": key}
         else:
             url = "https://{}/{}models".format(host, "openai/v1/" if provider == "groq" else "v1/")
             hdr = {"Authorization": "Bearer " + key}
@@ -136,12 +136,16 @@ def run(provider, api_key, model="", net_cfg=None):
                 r = ai_comments._call_api(url + "&key=" + urllib.request.quote(key, safe=""), {}, None, ctx, timeout=20, method="GET")
             else:
                 raise
-        n = len(r.get("models") or r.get("data") or [])
-        return True, "المفتاح مقبول ✓ ({})".format("نماذج متاحة" if n else "ردّ سليم"), False
+        items = r.get("models") or r.get("data") or []
+        if provider == "gemini":
+            names = [m.get("name", "").replace("models/", "") for m in items if "generateContent" in (m.get("supportedGenerationMethods") or [])]
+            best = ai_comments.rank_models(names)[:4]
+            return True, "المفتاح مقبول ✓ — نماذج مقترحة لحسابك: {}".format(", ".join(best) or "لم أجد نموذج flash مناسباً"), False
+        return True, "المفتاح مقبول ✓ ({} نموذجاً متاحاً)".format(len(items)), False
 
     def count_tokens():
         """طلب POST خفيف لا يولّد شيئاً: يفصل «POST لا يعمل» عن «التوليد وحده بطيء/محجوب»."""
-        m = model or ai_comments.GEMINI_FALLBACKS[0]
+        m = (gen_models[0] if gen_models else "") or ai_comments.GEMINI_FALLBACKS[0]
         url = "https://{}/v1beta/models/{}:countTokens".format(host, m)
         body = {"contents": [{"parts": [{"text": "hello"}]}]}
         r = ai_comments._gemini_call(url, key, body, ctx, timeout=15)
@@ -156,7 +160,13 @@ def run(provider, api_key, model="", net_cfg=None):
             return True, "ردّ بعد {:.1f} ث: «{}»".format(time.time() - t0, out), (time.time() - t0) > 15
         return generate
 
-    gen_models = ([model] if model else ai_comments.GEMINI_FALLBACKS) if provider == "gemini" else [model or ai_comments.DEFAULT_MODELS.get(provider, "")]
+    if provider == "gemini":
+        try:
+            gen_models = ai_comments.candidate_models(key, ctx, model)[:4]
+        except Exception:
+            gen_models = [model] if model else ai_comments.GEMINI_FALLBACKS[:3]
+    else:
+        gen_models = [model or ai_comments.DEFAULT_MODELS.get(provider, "")]
     plan = [("بروكسي", proxies), ("DNS", dns), ("اتصال TCP (IPv4)", tcp4), ("اتصال IPv6", tcp6),
             ("تشفير TLS والشهادة", tls), ("فحص المفتاح", listing)]
     if provider == "gemini":
@@ -192,6 +202,9 @@ def verdict(steps):
     if gens and not any(s["ok"] for s in gens):
         post_ok = by.get("POST خفيف", {}).get("ok")
         timed_out = all("TIMEOUT" in s["detail"] for s in gens)
+        if all("HTTP 404" in s["detail"] for s in gens):
+            return ("كل النماذج المجرَّبة غير متاحة لحسابك (404). انظر «نماذج مقترحة لحسابك» في خطوة فحص المفتاح، "
+                    "وإن لم تظهر نماذج فاكتب اسم نموذج متاح يدوياً في حقل «النموذج».")
         if post_ok and timed_out:
             return ("الاتصال والمفتاح وطلبات POST سليمة، لكن التوليد نفسه لا يردّ: المشكلة عند Google/حسابك وليست في شبكتك "
                     "(تأكد أن المفتاح من مشروع مفعّل في Google AI Studio وغير مقيّد بالمنطقة)، أو جرّب مفتاح Groq المجاني.")
