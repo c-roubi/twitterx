@@ -633,7 +633,7 @@ PAGES.tweets = {
 /* ---------- تيليجرام ---------- */
 PAGES.telegram = {
   mount() {
-    const tg = S.config.telegram, st = S.state.telegram;
+    const tg = S.config.telegram, st = S.state.telegram, ch = tg.channel;
     view(head("تيليجرام", "أرسل رابط تغريدة للبوت فتتفاعل معها الحسابات تلقائياً", `<span id="tg-chip"></span>`) + `<div class="card">
       <div class="step ${st.configured ? "done" : ""}" id="s1"><div class="n">1</div><div class="body"><div class="title">إنشاء البوت وإضافة التوكن</div>
         <div class="muted">افتح <b>@BotFather</b> في تيليجرام، أرسل <span class="ltr">/newbot</span> واتبع الخطوات، ثم الصق التوكن هنا.</div>
@@ -653,7 +653,17 @@ PAGES.telegram = {
         <div class="srow" style="padding:0;min-height:0;border:0"><div class="txtcol"><div class="t">احتمال كل عملية في الوضع الفوري</div><div class="d">100% يعني أن كل حساب مختار يعجب ويعيد التغريد ويعلّق. اخفضها لتبدو الحسابات أقل تطابقاً.</div></div><div class="c" id="tg-mix"><span class="unit">إعجاب</span><input class="inp sm num" data-k="like" type="number" min="0" max="100" value="${Math.round(tg.action_mix.like * 100)}"><span class="unit">ريتويت</span><input class="inp sm num" data-k="retweet" type="number" min="0" max="100" value="${Math.round(tg.action_mix.retweet * 100)}"><span class="unit">تعليق</span><input class="inp sm num" data-k="comment" type="number" min="0" max="100" value="${Math.round(tg.action_mix.comment * 100)}"><span class="unit">%</span></div></div>
         <div class="srow" style="padding:0;min-height:0;border:0"><div class="txtcol"><div class="t">التأخير بين عمليات الحساب</div><div class="d">فاصل قصير بين الإعجاب والريتويت والتعليق داخل الحساب الواحد (في الوضع الفوري).</div></div><div class="c"><div class="rng" id="tg-delay"><span>من</span><input class="inp sm num r0" type="number" step="0.5" min="0" value="${tg.action_delay_s[0]}"><span>إلى</span><input class="inp sm num r1" type="number" step="0.5" min="0" value="${tg.action_delay_s[1]}"><span class="unit">ثانية</span></div></div></div>
         <div class="srow" style="padding:0;min-height:0;border:0"><div class="txtcol"><div class="t">مدة توزيع التفاعل (عند إيقاف الوضع الفوري)</div><div class="d">تُوزَّع عمليات روابط تيليجرام خلال هذا المجال بدل التنفيذ الفوري.</div></div><div class="c"><div class="rng" id="tg-spread"><span>من</span><input class="inp sm num r0" type="number" step="0.1" min="0" value="${tg.spread_hours[0]}"><span>إلى</span><input class="inp sm num r1" type="number" step="0.1" min="0" value="${tg.spread_hours[1]}"><span class="unit">ساعة</span></div></div></div>
-        <div class="row"><button class="btn accent" data-act="tg-save">حفظ</button></div></div></div></div>
+        </div></div>
+      <div class="step" id="s4"><div class="n">4</div><div class="body"><div class="title">قناة الأدمن 📣 (بدل الفحص المتكرر لـX)</div>
+        <div class="muted">أضف البوت <b>أدمن</b> في قناتك. عند نزول أي منشور فيها: إن كان فيه رابط تغريدة يُجدول التفاعل فوراً، وإن لم يكن يُفحص حساب المدير في X مباشرة (مع إعادة محاولة). والفحص الدوري يصبح احتياطياً نادراً.</div>
+        <div class="srow" style="padding:0;min-height:0;border:0"><div class="txtcol"><div class="t">مراقبة القناة</div></div><div class="c">${sw(ch.enabled, 'id="ch-en"')}</div></div>
+        <div class="srow" style="padding:0;min-height:0;border:0"><div class="txtcol"><div class="t">معرّف القناة</div><div class="d">يبدأ عادةً بـ <span class="ltr">-100</span>. انشر أي شيء في القناة ثم اضغط «تحديث» ليظهر لك أدناه فتعتمده بضغطة.</div></div><div class="c"><input class="inp ltr num" id="ch-id" type="number" value="${ch.chat_id || ""}" placeholder="-1001234567890" style="width:200px"></div></div>
+        <div id="ch-found" class="stack" style="gap:6px"></div><div class="row"><button class="btn" data-act="ch-refresh">${ic("refresh", "sm")}تحديث القنوات</button></div>
+        <div class="srow" style="padding:0;min-height:0;border:0"><div class="txtcol"><div class="t">تنفيذ فوري لتغريدات القناة ⚡</div><div class="d">مثل رابط الأدمن: حساباً بعد حساب دون التقيّد بالحدود اليومية.</div></div><div class="c">${sw(ch.instant, 'id="ch-instant"')}</div></div>
+        <div class="srow" style="padding:0;min-height:0;border:0"><div class="txtcol"><div class="t">الفحص الاحتياطي لـX</div><div class="d">شبكة أمان لما فات القناة (نشر على X فقط). يُفضَّل أن يكون نادراً لتستريح الحسابات.</div></div><div class="c"><div class="rng" id="ch-fb"><span>من</span><input class="inp sm num r0" type="number" min="1" value="${ch.fallback_interval_min[0]}"><span>إلى</span><input class="inp sm num r1" type="number" min="1" value="${ch.fallback_interval_min[1]}"><span class="unit">دقيقة</span></div></div></div>
+        <div class="srow" style="padding:0;min-height:0;border:0"><div class="txtcol"><div class="t">فحص المدير بعد منشور بلا رابط</div><div class="d">أول فحص بعد كم ثانية، ثم كم مرة يعيد ويفصل بينها كم ثانية، وأقصى عمر للتغريدة المقبولة.</div></div><div class="c"><span class="unit">بعد</span><input class="inp sm num" id="ch-first" type="number" min="0" value="${ch.first_check_s}"><span class="unit">ث · إعادة</span><input class="inp sm num" id="ch-retries" type="number" min="0" value="${ch.retries}"><span class="unit">× كل</span><input class="inp sm num" id="ch-every" type="number" min="5" value="${ch.retry_every_s}"><span class="unit">ث · عمرها ≤</span><input class="inp sm num" id="ch-age" type="number" min="1" value="${ch.max_age_min}"><span class="unit">د</span></div></div>
+      </div></div>
+      <div class="step"><div class="n" style="visibility:hidden">·</div><div class="body"><div class="row"><button class="btn accent" data-act="tg-save">حفظ</button></div></div></div></div>
       <div class="h2">طريقة الاستخدام</div><div class="card pad muted" style="line-height:1.9">أرسل للبوت رابط أي تغريدة ← يجدول التفاعل فوراً ويردّ بعدد الحسابات والعمليات.<br>
       <span class="ltr">/menu</span> ← قائمة بأزرار: الحالة، المحرك، الحسابات، التغريدات، الكلمات المفتاحية، قوالب التعليقات، الإعدادات، WARP.<br>
       <span class="ltr">/all</span> + رابط ← تفاعل بكل الحسابات المفعّلة &nbsp;·&nbsp; <span class="ltr">/status</span> ← حالة التطبيق &nbsp;·&nbsp; نص بعد الرابط ← يُستخدم لتعليق مناسب للمحتوى.<br>
@@ -666,6 +676,10 @@ PAGES.telegram = {
     $("#tg-admins").innerHTML = st.admins.length ? `<div class="lbl">الأدمن المربوطون</div>` + st.admins.map(id => `<div class="row"><span class="chip ok">${ic("check", "sm")}<span class="num">${id}</span></span><button class="btn subtle icon" data-act="tg-unlink" data-id="${id}" title="إلغاء الربط" aria-label="إلغاء الربط">${ic("x", "sm")}</button></div>`).join("") : '<div class="hint">لا يوجد أدمن مربوط بعد.</div>';
     $("#s2").classList.toggle("done", st.admins.length > 0);
     $("#s1").classList.toggle("done", st.configured);
+    api("GET", "/api/telegram/channels").then(list => {
+      const el = $("#ch-found"); if (!el) return;
+      el.innerHTML = list.length ? `<div class="lbl">قنوات رآها البوت</div>` + list.map(c => `<div class="row"><span class="chip info">${esc(c.title || c.username || "قناة")}</span><span class="num faint">${c.id}</span><span class="faint small">قبل ${c.age_s} ث</span><button class="btn" data-act="ch-pick" data-id="${c.id}">اعتماد</button></div>`).join("") : '<div class="hint">لم يرَ البوت أي قناة بعد (تأكد أنه أدمن فيها وانشر منشوراً).</div>';
+    }).catch(() => {});
     const p = S.tg.code;
     if (p) $("#tg-pair").innerHTML = `<div class="code num">${p}</div><div class="hint">أرسل للبوت: <b class="ltr">/pair ${p}</b> — الرمز صالح 10 دقائق ويُستخدم مرة واحدة.</div>`;
   },
@@ -768,12 +782,15 @@ const ACT = {
     try { await api("POST", "/api/config", {telegram: {ca_bundle: $("#tg-ca").value.trim(), insecure_ssl: $("#tg-insecure").getAttribute("aria-checked") === "true"}}); const r = await api("POST", "/api/telegram/test", {token: $("#tg-token").value}); out.innerHTML = `<span class="chip ok">${ic("check", "sm")}متصل: @${esc(r.username)}</span>`; }
     catch (e) { out.innerHTML = `<span class="err-t">${esc(e.message)}</span>`; } finally { busy(b, false); }
   },
+  "ch-refresh"() { PAGES.telegram.update(); },
+  "ch-pick"(b) { $("#ch-id").value = b.dataset.id; toast("اعتُمد المعرّف — اضغط حفظ", "info"); },
   async "tg-pair"() { const r = await api("POST", "/api/telegram/pair"); S.tg.code = r.code; PAGES.telegram.update(); },
   async "tg-unlink"(b) { if (await confirmBox("إلغاء الربط", "لن يتمكن هذا الأدمن من التحكم بالبوت بعد الآن.", "إلغاء الربط")) { await api("DELETE", `/api/telegram/admins/${b.dataset.id}`); toast("تم إلغاء الربط"); await refresh(); } },
   async "tg-save"(b) {
     const sp = $("#tg-spread"); busy(b, true);
     try {
-      S.config = await api("POST", "/api/config", {telegram: {bot_token: $("#tg-token").value.trim(), ca_bundle: $("#tg-ca").value.trim(), insecure_ssl: $("#tg-insecure").getAttribute("aria-checked") === "true", enabled: $("#tg-en").getAttribute("aria-checked") === "true", instant: $("#tg-instant").getAttribute("aria-checked") === "true", notify: $("#tg-notify").getAttribute("aria-checked") === "true", action_mix: Object.fromEntries($$("#tg-mix input").map(i => [i.dataset.k, parseFloat(i.value) / 100])), action_delay_s: [parseFloat($(".r0", $("#tg-delay")).value), parseFloat($(".r1", $("#tg-delay")).value)], spread_hours: [parseFloat($(".r0", sp).value), parseFloat($(".r1", sp).value)]}});
+      S.config = await api("POST", "/api/config", {telegram: {bot_token: $("#tg-token").value.trim(), ca_bundle: $("#tg-ca").value.trim(), insecure_ssl: $("#tg-insecure").getAttribute("aria-checked") === "true", enabled: $("#tg-en").getAttribute("aria-checked") === "true", instant: $("#tg-instant").getAttribute("aria-checked") === "true", notify: $("#tg-notify").getAttribute("aria-checked") === "true", action_mix: Object.fromEntries($$("#tg-mix input").map(i => [i.dataset.k, parseFloat(i.value) / 100])), action_delay_s: [parseFloat($(".r0", $("#tg-delay")).value), parseFloat($(".r1", $("#tg-delay")).value)], spread_hours: [parseFloat($(".r0", sp).value), parseFloat($(".r1", sp).value)],
+        channel: {enabled: $("#ch-en").getAttribute("aria-checked") === "true", chat_id: parseInt($("#ch-id").value || "0", 10), instant: $("#ch-instant").getAttribute("aria-checked") === "true", max_age_min: parseFloat($("#ch-age").value), first_check_s: parseFloat($("#ch-first").value), retry_every_s: parseFloat($("#ch-every").value), retries: parseFloat($("#ch-retries").value), fallback_interval_min: [parseFloat($(".r0", $("#ch-fb")).value), parseFloat($(".r1", $("#ch-fb")).value)]}}});
       toast("تم حفظ إعدادات تيليجرام"); await refresh();
     } finally { busy(b, false); }
   },

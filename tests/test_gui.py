@@ -5,6 +5,7 @@ import os
 import sys
 import tempfile
 import threading
+import time
 import unittest
 import urllib.error
 import urllib.request
@@ -119,7 +120,7 @@ class TelegramTests(unittest.TestCase):
         self.saved = []
         self.calls = []
 
-        def sched(tid, text, cfg, chat_id=None):
+        def sched(tid, text, cfg, chat_id=None, **kw):
             self.calls.append((tid, text, cfg))
             return scheduled if scheduled is not None else {"queue": [{"actions": ["like", "retweet"]}, {"actions": ["like"]}]}
         return telegram_bot.TelegramBot(
@@ -797,6 +798,133 @@ class ExpediteTests(unittest.TestCase):
             self.assertIn("مجدولة مسبقاً", r2[0])
             self.assertTrue(self.config.load_seen()["910000000000000007"]["priority"])
             self.assertEqual(self.config.load_seen()["910000000000000007"]["notify_chat"], 5)
+
+
+class ChannelTests(unittest.TestCase):
+    """قناة الأدمن: منشور بلا رابط ← فحص X؛ برابط ← جدولة مباشرة؛ والفحص الدوري صار احتياطياً."""
+    CH = -1001234567890
+
+    def setUp(self):
+        from app import config
+        self.config = config
+        config.save_seen({})
+        cfg = config.load_config()
+        cfg["telegram"]["admin_ids"] = [5]
+        cfg["telegram"]["notify"] = True
+        cfg["telegram"]["channel"].update(enabled=True, chat_id=self.CH, instant=True)
+        cfg["manager_handle"] = "boss"
+        config.save_config(cfg)
+        self.sent, self.sched, self.checks = [], [], []
+        self.bot = telegram_bot.TelegramBot(
+            get_cfg=config.load_config, get_accounts=lambda: {"a": {"enabled": True}},
+            schedule=lambda tid, text, cfg, chat_id=None, source="telegram": self.sched.append((tid, text, source)) or {"queue": [{"actions": ["like"]}]},
+            save_admins=lambda ids: None, sender=lambda cid, text, markup=None: self.sent.append((cid, text)),
+            request_check=lambda ts: self.checks.append(ts) or True)
+
+    def post(self, text="", chat=None, **extra):
+        return dict({"chat": {"id": chat or self.CH, "title": "Boss channel", "type": "channel"}, "text": text}, **extra)
+
+    def test_other_channel_ignored_but_remembered(self):
+        self.assertEqual(self.bot.handle_channel_post(self.post("hi", chat=-100999)), "ignored")
+        self.assertIn(-100999, self.bot.channels_seen)
+        self.assertEqual((self.sched, self.checks, self.sent), ([], [], []))
+
+    def test_disabled_channel_ignored(self):
+        cfg = self.config.load_config(); cfg["telegram"]["channel"]["enabled"] = False; self.config.save_config(cfg)
+        self.assertEqual(self.bot.handle_channel_post(self.post("https://x.com/b/status/1234567890123")), "ignored")
+        self.assertEqual(self.sched, [])
+
+    def test_post_with_link_schedules_directly_as_channel(self):
+        r = self.bot.handle_channel_post(self.post("New call 🚀 https://x.com/b/status/1234567890123 $BTC"))
+        self.assertEqual(r, "scheduled:1234567890123")
+        self.assertEqual(self.sched, [("1234567890123", "New call 🚀 $BTC", "channel")])  # النص يُمرَّر للتعليقات
+        self.assertEqual(self.checks, [])                                                    # بلا زيارة لـX
+        self.assertIn("📣", self.sent[0][1])
+
+    def test_link_hidden_in_text_link_entity(self):
+        post = self.post("Read this", entities=[{"type": "text_link", "offset": 0, "length": 4, "url": "https://x.com/b/status/1234567890999"}])
+        self.assertEqual(self.bot.handle_channel_post(post), "scheduled:1234567890999")
+
+    def test_post_without_link_requests_x_check(self):
+        self.assertEqual(self.bot.handle_channel_post(self.post("Big news coming today")), "check-requested")
+        self.assertEqual(len(self.checks), 1)
+        self.assertEqual(self.sched, [])
+
+    def test_engine_stopped_warns_admin(self):
+        self.bot.request_check = lambda ts: False
+        self.assertEqual(self.bot.handle_channel_post(self.post("photo post")), "engine-stopped")
+        self.assertIn("المحرك متوقف", self.sent[-1][1])
+
+    def test_photo_caption_with_link(self):
+        post = {"chat": {"id": self.CH, "title": "t"}, "caption": "chart https://twitter.com/b/status/1234567890555"}
+        self.assertEqual(self.bot.handle_channel_post(post), "scheduled:1234567890555")
+
+    # ---- المحرك: الفحص بعد منشور بلا رابط ----
+    def make_engine(self):
+        from unittest import mock
+        from app.engine import Engine
+        e = Engine()
+        e.schedule_cb = lambda tid, text, cfg, instant: self.sched.append((tid, text, instant)) or {"queue": []}
+        e.notify_cb = lambda text: self.sent.append(("n", text))
+        e._stop = mock.MagicMock(); e._stop.wait.return_value = False; e._stop.is_set.return_value = False
+        return e
+
+    @staticmethod
+    def fresh(minutes_ago):
+        return str((int((time.time() - minutes_ago * 60) * 1000) - 1288834974657) << 22)
+
+    def test_check_retries_until_found(self):
+        from unittest import mock
+        from app import monitor
+        e = self.make_engine()
+        new = self.fresh(2)
+        results = iter([([], "empty"), ([{"id": new, "text": "BTC up"}], "ok")])
+        with mock.patch.object(monitor, "fetch_manager_tweets", side_effect=lambda *a, **k: next(results)) as f:
+            e._handle_check(monitor, time.time())
+        self.assertEqual(f.call_count, 2)                      # الثانية وجدت فتوقفت إعادة المحاولة
+        self.assertEqual(self.sched, [(new, "BTC up", True)])
+        self.assertTrue(any("وُجدت" in s[1] for s in self.sent))
+
+    def test_check_gives_up_and_tells_admin(self):
+        from unittest import mock
+        from app import monitor
+        e = self.make_engine()
+        with mock.patch.object(monitor, "fetch_manager_tweets", return_value=([], "empty")) as f:
+            e._handle_check(monitor, time.time())
+        self.assertEqual(f.call_count, 4)                      # 1 + 3 إعادات (الافتراضي)
+        self.assertTrue(any("لم أجد" in s[1] for s in self.sent))
+
+    def test_check_ignores_old_and_already_scheduled(self):
+        from unittest import mock
+        from app import monitor
+        e = self.make_engine()
+        old, done = self.fresh(300), self.fresh(5)
+        seen = self.config.load_seen(); seen[done] = {"scheduled": True, "queue": []}; self.config.save_seen(seen)
+        with mock.patch.object(monitor, "fetch_manager_tweets", return_value=([{"id": old, "text": ""}, {"id": done, "text": ""}], "ok")):
+            self.assertEqual(e._check_once(monitor), [])
+        self.assertEqual(self.sched, [])
+
+    def test_request_check_only_when_running_and_merges(self):
+        from app.engine import Engine
+        e = Engine()
+        self.assertFalse(e.request_check())
+        e._thread = type("T", (), {"is_alive": lambda s: True})()
+        e._stop.clear()
+        self.assertTrue(e.request_check(100.0)); self.assertTrue(e.request_check(50.0)); self.assertTrue(e.request_check(200.0))
+        self.assertEqual(e._check_ts, 50.0)                    # تُدمج الطلبات المتقاربة بأقدمها
+
+    def test_config_validation_for_channel(self):
+        svc = server.AppService()
+        with self.assertRaises(server.ApiError):
+            svc.set_config({"telegram": {"channel": {"fallback_interval_min": [90, 60]}}})
+        out = svc.set_config({"telegram": {"channel": {"chat_id": -1009876543210, "fallback_interval_min": [60, 90]}}})
+        self.assertEqual(out["telegram"]["channel"]["chat_id"], -1009876543210)
+
+    def test_channels_api(self):
+        svc = server.AppService()
+        svc.bot.channels_seen[-100777] = {"title": "T", "username": "u", "ts": time.time() - 5}
+        row = [c for c in svc.tg_channels() if c["id"] == -100777][0]
+        self.assertEqual((row["title"], row["username"]), ("T", "u"))
 
 
 if __name__ == "__main__":

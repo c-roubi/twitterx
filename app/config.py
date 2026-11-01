@@ -99,6 +99,16 @@ DEFAULT_CONFIG = {
         "instant": True,
         "action_mix": {"like": 1.0, "retweet": 1.0, "comment": 1.0},
         "action_delay_s": [2, 6],
+        "channel": {
+            "enabled": False,
+            "chat_id": 0,
+            "instant": True,
+            "max_age_min": 30,
+            "first_check_s": 30,
+            "retry_every_s": 60,
+            "retries": 3,
+            "fallback_interval_min": [60, 90]
+        },
         "ca_bundle": "",
         "insecure_ssl": False
     },

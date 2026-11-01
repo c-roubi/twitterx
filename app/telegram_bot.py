@@ -79,7 +79,8 @@ class TelegramBot:
     ui: كائن BotUI (قوائم وأزرار) | notices(): قائمة (chat_id, text) لإشعارات اكتمال التفاعل.
     """
 
-    def __init__(self, get_cfg, get_accounts, schedule, save_admins, engine_running=lambda: True, sender=None, ui=None, notices=None):
+    def __init__(self, get_cfg, get_accounts, schedule, save_admins, engine_running=lambda: True, sender=None, ui=None, notices=None,
+                 request_check=None):
         self.get_cfg = get_cfg
         self.get_accounts = get_accounts
         self.schedule = schedule
@@ -88,6 +89,8 @@ class TelegramBot:
         self._send_override = sender
         self.ui = ui
         self.notices = notices
+        self.request_check = request_check   # callable(ts) -> bool : يطلب فحص حساب المدير في X (يضعها الخادم)
+        self.channels_seen = {}              # chat_id -> {title, username, ts} للتعرّف على القناة من الواجهة
         self._stop = threading.Event()
         self._thread = None
         self._lock = threading.Lock()
@@ -249,7 +252,7 @@ class TelegramBot:
         if everyone:
             c["engagement"]["accounts_per_tweet"] = [len(enabled), len(enabled)]
         try:
-            entry = self.schedule(tid, text, c, chat_id=chat_id)
+            entry = self.schedule(tid, text, c, chat_id=chat_id, source="telegram")
         except Exception as e:
             log.error("فشل جدولة {}: {}".format(tid, e))
             return Reply("❌ فشلت الجدولة: {}".format(str(e).replace("<", "&lt;")))
@@ -268,6 +271,61 @@ class TelegramBot:
         if entry.get("skipped"):
             txt += "\n⚠️ تُخطّيت (غير جاهزة): {}".format(" ".join(str(s).replace("<", "&lt;") for s in entry["skipped"]))
         return Reply.of(txt, rows)
+
+    # ---------- قناة الأدمن ----------
+    def notify_admins(self, text, rows=None):
+        cfg = self.get_cfg()["telegram"]
+        if not cfg.get("notify", True):
+            return
+        for cid in cfg.get("admin_ids", []):
+            self.send(int(cid), text, rows)
+
+    def handle_channel_post(self, post):
+        """منشور جديد في قناة الأدمن: رابط تغريدة ← جدولة فورية، وإلا ← طلب فحص حساب المدير في X.
+
+        يعيد وصفاً لما حدث (للاختبار). لا يتصرف إلا إذا كانت القناة هي المحددة في الإعدادات.
+        """
+        chat = post.get("chat") or {}
+        cid = chat.get("id")
+        self.channels_seen[cid] = {"title": chat.get("title", ""), "username": chat.get("username", ""), "ts": time.time()}
+        cfg = self.get_cfg()
+        ch = cfg["telegram"].get("channel") or {}
+        try:
+            wanted = int(ch.get("chat_id") or 0)
+        except (TypeError, ValueError):
+            wanted = 0
+        if not ch.get("enabled") or not wanted or wanted != cid:
+            return "ignored"
+        text = post.get("text") or post.get("caption") or ""
+        ents = (post.get("entities") or []) + (post.get("caption_entities") or [])
+        urls = " ".join(e.get("url", "") for e in ents if e.get("type") == "text_link")
+        ids = extract_tweet_ids(text + " " + urls)
+        if ids:
+            body = strip_links(text)
+            done = []
+            for tid in ids[:5]:
+                try:
+                    entry = self.schedule(tid, body, copy.deepcopy(cfg), chat_id=None, source="channel")
+                except Exception as e:
+                    log.error("فشل جدولة منشور القناة {}: {}".format(tid, e))
+                    self.notify_admins("❌ فشلت جدولة تغريدة القناة <code>{}</code>: {}".format(tid, str(e).replace("<", "&lt;")))
+                    continue
+                if entry:
+                    done.append(tid)
+                    q = entry.get("queue", [])
+                    st = entry.get("_status")
+                    what = "⚡ حُوّلت المتبقية إلى فوري" if st in ("upgraded", "revived") else "جُدول التفاعل"
+                    self.notify_admins("📣 <b>منشور جديد في القناة</b>\n{} مع <code>{}</code> · الحسابات: <b>{}</b>".format(what, tid, len(q)),
+                                       [[("🔎 التقدّم", "tw:r:" + tid), ("🏠 القائمة", "home")]])
+            self.handled += len(done)
+            return "scheduled:" + ",".join(done)
+        # بلا رابط: نفحص صفحة المدير في X (مع إعادة محاولة لأن التغريدة قد تتأخر)
+        ok = bool(self.request_check and self.request_check(time.time()))
+        if ok:
+            self.notify_admins("📣 منشور جديد في القناة بلا رابط — أفحص حساب المدير في X الآن…")
+            return "check-requested"
+        self.notify_admins("⚠️ منشور جديد في القناة لكن المحرك متوقف — شغّله ليُفحص حساب المدير.", [[("▶️ تشغيل المحرك", "eng:start")]])
+        return "engine-stopped"
 
     def _status_text(self):
         accounts = self.get_accounts()
@@ -354,11 +412,18 @@ class TelegramBot:
                     except Exception as e:
                         log.debug("setMyCommands: {}".format(e))
                 self.state, self.error, backoff = "running", "", 3
-                params = {"timeout": 10, "allowed_updates": json.dumps(["message", "callback_query"])}
+                params = {"timeout": 10, "allowed_updates": json.dumps(["message", "callback_query", "channel_post"])}
                 if offset is not None:
                     params["offset"] = offset
                 for upd in self._api("getUpdates", params, timeout=25):
                     offset = upd["update_id"] + 1
+                    post = upd.get("channel_post")
+                    if post:
+                        try:
+                            self.handle_channel_post(post)
+                        except Exception:
+                            log.exception("خطأ في معالجة منشور القناة")
+                        continue
                     cq = upd.get("callback_query")
                     if cq and cq.get("message"):
                         self.handle_callback(cq["message"]["chat"]["id"], cq["message"]["message_id"], cq["id"], cq.get("data", ""))

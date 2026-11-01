@@ -195,12 +195,15 @@ class AppService:
         self._lock = threading.Lock()
         self.bot = telegram_bot.TelegramBot(
             get_cfg=load_config, get_accounts=load_accounts,
-            schedule=lambda tid, text, cfg, chat_id=None: self._schedule(tid, text, cfg, "telegram", cfg["telegram"].get("instant", True), notify_chat=chat_id),
+            schedule=self._bot_schedule,
             save_admins=self._save_admins,
             engine_running=lambda: self.engine.status == "running",
             notices=self.completion_notices,
         )
         self.bot.ui = telegram_menu.BotUI(self)
+        self.bot.request_check = self.engine.request_check
+        self.engine.schedule_cb = lambda tid, text, cfg, instant: self._schedule(tid, text, cfg, "channel", instant)
+        self.engine.notify_cb = self.bot.notify_admins
 
     def start(self):
         self.bot.start()
@@ -219,6 +222,11 @@ class AppService:
         cfg = load_config()
         cfg["telegram"]["admin_ids"] = ids
         save_config(cfg)
+
+    def _bot_schedule(self, tid, text, cfg, chat_id=None, source="telegram"):
+        if source == "channel":
+            return self._schedule(tid, text, cfg, "channel", cfg["telegram"]["channel"].get("instant", True))
+        return self._schedule(tid, text, cfg, "telegram", cfg["telegram"].get("instant", True), notify_chat=chat_id)
 
     def _schedule(self, tid, text, cfg, source, priority=False, notify_chat=None):
         from . import monitor  # استيراد متأخر (playwright)
@@ -584,6 +592,11 @@ class AppService:
             raise ApiError(str(e))
         return {"comment": out, "tweet": text}
 
+    def tg_channels(self):
+        """القنوات التي رآها البوت مؤخراً (للتعرّف على معرّف القناة من الواجهة)."""
+        return [{"id": cid, "title": v["title"], "username": v["username"], "age_s": int(time.time() - v["ts"])}
+                for cid, v in sorted(self.bot.channels_seen.items(), key=lambda kv: -kv[1]["ts"]) if cid is not None]
+
     # ---- WARP ----
     def warp_status(self):
         cfg = load_config()["warp"]
@@ -691,6 +704,9 @@ def make_handler(svc, token, port):
 
     @route("POST", "/api/telegram/test")
     def _(b, **k): return svc.tg_test(b.get("token", ""))
+
+    @route("GET", "/api/telegram/channels")
+    def _(b, **k): return svc.tg_channels()
 
     @route("POST", "/api/telegram/pair")
     def _(b, **k): return {"code": svc.bot.new_pair_code(), "ttl_min": telegram_bot.PAIR_TTL_S // 60}

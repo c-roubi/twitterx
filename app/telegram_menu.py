@@ -85,6 +85,9 @@ ITEMS = [
     ("tc", "tg", "telegram.action_mix.comment", "pct", "⚡ احتمال التعليق (فوري)", "100"),
     ("td", "tg", "telegram.action_delay_s", "range", "تأخير بين عمليات الحساب (ثانية)", "2-6"),
     ("tn", "tg", "telegram.notify", "bool", "إشعار عند اكتمال التفاعل", ""),
+    ("ce2", "tg", "telegram.channel.enabled", "bool", "📣 مراقبة قناة الأدمن", ""),
+    ("ci", "tg", "telegram.channel.instant", "bool", "تنفيذ فوري لتغريدات القناة", ""),
+    ("cf", "tg", "telegram.channel.fallback_interval_min", "range", "الفحص الاحتياطي لـX (دقيقة)", "60-90"),
     ("ts", "tg", "telegram.spread_hours", "range", "مدة التوزيع عند إيقاف الفوري (ساعة)", "0.1-1"),
 ]
 BY_KEY = {i[0]: i for i in ITEMS}
