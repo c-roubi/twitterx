@@ -92,6 +92,8 @@ DEFAULT_CONFIG = {
         "admin_ids": [],
         "notify": True,
         "spread_hours": [0.1, 1.0],
+        "instant": True,
+        "action_delay_s": [2, 6],
         "ca_bundle": "",
         "insecure_ssl": False
     },

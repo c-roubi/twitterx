@@ -152,7 +152,11 @@ class TelegramTests(unittest.TestCase):
         self.assertIn("✅", r[0])
         tid, text, cfg = self.calls[0]
         self.assertEqual((tid, text), ("1234567890", "تغريدة رائعة"))
-        self.assertEqual(cfg["engagement"]["spread_hours"], self.cfg["telegram"]["spread_hours"])
+        self.assertIn("فوري", r[0])  # الوضع الافتراضي: فوري
+        self.cfg["telegram"]["instant"] = False
+        r = bot.handle_message(5, "https://x.com/u/status/1234567891")
+        self.assertEqual(self.calls[1][2]["engagement"]["spread_hours"], self.cfg["telegram"]["spread_hours"])
+        self.assertIn("متدرّج", r[0])
 
     def test_all_command_uses_enabled_accounts(self):
         bot = self.make([5])
@@ -163,6 +167,101 @@ class TelegramTests(unittest.TestCase):
         bot = self.make([5], scheduled=False)
         self.assertIn("مجدولة مسبقاً", bot.handle_message(5, "https://x.com/u/status/1234567890")[0])
         self.assertIn("لم أجد", bot.handle_message(5, "مرحبا")[0])
+
+
+class PriorityTests(unittest.TestCase):
+    """تغريدات عاجلة (أدمن): فورية، بالتتابع، بلا التقيّد بالحدود اليومية."""
+
+    def setUp(self):
+        from app import config, monitor
+        self.monitor = monitor
+        config.save_seen({})
+        self.cfg = load_config()
+        self.cfg["engagement"]["accounts_per_tweet"] = [2, 2]
+        self.cfg["engagement"]["action_mix"] = {"like": 1.0, "retweet": 1.0, "comment": 0.0}
+        self.accounts = {"p1": {"enabled": True}, "p2": {"enabled": True}}
+
+    def test_priority_due_now_and_separated(self):
+        e = self.monitor.schedule_for_tweet("111111111", "t", self.cfg, self.accounts, source="telegram", priority=True)
+        self.assertTrue(e["priority"])
+        self.assertTrue(all(t["due"] <= __import__("time").time() for t in e["queue"]))
+        self.assertEqual(len(self.monitor.due_tasks_for("p1", priority=True)), 1)
+        self.assertEqual(self.monitor.due_tasks_for("p1"), [])  # الجلسة العادية لا تلتقطها
+        self.assertTrue(self.monitor.priority_pending("p2"))
+
+    def test_normal_not_priority(self):
+        self.monitor.schedule_for_tweet("222222222", "t", self.cfg, self.accounts)
+        self.assertFalse(self.monitor.priority_pending("p1"))
+        self.assertEqual(self.monitor.due_tasks_for("p1", priority=True), [])
+
+    def _state(self):
+        z = {"likes": 0, "retweets": 0, "comments": 0, "follows": 0}
+        return {"done": dict(likes=6, retweets=1, comments=1, follows=0), "caps": dict(likes=6, retweets=1, comments=1, follows=0), "rest_day": True}
+
+    def test_priority_ignores_caps_and_rest_day(self):
+        from unittest import mock
+        from app import routine
+        self.monitor.schedule_for_tweet("333333333", "t", self.cfg, self.accounts, priority=True)
+        state, human = self._state(), mock.MagicMock()
+        with mock.patch.object(routine, "open_tweet_with_retry", return_value=(True, "ok")), \
+             mock.patch.object(routine, "like_tweet", return_value=(True, "ok")) as lk, \
+             mock.patch.object(routine, "retweet_tweet", return_value=(True, "ok")) as rt, \
+             mock.patch.object(routine, "save_state"):
+            routine._run_due_manager_tasks(mock.MagicMock(), "p1", self.cfg, state, human, priority=True)
+        self.assertEqual((lk.call_count, rt.call_count), (1, 1))
+        self.assertEqual(state["done"]["likes"], 7)  # تجاوز الحد 6 ويُعدّ
+        self.assertEqual(self.monitor.due_tasks_for("p1", priority=True), [])  # لا تُعاد
+        waits = [c.args for c in human.pause.call_args_list]
+        self.assertTrue(all(b <= 6 for a, b in waits), waits)  # تأخيرات قصيرة
+
+    def test_normal_still_respects_caps(self):
+        from unittest import mock
+        from app import routine
+        self.monitor.schedule_for_tweet("444444444", "t", self.cfg, self.accounts)
+        for t in self.monitor.load_seen()["444444444"]["queue"]:
+            t["due"] = 0
+        seen = self.monitor.load_seen(); seen["444444444"]["queue"][0]["due"] = 0; seen["444444444"]["queue"][1]["due"] = 0
+        self.monitor.save_seen(seen)
+        state = self._state(); state["rest_day"] = False
+        with mock.patch.object(routine, "open_tweet_with_retry", return_value=(True, "ok")), \
+             mock.patch.object(routine, "like_tweet", return_value=(True, "ok")) as lk, \
+             mock.patch.object(routine, "retweet_tweet", return_value=(True, "ok")) as rt, \
+             mock.patch.object(routine, "save_state"):
+            routine._run_due_manager_tasks(mock.MagicMock(), "p1", self.cfg, state, mock.MagicMock())
+        self.assertEqual((lk.call_count, rt.call_count), (0, 0))
+
+    def test_open_failure_gives_up_instead_of_looping(self):
+        from unittest import mock
+        from app import routine
+        self.monitor.schedule_for_tweet("555555555", "t", self.cfg, self.accounts, priority=True)
+        state = self._state()
+        with mock.patch.object(routine, "open_tweet_with_retry", return_value=(False, "network")), \
+             mock.patch.object(routine, "save_state"):
+            for _ in range(4):
+                routine._run_due_manager_tasks(mock.MagicMock(), "p1", self.cfg, state, mock.MagicMock(), priority=True)
+        self.assertEqual(self.monitor.due_tasks_for("p1", priority=True), [])
+
+    def test_check_priority_tasks_sequential_and_backoff(self):
+        from unittest import mock
+        from app import routine
+        routine._retry_after.clear()
+        self.monitor.schedule_for_tweet("666666666", "t", self.cfg, self.accounts, priority=True)
+        order = []
+        def fake(acc_id, *a, **k):
+            order.append(acc_id); return True
+        with mock.patch.object(routine, "run_priority_session", side_effect=fake):
+            n = routine.check_priority_tasks(self.cfg, self.accounts)
+            n2 = routine.check_priority_tasks(self.cfg, self.accounts)  # المهام ما زالت قائمة: انتظار 30ث
+        self.assertEqual((n, sorted(order)), (2, ["p1", "p2"]))
+        self.assertEqual(n2, 0)
+
+    def test_busy_account_lock(self):
+        from app import routine
+        self.assertTrue(routine._acquire("lock_x"))
+        self.assertFalse(routine._acquire("lock_x"))
+        self.assertFalse(routine.run_priority_session("lock_x", self.cfg, {"lock_x": {}}))
+        routine._release("lock_x")
+        self.assertTrue(routine._acquire("lock_x")); routine._release("lock_x")
 
 
 if __name__ == "__main__":

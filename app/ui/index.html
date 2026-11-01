@@ -534,7 +534,8 @@ PAGES.home = {
 const SRC = {manager: "المدير", telegram: "تيليجرام", manual: "يدوي"};
 function tweetRow(t) {
   const pct = t.total ? Math.round(t.done / t.total * 100) : 0;
-  const status = t.deleted ? '<span class="chip err">محذوفة</span>' : t.completed ? '<span class="chip ok">مكتملة</span>' : '<span class="chip info">قيد التنفيذ</span>';
+  const flash = t.priority ? '<span class="chip warn" title="تنفيذ فوري بالتتابع">⚡ فوري</span>' : "";
+  const status = flash + (t.deleted ? '<span class="chip err">محذوفة</span>' : t.completed ? '<span class="chip ok">مكتملة</span>' : '<span class="chip info">قيد التنفيذ</span>');
   return `<div class="listrow"><div class="grow"><div class="ell ltr" style="text-align:start"><a href="${esc(t.url)}" target="_blank" rel="noopener noreferrer">…/status/${esc(t.id)}</a></div>
     <div class="faint small">${ago(t.detected_at)} · ${SRC[t.source] || esc(t.source)}${t.text ? ` · ${esc(t.text.slice(0, 60))}` : ""}</div></div>
     <div style="width:160px"><div class="bar ${pct === 100 ? "ok" : ""}"><i style="width:${pct}%"></i></div><div class="faint small" style="margin-top:4px"><span class="num">${t.done}/${t.total}</span> عملية · <span class="num">${t.accounts}</span> حساب${t.failed ? ` · <span class="num">${t.failed}</span> فاشلة` : ""}</div></div>${status}</div>`;
@@ -614,7 +615,7 @@ PAGES.tweets = {
     view(head("التغريدات", "أضف رابط تغريدة لتتفاعل معها الحسابات، وتابع التقدّم") + `<div class="stack">
       <div class="card pad stack"><div class="field"><label for="t-url">رابط التغريدة</label><input class="inp ltr" id="t-url" placeholder="https://x.com/user/status/123456789" autocomplete="off" spellcheck="false"></div>
         <div class="field"><label for="t-text">نص التغريدة (اختياري)</label><textarea class="txt" id="t-text" rows="2" placeholder="يُستخدم لتوليد تعليقات تناسب المحتوى"></textarea></div>
-        <div class="row wrap" style="gap:24px"><label class="row"><span class="lbl" style="font-weight:400">كل الحسابات المفعّلة</span>${sw(false, 'id="t-all"')}</label><label class="row"><span class="lbl" style="font-weight:400">تنفيذ سريع (خلال ساعة)</span>${sw(true, 'id="t-fast"')}</label><span style="flex:1"></span>
+        <div class="row wrap" style="gap:24px"><label class="row"><span class="lbl" style="font-weight:400">كل الحسابات المفعّلة</span>${sw(false, 'id="t-all"')}</label><label class="row"><span class="lbl" style="font-weight:400" title="مثل تغريدة الأدمن: حساباً بعد حساب فوراً، بلا التقيّد بالحدود اليومية">تنفيذ فوري (يتجاوز الحدود اليومية)</span>${sw(true, 'id="t-fast"')}</label><span style="flex:1"></span>
         <button class="btn accent" data-act="tweet-add">${ic("play", "sm")}بدء التفاعل</button></div></div>
       <div class="h2">السجل</div><div class="card" id="tw-list"></div></div>`);
     this.load();
@@ -644,7 +645,9 @@ PAGES.telegram = {
         <div id="tg-admins"></div></div></div>
       <div class="step" id="s3"><div class="n">3</div><div class="body"><div class="title">التفعيل والخيارات</div>
         <div class="srow" style="padding:0;min-height:0;border:0"><div class="txtcol"><div class="t">تفعيل البوت</div><div class="d">يستمع للرسائل ما دام التطبيق مفتوحاً.</div></div><div class="c">${sw(tg.enabled, 'id="tg-en"')}</div></div>
-        <div class="srow" style="padding:0;min-height:0;border:0"><div class="txtcol"><div class="t">مدة توزيع التفاعل</div><div class="d">تُنفَّذ عمليات الروابط الواردة من تيليجرام خلال هذا المجال (أسرع من التغريدات العادية).</div></div><div class="c"><div class="rng" id="tg-spread"><span>من</span><input class="inp sm num r0" type="number" step="0.1" min="0" value="${tg.spread_hours[0]}"><span>إلى</span><input class="inp sm num r1" type="number" step="0.1" min="0" value="${tg.spread_hours[1]}"><span class="unit">ساعة</span></div></div></div>
+        <div class="srow" style="padding:0;min-height:0;border:0"><div class="txtcol"><div class="t">تنفيذ فوري كتغريدة أدمن ⚡</div><div class="d">تتفاعل الحسابات حساباً بعد حساب فوراً، بلا انتظار جلساتها ومن غير التقيّد بالحدود اليومية ولا يوم الراحة.</div></div><div class="c">${sw(tg.instant, 'id="tg-instant"')}</div></div>
+        <div class="srow" style="padding:0;min-height:0;border:0"><div class="txtcol"><div class="t">التأخير بين عمليات الحساب</div><div class="d">فاصل قصير بين الإعجاب والريتويت والتعليق داخل الحساب الواحد (في الوضع الفوري).</div></div><div class="c"><div class="rng" id="tg-delay"><span>من</span><input class="inp sm num r0" type="number" step="0.5" min="0" value="${tg.action_delay_s[0]}"><span>إلى</span><input class="inp sm num r1" type="number" step="0.5" min="0" value="${tg.action_delay_s[1]}"><span class="unit">ثانية</span></div></div></div>
+        <div class="srow" style="padding:0;min-height:0;border:0"><div class="txtcol"><div class="t">مدة توزيع التفاعل (عند إيقاف الوضع الفوري)</div><div class="d">تُوزَّع عمليات روابط تيليجرام خلال هذا المجال بدل التنفيذ الفوري.</div></div><div class="c"><div class="rng" id="tg-spread"><span>من</span><input class="inp sm num r0" type="number" step="0.1" min="0" value="${tg.spread_hours[0]}"><span>إلى</span><input class="inp sm num r1" type="number" step="0.1" min="0" value="${tg.spread_hours[1]}"><span class="unit">ساعة</span></div></div></div>
         <div class="row"><button class="btn accent" data-act="tg-save">حفظ</button></div></div></div></div>
       <div class="h2">طريقة الاستخدام</div><div class="card pad muted" style="line-height:1.9">أرسل للبوت رابط أي تغريدة ← يجدول التفاعل فوراً ويردّ بعدد الحسابات والعمليات.<br>
       <span class="ltr">/all</span> + رابط ← تفاعل بكل الحسابات المفعّلة &nbsp;·&nbsp; <span class="ltr">/status</span> ← حالة التطبيق &nbsp;·&nbsp; نص بعد الرابط ← يُستخدم لتعليق مناسب للمحتوى.</div>`);
@@ -760,7 +763,7 @@ const ACT = {
   async "tg-save"(b) {
     const sp = $("#tg-spread"); busy(b, true);
     try {
-      S.config = await api("POST", "/api/config", {telegram: {bot_token: $("#tg-token").value.trim(), ca_bundle: $("#tg-ca").value.trim(), insecure_ssl: $("#tg-insecure").getAttribute("aria-checked") === "true", enabled: $("#tg-en").getAttribute("aria-checked") === "true", spread_hours: [parseFloat($(".r0", sp).value), parseFloat($(".r1", sp).value)]}});
+      S.config = await api("POST", "/api/config", {telegram: {bot_token: $("#tg-token").value.trim(), ca_bundle: $("#tg-ca").value.trim(), insecure_ssl: $("#tg-insecure").getAttribute("aria-checked") === "true", enabled: $("#tg-en").getAttribute("aria-checked") === "true", instant: $("#tg-instant").getAttribute("aria-checked") === "true", action_delay_s: [parseFloat($(".r0", $("#tg-delay")).value), parseFloat($(".r1", $("#tg-delay")).value)], spread_hours: [parseFloat($(".r0", sp).value), parseFloat($(".r1", sp).value)]}});
       toast("تم حفظ إعدادات تيليجرام"); await refresh();
     } finally { busy(b, false); }
   },

@@ -195,7 +195,7 @@ class AppService:
         self._lock = threading.Lock()
         self.bot = telegram_bot.TelegramBot(
             get_cfg=load_config, get_accounts=load_accounts,
-            schedule=lambda tid, text, cfg: self._schedule(tid, text, cfg, "telegram"),
+            schedule=lambda tid, text, cfg: self._schedule(tid, text, cfg, "telegram", cfg["telegram"].get("instant", True)),
             save_admins=self._save_admins,
             engine_running=lambda: self.engine.status == "running",
         )
@@ -218,9 +218,12 @@ class AppService:
         cfg["telegram"]["admin_ids"] = ids
         save_config(cfg)
 
-    def _schedule(self, tid, text, cfg, source):
+    def _schedule(self, tid, text, cfg, source, priority=False):
         from . import monitor  # استيراد متأخر (playwright)
-        return monitor.schedule_for_tweet(tid, text, cfg, load_accounts(), source=source)
+        entry = monitor.schedule_for_tweet(tid, text, cfg, load_accounts(), source=source, priority=priority)
+        if entry and priority:
+            self.engine.wake()
+        return entry
 
     def _engine_start(self, dry_run):
         try:
@@ -260,6 +263,7 @@ class AppService:
                 "detected_at": e.get("detected_at", ""), "source": e.get("source", "manager"),
                 "accounts": len(q), "total": total, "done": done, "failed": failed,
                 "deleted": bool(e.get("deleted")), "completed": bool(e.get("completed_at")),
+                "priority": bool(e.get("priority")),
             })
         out.sort(key=lambda x: x["detected_at"], reverse=True)
         return out[:limit]
@@ -392,10 +396,8 @@ class AppService:
             raise ApiError("لا توجد حسابات مفعّلة")
         if body.get("all"):
             cfg["engagement"]["accounts_per_tweet"] = [len(enabled), len(enabled)]
-        if body.get("fast"):
-            cfg["engagement"]["spread_hours"] = [0.1, 1.0]
         text = str(body.get("text", ""))[:2000]
-        entry = self._schedule(ids[0], text, cfg, "manual")
+        entry = self._schedule(ids[0], text, cfg, "manual", bool(body.get("fast")))
         if not entry:
             raise ApiError("هذه التغريدة مجدولة مسبقاً")
         return {"id": ids[0], "accounts": len(entry["queue"])}

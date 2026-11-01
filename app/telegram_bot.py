@@ -184,7 +184,8 @@ class TelegramBot:
         if not enabled:
             return "❌ لا توجد حسابات مفعّلة."
         c = copy.deepcopy(cfg)
-        c["engagement"]["spread_hours"] = list(cfg["telegram"].get("spread_hours") or c["engagement"]["spread_hours"])
+        if not cfg["telegram"].get("instant", True):
+            c["engagement"]["spread_hours"] = list(cfg["telegram"].get("spread_hours") or c["engagement"]["spread_hours"])
         if everyone:
             c["engagement"]["accounts_per_tweet"] = [len(enabled), len(enabled)]
         try:
@@ -197,7 +198,8 @@ class TelegramBot:
             return "ℹ️ هذه التغريدة مجدولة مسبقاً ({}).".format(tid)
         q = entry.get("queue", [])
         acts = sum(len(t["actions"]) for t in q)
-        return "✅ جُدول التفاعل مع التغريدة {}\n• الحسابات: {}\n• العمليات: {}".format(tid, len(q), acts)
+        mode = "فوري ⚡ بالتتابع (بلا التقيّد بالحدود اليومية)" if cfg["telegram"].get("instant", True) else "متدرّج"
+        return "✅ جُدول التفاعل مع التغريدة {}\n• الحسابات: {}\n• العمليات: {}\n• التنفيذ: {}".format(tid, len(q), acts, mode)
 
     def _status_text(self):
         accounts = self.get_accounts()

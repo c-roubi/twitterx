@@ -15,6 +15,8 @@ TICK_S = 60
 class Engine:
     def __init__(self):
         self._thread = None
+        self._prio_thread = None
+        self._wake = threading.Event()
         self._stop = threading.Event()
         self._lock = threading.Lock()
         self.dry_run = False
@@ -26,7 +28,11 @@ class Engine:
 
     # ---------- الحالة ----------
     def running(self):
-        return bool(self._thread and self._thread.is_alive())
+        return any(t and t.is_alive() for t in (self._thread, self._prio_thread))
+
+    def wake(self):
+        """إيقاظ عامل المهام العاجلة فوراً (عند وصول تغريدة عاجلة)."""
+        self._wake.set()
 
     @property
     def status(self):
@@ -55,7 +61,9 @@ class Engine:
             self.last_error = ""
             self.next_manager_check = 0.0
             self._thread = threading.Thread(target=self._run, name="engine", daemon=True)
+            self._prio_thread = threading.Thread(target=self._run_priority, name="engine-priority", daemon=True)
             self._thread.start()
+            self._prio_thread.start()
             log.info("بدء المحرك" + (" (وضع المحاكاة)" if dry_run else ""))
             return True
 
@@ -64,10 +72,29 @@ class Engine:
         if not self.running():
             return False
         self._stop.set()
+        self._wake.set()
         log.info("طلب إيقاف المحرك - ستنتهي الجلسة الجارية أولاً")
         if wait:
-            self._thread.join(wait)
+            for t in (self._thread, self._prio_thread):
+                if t:
+                    t.join(wait)
         return True
+
+    def _run_priority(self):
+        """عامل مستقل للمهام العاجلة: يعمل بالتوازي مع الجلسات العادية ولا ينتظرها."""
+        try:
+            from . import routine
+        except Exception as e:
+            log.error("تعذّر تحميل وحدة المهام العاجلة: {}".format(e))
+            return
+        while not self._stop.is_set():
+            try:
+                routine.check_priority_tasks(load_config(), load_accounts(), dry_run=self.dry_run,
+                                             should_stop=self._stop.is_set)
+            except Exception as e:
+                log.error("خطأ في المهام العاجلة: {}".format(e))
+            self._wake.wait(5)
+            self._wake.clear()
 
     # ---------- الحلقة ----------
     def _run(self):

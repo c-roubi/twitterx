@@ -105,8 +105,11 @@ def _fetch_with_account(cfg, accounts, acc_id):
             pass
 
 
-def schedule_for_tweet(tid, text="", cfg=None, accounts=None, source="manager"):
+def schedule_for_tweet(tid, text="", cfg=None, accounts=None, source="manager", priority=False):
     """اختيار مجموعة حسابية عشوائية وتوزيع مهام عليها بجدول متدرج.
+
+    priority=True: تغريدة عاجلة (مثل أوامر الأدمن): تُنفَّذ فوراً وبالتتابع حساباً بعد حساب،
+    بدون انتظار جلسة الحساب ومن غير التقيّد بالحدود اليومية أو يوم الراحة.
 
     text: نص التغريدة (يُحفظ لاستخدامه في التوليد السياقي للتعليقات).
     """
@@ -149,7 +152,7 @@ def schedule_for_tweet(tid, text="", cfg=None, accounts=None, source="manager"):
             actions.append("comment")
         if not actions:
             actions = ["like"]
-        due = now + random.uniform(120, spread)  # أول عملية بعد دقيقتين على الأقل
+        due = now if priority else now + random.uniform(120, spread)  # العاجلة فوراً، العادية بعد دقيقتين على الأقل
         queue.append({"account": aid, "actions": actions, "due": due, "done": []})
 
     seen[tid] = {
@@ -159,6 +162,7 @@ def schedule_for_tweet(tid, text="", cfg=None, accounts=None, source="manager"):
         "detected_at": datetime.now().isoformat(timespec="seconds"),
         "scheduled": True,
         "source": source,
+        "priority": bool(priority),
         "queue": queue,
     }
     save_seen(seen)
@@ -166,7 +170,7 @@ def schedule_for_tweet(tid, text="", cfg=None, accounts=None, source="manager"):
     return seen[tid]
 
 
-def due_tasks_for(acc_id, seen=None):
+def due_tasks_for(acc_id, seen=None, priority=False):
     """مهام الحساب المستحقة التنفيذ الآن (تتخطى المحذوفة والمتخلى عنها)."""
     seen = seen or load_seen()
     tasks = []
@@ -174,6 +178,8 @@ def due_tasks_for(acc_id, seen=None):
         if not entry.get("scheduled"):
             continue
         if entry.get("deleted"):
+            continue
+        if bool(entry.get("priority")) != bool(priority):
             continue
         for task in entry.get("queue", []):
             if task["account"] != acc_id:
@@ -191,6 +197,14 @@ def due_tasks_for(acc_id, seen=None):
                     "remaining": remaining,
                 })
     return tasks
+
+
+def priority_pending(acc_id):
+    """هل لدى الحساب مهام عاجلة مستحقة؟ (تُستخدم لإنهاء التصفح العادي مبكراً)."""
+    try:
+        return bool(due_tasks_for(acc_id, priority=True))
+    except Exception:
+        return False
 
 
 def mark_done(tid, acc_id, action):
