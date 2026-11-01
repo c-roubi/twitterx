@@ -622,5 +622,109 @@ class StaleTweetTests(unittest.TestCase):
         self.assertFalse(any(d.startswith("tw:x:") for row in v.rows for _, d in row))
 
 
+class CommentQualityTests(unittest.TestCase):
+    """لغة مطابقة للتغريدة + منع التكرار والتشابه (سبام)."""
+
+    def setUp(self):
+        from app import comments, config
+        self.c, self.config = comments, config
+        if os.path.exists(comments.HISTORY_PATH):
+            os.remove(comments.HISTORY_PATH)
+        self.cfg = config.load_config()
+        self.cfg["comments"]["ai"]["enabled"] = False
+        self.cfg["comments"]["contextual"] = False   # نختبر الطبقة العامة هنا
+        with open(config.COMMENTS_PATH, "w", encoding="utf-8") as f:   # ملف قوالب عربي فقط (الوضع الافتراضي)
+            f.write("الأسواق هيك، صعود وهبوط، المهم الاستراتيجية\nرؤية واضحة، شكراً على المشاركة\nكلام في الصميم\nطرح راقٍ وواضح\n")
+
+    def test_detect_lang(self):
+        d = self.c.detect_lang
+        self.assertEqual(d("Bitcoin is breaking resistance today"), "en")
+        self.assertEqual(d("البيتكوين يكسر المقاومة اليوم"), "ar")
+        self.assertEqual(d("$BTC https://x.com/a/status/1 @user #crypto"), None)
+        self.assertEqual(d(""), None)
+        self.assertEqual(d("Bitcoin breaks 70k البيتكوين"), "en")  # الأغلب إنجليزي
+
+    def test_similarity_catches_emoji_and_diacritics_variants(self):
+        n = self.c.norm_text
+        a = "الأسواق هيك، صعود وهبوط، المهم الاستراتيجية"
+        self.assertTrue(self.c.similar(n(a), n(a + " 🔥")))                 # مثل حالة Tony في لقطتك
+        self.assertTrue(self.c.similar(n("Great call!!"), n("great call 🔥")))
+        self.assertTrue(self.c.similar(n("الاسواق هيك"), n("الأسواق هَيك")))
+        self.assertFalse(self.c.similar(n("Great call"), n("Clean chart, levels look clear")))
+
+    def test_english_tweet_never_gets_arabic_even_with_arabic_only_templates(self):
+        for _ in range(25):
+            t = self.c.build_comment_for("Bitcoin breaks above resistance with strong volume", cfg=self.cfg, reserve=False)
+            self.assertIsNotNone(t)
+            self.assertFalse(self.c.has_arabic(t), t)
+
+    def test_arabic_tweet_gets_arabic(self):
+        for _ in range(15):
+            t = self.c.build_comment_for("البيتكوين يكسر المقاومة بحجم تداول قوي", cfg=self.cfg, reserve=False)
+            self.assertTrue(self.c.has_arabic(t), t)
+
+    def test_unknown_language_follows_en_ratio(self):
+        self.cfg["comments"]["en_ratio"] = 1.0
+        self.assertFalse(self.c.has_arabic(self.c.build_comment_for("", cfg=self.cfg, reserve=False)))
+        self.cfg["comments"]["en_ratio"] = 0.0
+        self.assertTrue(self.c.has_arabic(self.c.build_comment_for("", cfg=self.cfg, reserve=False)))
+
+    def test_match_language_can_be_disabled(self):
+        self.cfg["comments"]["match_language"] = False
+        self.cfg["comments"]["en_ratio"] = 0.0
+        self.assertTrue(self.c.has_arabic(self.c.build_comment_for("Bitcoin is pumping hard today", cfg=self.cfg, reserve=False)))
+
+    def test_no_near_duplicates_across_accounts_and_tweets(self):
+        out = []
+        for i in range(14):
+            t = self.c.build_comment_for("Bitcoin is pumping hard today", cfg=self.cfg, acc_id="acc_%d" % (i % 4))
+            if t:
+                out.append(self.c.norm_text(t))
+        self.assertGreaterEqual(len(out), 10)
+        for i in range(len(out)):
+            for j in range(i + 1, len(out)):
+                self.assertFalse(self.c.similar(out[i], out[j]), (out[i], out[j]))
+
+    def test_used_texts_block_variants_and_exhaustion_returns_none(self):
+        used = list(self.c.DEFAULT_EN_GENERIC) + ["x 🔥"]
+        self.assertIsNone(self.c.build_comment_for("Bitcoin is pumping hard today", used_texts=used, cfg=self.cfg, reserve=False))
+        self.assertEqual(self.c.norm_text("a 🔥!"), "a")
+
+    def test_reservation_blocks_concurrent_pick(self):
+        first = self.c.build_comment_for("Bitcoin is pumping hard today", cfg=self.cfg, acc_id="a1")
+        for _ in range(20):
+            nxt = self.c.build_comment_for("Bitcoin is pumping hard today", cfg=self.cfg, acc_id="a2", reserve=False)
+            self.assertFalse(self.c.similar(self.c.norm_text(first), self.c.norm_text(nxt)))
+
+    def test_ai_prompt_forces_language(self):
+        from unittest import mock
+        from app import ai_comments
+        ai_comments._last_call = 0
+        seen = {}
+        def fake(url, headers, body, ctx, timeout=20):
+            seen["p"] = body["contents"][0]["parts"][0]["text"]
+            return {"candidates": [{"content": {"parts": [{"text": "nice"}]}}]}
+        with mock.patch.object(ai_comments, "_call_api", side_effect=fake):
+            ai_comments.generate_ai_comment("BTC up", {"provider": "gemini", "api_key": "k", "min_interval_s": 0}, lang="en")
+        self.assertIn("ONLY in English", seen["p"])
+
+    def test_task_skips_comment_when_no_unique_text(self):
+        from unittest import mock
+        from app import monitor, routine
+        self.config.save_seen({})
+        cfg = self.config.load_config()
+        cfg["engagement"]["accounts_per_tweet"] = [1, 1]
+        cfg["engagement"]["action_mix"] = {"like": 0.0, "retweet": 0.0, "comment": 1.0}
+        monitor.schedule_for_tweet("888777666", "", cfg, {"cq1": {"enabled": True}}, priority=True)
+        state = {"done": {"likes": 0, "retweets": 0, "comments": 0, "follows": 0}, "caps": {"likes": 9, "retweets": 9, "comments": 9, "follows": 9}}
+        with mock.patch.object(routine, "open_tweet_with_retry", return_value=(True, "ok")), \
+             mock.patch.object(routine, "_extract_open_tweet_text", return_value="Bitcoin"), \
+             mock.patch.object(routine, "build_comment_for", return_value=None), \
+             mock.patch.object(routine, "comment_on_tweet") as cm, mock.patch.object(routine, "save_state"):
+            routine._run_due_manager_tasks(mock.MagicMock(), "cq1", cfg, state, mock.MagicMock(), priority=True)
+        cm.assert_not_called()
+        self.assertEqual(monitor.due_tasks_for("cq1", priority=True), [])  # لا تُعاد المحاولة
+
+
 if __name__ == "__main__":
     unittest.main()

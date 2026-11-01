@@ -74,6 +74,7 @@ ITEMS = [
     ("wm", "wrm", "warmup.session_minutes", "range", "مدة جلسة الإحماء (دقيقة)", "8-15"),
     ("ce", "cmt", "comments.en_ratio", "pct", "نسبة التعليقات الإنجليزية", "90"),
     ("cc", "cmt", "comments.contextual", "bool", "تعليقات سياقية", ""),
+    ("cl", "cmt", "comments.match_language", "bool", "اللغة تتبع لغة التغريدة", ""),
     ("ca", "cmt", "comments.ai.enabled", "bool", "التوليد بالذكاء الاصطناعي", ""),
     ("we2", "net", "warp.enabled", "bool", "تدوير IP عبر WARP", ""),
     ("wa", "net", "warp.accounts_per_ip", "int", "الحسابات لكل IP", "5"),

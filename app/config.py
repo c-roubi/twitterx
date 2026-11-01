@@ -42,6 +42,7 @@ DEFAULT_CONFIG = {
     },
     "comments": {
         "contextual": True,
+        "match_language": True,
         "en_ratio": 0.9,
         "ai": {
             "enabled": False,

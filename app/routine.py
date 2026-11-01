@@ -478,7 +478,10 @@ def _open_and_comment(page, url, acc_id, state, human, cfg=None, en_ratio=None):
         return False
     tweet_text = _extract_open_tweet_text(page)
     used = {c for t, e in load_seen().items() for c in e.get("comments_used", [])}
-    text = build_comment_for(tweet_text, used_texts=used, cfg=cfg, en_ratio=en_ratio)
+    text = build_comment_for(tweet_text, used_texts=used, cfg=cfg, en_ratio=en_ratio, acc_id=acc_id)
+    if not text:
+        log.warning(f"{acc_id} | لا يوجد تعليق غير مكرر متاح - تخطّي التعليق")
+        return False
     res, msg = comment_on_tweet(page, text, human)
     if res:
         _mark_done(state, "comments")
@@ -582,7 +585,11 @@ def _run_due_manager_tasks(page, acc_id, cfg, state, human, acc=None, priority=F
                     if tweet_text:
                         task["text"] = tweet_text
                         monitor.set_tweet_text(task["tweet_id"], tweet_text)
-                text = build_comment_for(tweet_text, used_texts=used, cfg=cfg, en_ratio=en_ratio)
+                text = build_comment_for(tweet_text, used_texts=used, cfg=cfg, en_ratio=en_ratio, acc_id=acc_id)
+                if not text:  # كل التعليقات المتاحة مكررة: الأفضل ألا نعلّق بدل أن نُصنَّف سبام
+                    log.warning(f"{acc_id} | لا يوجد تعليق غير مكرر لـ {task['tweet_id']} - تخطّي التعليق")
+                    monitor.give_up_action(task["tweet_id"], acc_id, "comment")
+                    continue
                 res, msg = comment_on_tweet(page, text, human)
                 if res:
                     _record_comment(task["url"], text, task["tweet_id"])

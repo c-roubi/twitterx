@@ -93,7 +93,7 @@ def _clean(text):
     return text or None
 
 
-def generate_ai_comment(tweet_text, ai_cfg, net_cfg=None, raise_errors=False, ignore_interval=False):
+def generate_ai_comment(tweet_text, ai_cfg, net_cfg=None, raise_errors=False, ignore_interval=False, lang=None):
     """توليد تعليق (إنجليزي غالباً مع $TICKER) من نص التغريدة عبر المزوّد المحدد.
 
     يرجع None عند أي خطأ (مع تسجيل السبب في السجلات)؛ raise_errors=True يرفع AIError لعرضه في الاختبار.
@@ -127,6 +127,12 @@ def generate_ai_comment(tweet_text, ai_cfg, net_cfg=None, raise_errors=False, ig
         user_model = ""
     persona = random.choice(_PERSONAS)
     user_msg = "Persona: {}.\n\nTweet:\n{}\n\nWrite only the comment.".format(persona, tweet_text[:500])
+    system = _SYSTEM_PROMPT
+    if lang == "en":
+        system += " IMPORTANT: the tweet is in English, so reply ONLY in English."
+    elif lang == "ar":
+        system += " IMPORTANT: the tweet is in Arabic, so reply ONLY in simple Arabic (no English sentences)."
+    system += " Never repeat common stock phrases; make the reply specific to this tweet."
     ctx = net.ssl_context(net_cfg)
 
     try:
@@ -135,7 +141,7 @@ def generate_ai_comment(tweet_text, ai_cfg, net_cfg=None, raise_errors=False, ig
             resp = None
             for i, model in enumerate(models):
                 url = "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent".format(model)
-                body = {"contents": [{"parts": [{"text": "{}\n\n{}".format(_SYSTEM_PROMPT, user_msg)}]}]}
+                body = {"contents": [{"parts": [{"text": "{}\n\n{}".format(system, user_msg)}]}]}
                 try:
                     resp = _call_api(url, {"Content-Type": "application/json", "x-goog-api-key": api_key}, body, ctx)
                     break
@@ -152,7 +158,7 @@ def generate_ai_comment(tweet_text, ai_cfg, net_cfg=None, raise_errors=False, ig
                 return fail("مزوّد غير مدعوم: {}".format(provider))
             body = {
                 "model": user_model or DEFAULT_MODELS.get(provider),
-                "messages": [{"role": "system", "content": _SYSTEM_PROMPT}, {"role": "user", "content": user_msg}],
+                "messages": [{"role": "system", "content": system}, {"role": "user", "content": user_msg}],
                 "temperature": 0.9,
                 "max_tokens": 60,
             }

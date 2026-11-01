@@ -3,3 +3,5 @@ __pycache__/
 data/warp_rotate.lock
 data/logs/
 data/warp_state.json
+data/comment_history.json
+data/notified.json
