@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
 """إدارة ملفات الإعدادات والحسابات (مع حماية البيانات بالكتابة الذرية)."""
+import functools
 import json
 import os
 import sys
+import threading
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.environ.get("SMARTENGAGE_DATA") or os.path.join(BASE_DIR, "data")
@@ -246,6 +248,18 @@ def load_comments():
         return lines or DEFAULT_COMMENTS.strip().splitlines()
     except Exception:
         return DEFAULT_COMMENTS.strip().splitlines()
+
+
+# قفل لكل عمليات قراءة-تعديل-كتابة على seen.json (محرك + عامل عاجل + بوت + واجهة تعمل بالتوازي)
+SEEN_LOCK = threading.RLock()
+
+
+def locked_seen(fn):
+    @functools.wraps(fn)
+    def wrapper(*a, **k):
+        with SEEN_LOCK:
+            return fn(*a, **k)
+    return wrapper
 
 
 def load_seen():

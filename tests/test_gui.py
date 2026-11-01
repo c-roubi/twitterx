@@ -117,7 +117,7 @@ class TelegramTests(unittest.TestCase):
         self.saved = []
         self.calls = []
 
-        def sched(tid, text, cfg):
+        def sched(tid, text, cfg, chat_id=None):
             self.calls.append((tid, text, cfg))
             return scheduled if scheduled is not None else {"queue": [{"actions": ["like", "retweet"]}, {"actions": ["like"]}]}
         return telegram_bot.TelegramBot(
@@ -262,6 +262,167 @@ class PriorityTests(unittest.TestCase):
         self.assertFalse(routine.run_priority_session("lock_x", self.cfg, {"lock_x": {}}))
         routine._release("lock_x")
         self.assertTrue(routine._acquire("lock_x")); routine._release("lock_x")
+
+
+class BotMenuTests(unittest.TestCase):
+    """قوائم البوت: أزرار + تعديل الإعدادات والكلمات المفتاحية والتعليقات من تيليجرام."""
+
+    @classmethod
+    def setUpClass(cls):
+        from app import config
+        cls.config = config
+        cls.svc = server.AppService()
+        cls.ui = cls.svc.bot.ui
+        cls.chat = 77
+
+    def setUp(self):
+        self.svc.save_cfg = None
+        cfg = self.config.load_config()
+        cfg["telegram"]["admin_ids"] = [self.chat]
+        cfg["follow"]["queries"] = ["bitcoin", "ethereum", "solana"]
+        cfg["follow"]["enabled"] = True
+        cfg["engagement"]["accounts_per_tweet"] = [6, 12]
+        self.config.save_config(cfg)
+        self.ui.cancel(self.chat)
+        self.calls = []
+        self.svc.bot._api = lambda method, params=None, **k: self.calls.append((method, params)) or {"message_id": 1}
+
+    def cfg(self):
+        return self.config.load_config()
+
+    def labels(self, view):
+        return [l for row in view.rows for l, _ in row]
+
+    def test_home_buttons(self):
+        v = self.ui.home()
+        self.assertTrue(all(len(d.encode()) <= 64 for row in v.rows for _, d in row))
+        self.assertIn("🛠 الإعدادات", self.labels(v))
+        self.assertIn("🔑 الكلمات المفتاحية", self.labels(v))
+
+    def test_toggle_setting(self):
+        v = self.ui.route(self.chat, "set:i:fe")
+        self.assertFalse(self.cfg()["follow"]["enabled"])
+        self.assertEqual(v.notice, "تم الحفظ ✅")
+        self.ui.route(self.chat, "set:i:fe")
+        self.assertTrue(self.cfg()["follow"]["enabled"])
+
+    def test_range_pct_input_flow(self):
+        v = self.ui.route(self.chat, "set:i:ap")
+        self.assertTrue(self.ui.has_pending(self.chat))
+        self.assertIn("أرسل القيمة", v.text)
+        bad = self.ui.on_text(self.chat, "9-5")
+        self.assertIn("❌", bad.text)
+        self.assertEqual(self.cfg()["engagement"]["accounts_per_tweet"], [6, 12])
+        self.assertTrue(self.ui.has_pending(self.chat))  # يبقى منتظراً لقيمة صحيحة
+        ok = self.ui.on_text(self.chat, "٥-٩")  # أرقام عربية
+        self.assertEqual(self.cfg()["engagement"]["accounts_per_tweet"], [5, 9])
+        self.assertFalse(self.ui.has_pending(self.chat))
+        self.ui.route(self.chat, "set:i:ml"); self.ui.on_text(self.chat, "80%")
+        self.assertAlmostEqual(self.cfg()["engagement"]["action_mix"]["like"], 0.8)
+        self.ui.route(self.chat, "set:i:ml"); self.assertIn("❌", self.ui.on_text(self.chat, "150").text)
+        self.ui.route(self.chat, "set:i:ah"); self.ui.on_text(self.chat, "9:30-22:00")
+        self.assertEqual(self.cfg()["behavior"]["active_hours"], ["09:30", "22:00"])
+
+    def test_server_validation_surfaces(self):
+        self.ui.route(self.chat, "set:i:ap")
+        v = self.ui.on_text(self.chat, "9999-99999")  # خارج النطاق المسموح
+        self.assertIn("❌", v.text)
+        self.assertEqual(self.cfg()["engagement"]["accounts_per_tweet"], [6, 12])
+
+    def test_navigation_cancels_pending(self):
+        self.ui.route(self.chat, "set:i:ap")
+        self.ui.route(self.chat, "home")
+        self.assertFalse(self.ui.has_pending(self.chat))
+
+    def test_keywords(self):
+        self.ui.route(self.chat, "kw:add")
+        self.ui.on_text(self.chat, "Bitcoin، doge\nsui, ")
+        self.assertEqual(self.cfg()["follow"]["queries"], ["bitcoin", "ethereum", "solana", "doge", "sui"])  # بلا تكرار
+        v = self.ui.route(self.chat, "kw:del:0")
+        rm = [d for row in v.rows for _, d in row if d.startswith("kw:rm:")]
+        self.ui.route(self.chat, rm[0])
+        self.assertEqual(len(self.cfg()["follow"]["queries"]), 4)
+        self.ui.route(self.chat, "kw:rm:0:ffffff")  # بصمة قديمة: لا يحذف شيئاً
+        self.assertEqual(len(self.cfg()["follow"]["queries"]), 4)
+        self.ui.route(self.chat, "kw:rep"); self.ui.on_text(self.chat, "a\nb")
+        self.assertEqual(self.cfg()["follow"]["queries"], ["a", "b"])
+        self.ui.route(self.chat, "kw:clr2")
+        self.assertEqual(self.cfg()["follow"]["queries"], [])
+
+    def test_comments(self):
+        before = len(self.ui.svc.comments_list())
+        self.ui.route(self.chat, "cm:add"); self.ui.on_text(self.chat, "قالب جديد ١\nقالب جديد ٢")
+        self.assertEqual(len(self.ui.svc.comments_list()), before + 2)
+        v = self.ui.route(self.chat, "cm:del:0")
+        self.assertTrue(any(d.startswith("cm:rm:") for row in v.rows for _, d in row))
+
+    def test_accounts_toggle(self):
+        a = self.svc.add_account({"handle": "menu_acc"})
+        v = self.ui.route(self.chat, "acc:0")
+        self.assertTrue(any(l.endswith("@menu_acc") for l in self.labels(v)))
+        self.ui.route(self.chat, "acc:t:%s:0" % a["id"])
+        self.assertFalse(self.svc.account_view(a["id"], self.config.load_accounts()[a["id"]])["enabled"])
+        self.svc.delete_account(a["id"])
+
+    def test_engine_buttons(self):
+        from unittest import mock
+        with mock.patch.object(self.svc, "_engine_start") as st, mock.patch.object(self.svc.engine, "stop") as sp:
+            self.ui.route(self.chat, "eng:dry")
+            st.assert_called_once_with(True)
+            self.ui.route(self.chat, "eng:stop")
+            sp.assert_called_once()
+
+    def test_callback_auth_and_edit(self):
+        self.svc.bot.handle_callback(999, 5, "cb1", "set")  # غير أدمن
+        self.assertEqual(self.calls[-1][0], "answerCallbackQuery")
+        self.assertEqual(self.calls[-1][1]["text"], "غير مصرّح")
+        self.calls.clear()
+        self.svc.bot.handle_callback(self.chat, 5, "cb2", "set")
+        methods = [c[0] for c in self.calls]
+        self.assertEqual(methods, ["answerCallbackQuery", "editMessageText"])
+        edit = self.calls[1][1]
+        self.assertEqual(edit["parse_mode"], "HTML")
+        self.assertIn("inline_keyboard", edit["reply_markup"])
+
+    def test_messages_with_buttons(self):
+        bot = self.svc.bot
+        r = bot.handle_message(self.chat, "/menu")
+        self.assertTrue(r[0].markup)
+        bot.handle_message(self.chat, "/menu")
+        self.ui.route(self.chat, "kw:add")
+        r = bot.handle_message(self.chat, "pepe")  # نص عادي أثناء الانتظار ← يُعالَج كإدخال
+        self.assertIn("pepe", self.cfg()["follow"]["queries"])
+        self.ui.route(self.chat, "kw:add")
+        bot.handle_message(self.chat, "/cancel")
+        self.assertFalse(self.ui.has_pending(self.chat))
+        r = bot.handle_message(self.chat, "hello")
+        self.assertTrue(r[0].markup)  # لا رابط: زر القائمة
+
+    def test_link_reply_has_progress_button(self):
+        from unittest import mock
+        a = self.svc.add_account({"handle": "lnk_acc"})
+        try:
+            with mock.patch.object(self.svc.bot, "engine_running", return_value=True):
+                r = self.svc.bot.handle_message(self.chat, "https://x.com/u/status/9876543210123")
+            self.assertTrue(any(d.startswith("tw:r:9876543210123") for row in r[0].markup for _, d in row), r[0])
+            d = self.svc.tweet_detail("9876543210123")
+            self.assertTrue(d["priority"] and d["total"] >= 1)
+            v = self.ui.route(self.chat, "tw:r:9876543210123")
+            self.assertIn("9876543210123", v.text)
+            self.assertEqual(self.svc.completion_notices(), [])  # لم تكتمل بعد
+        finally:
+            self.svc.delete_account(a["id"])
+
+    def test_completion_notice_once(self):
+        from app import config
+        seen = config.load_seen()
+        seen["5550001"] = {"scheduled": True, "url": "u", "notify_chat": self.chat, "completed_at": "2026-01-01T00:00:00",
+                           "queue": [{"account": "x", "actions": ["like"], "done": ["like"]}]}
+        config.save_seen(seen)
+        n = self.svc.completion_notices()
+        self.assertEqual((len(n), n[0][0]), (1, self.chat))
+        self.assertIn("اكتمل", n[0][1])
+        self.assertEqual(self.svc.completion_notices(), [])
 
 
 if __name__ == "__main__":

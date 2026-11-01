@@ -15,7 +15,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 
-from . import telegram_bot, warp
+from . import telegram_bot, telegram_menu, warp
 from .config import (
     COMMENTS_PATH, DEFAULT_CONFIG, LOGS_DIR, PROFILES_DIR, SESSIONS_DIR, STATE_DIR,
     _atomic_save, _deep_merge, ensure_initial_files, load_accounts, load_config,
@@ -195,10 +195,12 @@ class AppService:
         self._lock = threading.Lock()
         self.bot = telegram_bot.TelegramBot(
             get_cfg=load_config, get_accounts=load_accounts,
-            schedule=lambda tid, text, cfg: self._schedule(tid, text, cfg, "telegram", cfg["telegram"].get("instant", True)),
+            schedule=lambda tid, text, cfg, chat_id=None: self._schedule(tid, text, cfg, "telegram", cfg["telegram"].get("instant", True), notify_chat=chat_id),
             save_admins=self._save_admins,
             engine_running=lambda: self.engine.status == "running",
+            notices=self.completion_notices,
         )
+        self.bot.ui = telegram_menu.BotUI(self)
 
     def start(self):
         self.bot.start()
@@ -218,9 +220,9 @@ class AppService:
         cfg["telegram"]["admin_ids"] = ids
         save_config(cfg)
 
-    def _schedule(self, tid, text, cfg, source, priority=False):
+    def _schedule(self, tid, text, cfg, source, priority=False, notify_chat=None):
         from . import monitor  # استيراد متأخر (playwright)
-        entry = monitor.schedule_for_tweet(tid, text, cfg, load_accounts(), source=source, priority=priority)
+        entry = monitor.schedule_for_tweet(tid, text, cfg, load_accounts(), source=source, priority=priority, notify_chat=notify_chat)
         if entry and priority:
             self.engine.wake()
         return entry
@@ -231,6 +233,72 @@ class AppService:
         except Exception as e:
             raise ApiError("مكتبات التشغيل غير جاهزة: {} — ثبّت المتطلبات (pip install -r requirements.txt && python -m playwright install chromium)".format(e), 500)
         return self.engine.start(dry_run)
+
+    # ---- واجهة مبسّطة للبوت (قوائم تيليجرام) ----
+    def cfg(self):
+        return load_config()
+
+    def patch_config(self, partial):
+        return self.set_config(partial)
+
+    def accounts_view(self):
+        return [self.account_view(k, v) for k, v in load_accounts().items()]
+
+    def set_account_enabled(self, aid, on):
+        return self.update_account(aid, {"enabled": bool(on)})
+
+    def engine_start(self, dry_run=False):
+        return self._engine_start(bool(dry_run))
+
+    def engine_stop(self):
+        return self.engine.stop()
+
+    def comments_list(self):
+        return [l.strip() for l in self.get_comments().splitlines() if l.strip()]
+
+    def set_comments_list(self, items):
+        return self.set_comments("\n".join(items))
+
+    def tweet_detail(self, tid):
+        e = load_seen().get(tid)
+        if not e:
+            return None
+        by = {"like": [0, 0], "retweet": [0, 0], "comment": [0, 0]}
+        failed = done = total = 0
+        for t in e.get("queue", []):
+            for a in t.get("actions", []):
+                total += 1
+                by.setdefault(a, [0, 0])[1] += 1
+                if a in t.get("done", []):
+                    done += 1
+                    by[a][0] += 1
+            failed += len(t.get("failed", []))
+        return {"done": done, "total": total, "failed": failed, "by": by, "accounts": len(e.get("queue", [])),
+                "priority": bool(e.get("priority")), "deleted": bool(e.get("deleted")),
+                "completed": bool(e.get("completed_at")), "url": e.get("url", "")}
+
+    def completion_notices(self):
+        """إشعارات لمن أرسل الرابط عبر تيليجرام عند اكتمال/حذف التغريدة (تُرسَل مرة واحدة)."""
+        path = os.path.join(os.path.dirname(COMMENTS_PATH), "notified.json")
+        try:
+            with open(path, encoding="utf-8") as f:
+                sent = set(json.load(f))
+        except (OSError, ValueError):
+            sent = set()
+        out = []
+        for tid, e in load_seen().items():
+            chat = e.get("notify_chat")
+            if not chat or tid in sent or not (e.get("completed_at") or e.get("deleted")):
+                continue
+            d = self.tweet_detail(tid)
+            text = ("🗑 التغريدة <code>{}</code> حُذفت — أُلغي التفاعل.".format(tid) if e.get("deleted") else
+                    "✅ <b>اكتمل التفاعل</b> مع <code>{}</code>\n{} ({}/{})\n👥 حسابات: {} · فاشلة: {}".format(
+                        tid, telegram_menu.bar(d["done"], d["total"]), d["done"], d["total"], d["accounts"], d["failed"]))
+            out.append((int(chat), text, [[("🔎 التفاصيل", "tw:r:" + tid), ("🏠 القائمة", "home")]]))
+            sent.add(tid)
+        if out:
+            _atomic_save(sorted(sent), path)
+        return out
 
     # ---- الحالة ----
     def account_view(self, aid, a):

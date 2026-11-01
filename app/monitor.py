@@ -6,7 +6,7 @@ from datetime import datetime
 
 from . import browser, humanizer, resilience
 from .actions import scrape_profile_tweets
-from .config import load_accounts, load_seen, save_seen
+from .config import load_accounts, load_seen, locked_seen, save_seen
 from .logger import get_logger
 
 log = get_logger("monitor")
@@ -105,7 +105,8 @@ def _fetch_with_account(cfg, accounts, acc_id):
             pass
 
 
-def schedule_for_tweet(tid, text="", cfg=None, accounts=None, source="manager", priority=False):
+@locked_seen
+def schedule_for_tweet(tid, text="", cfg=None, accounts=None, source="manager", priority=False, notify_chat=None):
     """اختيار مجموعة حسابية عشوائية وتوزيع مهام عليها بجدول متدرج.
 
     priority=True: تغريدة عاجلة (مثل أوامر الأدمن): تُنفَّذ فوراً وبالتتابع حساباً بعد حساب،
@@ -163,6 +164,7 @@ def schedule_for_tweet(tid, text="", cfg=None, accounts=None, source="manager", 
         "scheduled": True,
         "source": source,
         "priority": bool(priority),
+        "notify_chat": notify_chat,
         "queue": queue,
     }
     save_seen(seen)
@@ -207,6 +209,7 @@ def priority_pending(acc_id):
         return False
 
 
+@locked_seen
 def mark_done(tid, acc_id, action):
     seen = load_seen()
     entry = seen.get(tid)
@@ -223,6 +226,7 @@ def mark_done(tid, acc_id, action):
     save_seen(seen)
 
 
+@locked_seen
 def mark_tweet_deleted(tid):
     """وسم التغريدة كمحذوفة من المدير وإزالتها من الجدول نهائياً."""
     seen = load_seen()
@@ -235,6 +239,7 @@ def mark_tweet_deleted(tid):
     log.info(f"التغريدة {tid} محذوفة من المدير - أُزيلت من جدول المهام")
 
 
+@locked_seen
 def record_tweet_open_attempt(tid):
     """زيادة عدّاد محاولات فتح التغريدة (لتشخيص المشاكل)."""
     seen = load_seen()
@@ -245,6 +250,7 @@ def record_tweet_open_attempt(tid):
     save_seen(seen)
 
 
+@locked_seen
 def record_action_attempt(tid, acc_id, action):
     """تسجيل محاولة تنفيذ عملية معينة على تغريدة المدير لحساب معين."""
     seen = load_seen()
@@ -258,6 +264,7 @@ def record_action_attempt(tid, acc_id, action):
     save_seen(seen)
 
 
+@locked_seen
 def give_up_action(tid, acc_id, action):
     """التخلي النهائي عن عملية بعد تجاوز حد المحاولات (تخطي واستمرار)."""
     seen = load_seen()

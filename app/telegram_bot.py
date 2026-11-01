@@ -63,16 +63,41 @@ def valid_token(token):
     return bool(TOKEN_RE.match((token or "").strip()))
 
 
-class TelegramBot:
-    """get_cfg(): الإعدادات الحالية | schedule(tid, text, cfg) -> entry|None | save_admins(ids)."""
+class Reply(str):
+    """نص رد + أزرار اختيارية (markup = صفوف [(تسمية، callback_data)])."""
+    markup = None
 
-    def __init__(self, get_cfg, get_accounts, schedule, save_admins, engine_running=lambda: True, sender=None):
+    @classmethod
+    def of(cls, text, rows=None):
+        r = cls(text)
+        r.markup = rows
+        return r
+
+
+def _kb(rows):
+    if not rows:
+        return None
+    return json.dumps({"inline_keyboard": [[{"text": l, "callback_data": d} for l, d in row] for row in rows]}, ensure_ascii=False)
+
+
+COMMANDS = [("menu", "القائمة الرئيسية"), ("status", "حالة التطبيق"), ("help", "المساعدة"), ("cancel", "إلغاء الإدخال الحالي")]
+
+
+class TelegramBot:
+    """get_cfg(): الإعدادات | schedule(tid, text, cfg, chat_id=None) -> entry|None | save_admins(ids).
+
+    ui: كائن BotUI (قوائم وأزرار) | notices(): قائمة (chat_id, text) لإشعارات اكتمال التفاعل.
+    """
+
+    def __init__(self, get_cfg, get_accounts, schedule, save_admins, engine_running=lambda: True, sender=None, ui=None, notices=None):
         self.get_cfg = get_cfg
         self.get_accounts = get_accounts
         self.schedule = schedule
         self.save_admins = save_admins
         self.engine_running = engine_running
         self._send_override = sender
+        self.ui = ui
+        self.notices = notices
         self._stop = threading.Event()
         self._thread = None
         self._lock = threading.Lock()
@@ -100,13 +125,33 @@ class TelegramBot:
             raise RuntimeError(body.get("description", "telegram error"))
         return body["result"]
 
-    def send(self, chat_id, text):
+    def send(self, chat_id, text, markup=None):
         if self._send_override:
-            return self._send_override(chat_id, text)
+            return self._send_override(chat_id, text, markup)
+        params = {"chat_id": chat_id, "text": text, "parse_mode": "HTML", "disable_web_page_preview": "true"}
+        kb = _kb(markup)
+        if kb:
+            params["reply_markup"] = kb
         try:
-            self._api("sendMessage", {"chat_id": chat_id, "text": text, "disable_web_page_preview": "true"}, timeout=15)
+            return self._api("sendMessage", params, timeout=15).get("message_id")
         except Exception as e:
             log.warning("تعذّر إرسال رد تيليجرام: {}".format(e))
+
+    def edit(self, chat_id, message_id, text, markup=None):
+        params = {"chat_id": chat_id, "message_id": message_id, "text": text, "parse_mode": "HTML", "disable_web_page_preview": "true"}
+        kb = _kb(markup)
+        params["reply_markup"] = kb if kb else json.dumps({"inline_keyboard": []})
+        try:
+            self._api("editMessageText", params, timeout=15)
+        except Exception as e:
+            if "not modified" not in str(e):
+                log.warning("تعذّر تعديل رسالة تيليجرام: {}".format(e))
+
+    def answer(self, cb_id, text=""):
+        try:
+            self._api("answerCallbackQuery", {"callback_query_id": cb_id, "text": text[:180]}, timeout=10)
+        except Exception as e:
+            log.debug("answerCallbackQuery: {}".format(e))
 
     def test_token(self, token):
         """يعيد معلومات البوت (username) أو يرمي استثناء برسالة واضحة."""
@@ -133,8 +178,15 @@ class TelegramBot:
             return True
 
     # ---------- معالجة الرسائل (قابلة للاختبار) ----------
+    def _is_admin(self, chat_id):
+        return chat_id in [int(x) for x in self.get_cfg()["telegram"].get("admin_ids", [])]
+
+    @staticmethod
+    def _view(v):
+        return Reply.of(v.text, v.rows)
+
     def handle_message(self, chat_id, text, from_name=""):
-        """يعيد قائمة الردود النصية."""
+        """يعيد قائمة ردود (Reply: نص + أزرار اختيارية)."""
         cfg = self.get_cfg()
         text = (text or "").strip()
         admins = [int(x) for x in cfg["telegram"].get("admin_ids", [])]
@@ -143,69 +195,130 @@ class TelegramBot:
         if low.startswith("/pair"):
             code = text[5:].strip()
             if chat_id in admins:
-                return ["✅ هذا الحساب مربوط مسبقاً."]
+                return [Reply.of("✅ هذا الحساب مربوط مسبقاً.", [[("🏠 القائمة", "home")]])]
             if code and self._consume_pair(code):
                 admins.append(int(chat_id))
                 self.save_admins(admins)
                 log.info("تم ربط أدمن تيليجرام جديد: {} ({})".format(chat_id, from_name))
-                return ["✅ تم الربط بنجاح. أرسل رابط أي تغريدة لتتفاعل معها الحسابات.\nاكتب /help للمساعدة."]
-            return ["❌ رمز الربط غير صحيح أو منتهي. أنشئ رمزاً جديداً من التطبيق."]
+                out = [Reply("✅ تم الربط بنجاح. أرسل رابط أي تغريدة لتتفاعل معها الحسابات.")]
+                if self.ui:
+                    out.append(self._view(self.ui.home(greeting=True)))
+                return out
+            return [Reply("❌ رمز الربط غير صحيح أو منتهي. أنشئ رمزاً جديداً من التطبيق.")]
 
         if chat_id not in admins:
-            return ["🔒 غير مصرّح. معرّف محادثتك: {}\nللربط أنشئ رمزاً من التطبيق (تبويب تيليجرام) ثم أرسل: /pair الرمز".format(chat_id)]
+            return [Reply("🔒 غير مصرّح. معرّف محادثتك: {}\nللربط أنشئ رمزاً من التطبيق (تبويب تيليجرام) ثم أرسل: /pair الرمز".format(chat_id))]
 
+        if self.ui:
+            if low.startswith("/cancel"):
+                self.ui.cancel(chat_id)
+                return [Reply("تم الإلغاء."), self._view(self.ui.home())]
+            if self.ui.has_pending(chat_id):
+                if text.startswith("/"):
+                    self.ui.cancel(chat_id)  # أمر جديد يلغي الإدخال المعلّق
+                else:
+                    v = self.ui.on_text(chat_id, text)
+                    if v:
+                        return [self._view(v)]
+            if low.startswith(("/start", "/menu")):
+                return [self._view(self.ui.home(greeting=low.startswith("/start")))]
+            if low.startswith("/status"):
+                return [self._view(self.ui.status())]
         if low.startswith(("/start", "/help")):
-            return [
+            return [Reply.of(
                 "مرحباً 👋 أنا بوت SmartEngage.\n"
-                "• أرسل رابط تغريدة ← تتفاعل معها مجموعة من الحسابات (لايك/ريتويت/تعليق).\n"
+                "• أرسل رابط تغريدة ← تتفاعل معها الحسابات (لايك/ريتويت/تعليق).\n"
                 "• /all رابط ← كل الحسابات المفعّلة.\n"
+                "• /menu ← القائمة بالأزرار (الإعدادات والكلمات المفتاحية والحسابات والمحرك).\n"
                 "• /status ← حالة التطبيق.\n"
-                "يمكنك إضافة نص بعد الرابط ليُستخدم في توليد تعليقات مناسبة."
-            ]
+                "يمكنك إضافة نص بعد الرابط ليُستخدم في توليد تعليقات مناسبة.", [[("🏠 القائمة", "home")]])]
         if low.startswith("/status"):
-            return [self._status_text()]
+            return [Reply(self._status_text())]
 
         ids = extract_tweet_ids(text)
         if not ids:
-            return ["لم أجد رابط تغريدة في رسالتك. أرسل رابطاً مثل:\nhttps://x.com/user/status/123456789"]
+            return [Reply.of("لم أجد رابط تغريدة في رسالتك. أرسل رابطاً مثل:\nhttps://x.com/user/status/123456789", [[("🏠 القائمة", "home")]])]
 
         everyone = low.startswith("/all")
         tweet_text = strip_links(text[4:] if everyone else text)
         replies = []
         for tid in ids[:5]:
-            replies.append(self._schedule_one(tid, tweet_text, cfg, everyone))
+            replies.append(self._schedule_one(tid, tweet_text, cfg, everyone, chat_id))
         if not self.engine_running():
-            replies.append("⚠ المحرك متوقف حالياً — شغّله من التطبيق ليبدأ التنفيذ.")
+            replies.append(Reply.of("⚠️ المحرك متوقف حالياً — شغّله ليبدأ التنفيذ.", [[("▶️ تشغيل المحرك", "eng:start")]]))
         return replies
 
-    def _schedule_one(self, tid, text, cfg, everyone):
+    def _schedule_one(self, tid, text, cfg, everyone, chat_id=None):
         accounts = self.get_accounts()
         enabled = [a for a, v in accounts.items() if v.get("enabled", True)]
         if not enabled:
-            return "❌ لا توجد حسابات مفعّلة."
+            return Reply("❌ لا توجد حسابات مفعّلة.")
         c = copy.deepcopy(cfg)
         if not cfg["telegram"].get("instant", True):
             c["engagement"]["spread_hours"] = list(cfg["telegram"].get("spread_hours") or c["engagement"]["spread_hours"])
         if everyone:
             c["engagement"]["accounts_per_tweet"] = [len(enabled), len(enabled)]
         try:
-            entry = self.schedule(tid, text, c)
+            entry = self.schedule(tid, text, c, chat_id=chat_id)
         except Exception as e:
             log.error("فشل جدولة {}: {}".format(tid, e))
-            return "❌ فشلت الجدولة: {}".format(e)
+            return Reply("❌ فشلت الجدولة: {}".format(str(e).replace("<", "&lt;")))
         self.handled += 1
+        rows = [[("🔎 التقدّم", "tw:r:" + tid), ("🏠 القائمة", "home")]]
         if not entry:
-            return "ℹ️ هذه التغريدة مجدولة مسبقاً ({}).".format(tid)
+            return Reply.of("ℹ️ هذه التغريدة مجدولة مسبقاً ({}).".format(tid), rows)
         q = entry.get("queue", [])
         acts = sum(len(t["actions"]) for t in q)
         mode = "فوري ⚡ بالتتابع (بلا التقيّد بالحدود اليومية)" if cfg["telegram"].get("instant", True) else "متدرّج"
-        return "✅ جُدول التفاعل مع التغريدة {}\n• الحسابات: {}\n• العمليات: {}\n• التنفيذ: {}".format(tid, len(q), acts, mode)
+        return Reply.of("✅ <b>جُدول التفاعل</b> مع التغريدة <code>{}</code>\n• الحسابات: <b>{}</b>\n• العمليات: <b>{}</b>\n• التنفيذ: {}".format(tid, len(q), acts, mode), rows)
 
     def _status_text(self):
         accounts = self.get_accounts()
         en = [a for a, v in accounts.items() if v.get("enabled", True)]
         return "المحرك: {}\nالحسابات المفعّلة: {} / {}\nالتغريدات المستلمة عبر البوت: {}".format(
             "يعمل ✅" if self.engine_running() else "متوقف ⏸", len(en), len(accounts), self.handled)
+
+    # ---------- الأزرار ----------
+    def handle_callback(self, chat_id, message_id, cb_id, data):
+        """يعالج ضغطة زر. الأزرار البطيئة (WARP) تُنفَّذ في خيط خلفي وتُحدّث الرسالة عند الانتهاء."""
+        if not self.ui or not self._is_admin(chat_id):
+            self.answer(cb_id, "غير مصرّح")
+            return
+        try:
+            if data in ("wp:st", "wp:rot"):
+                self.answer(cb_id, "جارٍ التنفيذ…")
+                v = self.ui.warp(busy=True)
+                self.edit(chat_id, message_id, v.text, v.rows)
+                threading.Thread(target=self._warp_job, args=(chat_id, message_id, data), daemon=True).start()
+                return
+            v = self.ui.route(chat_id, data)
+        except Exception as e:
+            log.exception("خطأ في زر البوت %s", data)
+            v = None
+            self.answer(cb_id, "حدث خطأ: {}".format(str(e)[:100]))
+            return
+        self.answer(cb_id, (v.notice or "") if v else "")
+        if v:
+            self.edit(chat_id, message_id, v.text, v.rows)
+
+    def _warp_job(self, chat_id, message_id, data):
+        try:
+            if data == "wp:st":
+                r = self.ui.svc.warp_status()
+                info = ("متصل ✅" if r["connected"] else "غير متصل ⚠️") + " · IP: <code>{}</code>".format(r.get("ip") or "—") if r["installed"] else "⚠️ WARP غير مثبّت"
+            else:
+                r = self.ui.svc.warp_rotate()
+                info = "✅ تم التدوير: <code>{}</code> ← <code>{}</code>".format(r.get("before") or "?", r.get("after") or "?") if r["ok"] else "❌ فشل التدوير — راجع السجلات"
+        except Exception as e:
+            info = "❌ {}".format(str(e)[:120].replace("<", "&lt;"))
+        v = self.ui.warp(info=info)
+        self.edit(chat_id, message_id, v.text, v.rows)
+
+    def send_notices(self):
+        if not self.notices or not self.get_cfg()["telegram"].get("notify", True):
+            return
+        for chat_id, text, rows in self.notices():
+            self.send(chat_id, text, rows)
 
     # ---------- الحلقة ----------
     def start(self):
@@ -239,18 +352,27 @@ class TelegramBot:
                     self.username = me.get("username", "")
                     token_used, offset = token, None
                     log.info("بوت تيليجرام يعمل: @{}".format(self.username))
+                    try:
+                        self._api("setMyCommands", {"commands": json.dumps([{"command": c, "description": d} for c, d in COMMANDS], ensure_ascii=False)}, timeout=15)
+                    except Exception as e:
+                        log.debug("setMyCommands: {}".format(e))
                 self.state, self.error, backoff = "running", "", 3
-                params = {"timeout": 25, "allowed_updates": json.dumps(["message"])}
+                params = {"timeout": 10, "allowed_updates": json.dumps(["message", "callback_query"])}
                 if offset is not None:
                     params["offset"] = offset
-                for upd in self._api("getUpdates", params, timeout=35):
+                for upd in self._api("getUpdates", params, timeout=25):
                     offset = upd["update_id"] + 1
+                    cq = upd.get("callback_query")
+                    if cq and cq.get("message"):
+                        self.handle_callback(cq["message"]["chat"]["id"], cq["message"]["message_id"], cq["id"], cq.get("data", ""))
+                        continue
                     msg = upd.get("message") or {}
                     if msg.get("chat", {}).get("type") != "private" or "text" not in msg:
                         continue
                     who = (msg.get("from") or {}).get("username", "")
                     for r in self.handle_message(msg["chat"]["id"], msg["text"], who):
-                        self.send(msg["chat"]["id"], r)
+                        self.send(msg["chat"]["id"], str(r), r.markup)
+                self.send_notices()
             except Exception as e:
                 self.state, self.error = "error", str(e)[:160]
                 log.warning("خطأ بوت تيليجرام: {}".format(e))

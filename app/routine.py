@@ -17,7 +17,7 @@ from .selectors import RETWEET_CONFIRM_CANDIDATES, TWEET_TEXT
 from .comments import build_comment_for
 from .config import (
     enabled_accounts, load_accounts, load_config,
-    load_seen, load_state, save_state,
+    load_seen, load_state, locked_seen, save_state,
 )
 from .grow import crypto_activity
 from .humanizer import (
@@ -651,6 +651,7 @@ def _comments_used_for(tid):
     return seen.get(tid, {}).get("comments_used", [])
 
 
+@locked_seen
 def _record_comment(url, text, tid=None):
     seen = load_seen()
     key = None
