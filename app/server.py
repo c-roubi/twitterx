@@ -294,7 +294,7 @@ class AppService:
             failed += len(t.get("failed", []))
         return {"done": done, "total": total, "failed": failed, "by": by, "accounts": len(e.get("queue", [])),
                 "priority": bool(e.get("priority")), "deleted": bool(e.get("deleted")),
-                "completed": bool(e.get("completed_at")), "url": e.get("url", "")}
+                "completed": bool(e.get("completed_at")), "cancelled": bool(e.get("cancelled")), "url": e.get("url", "")}
 
     def completion_notices(self):
         """إشعارات لمن أرسل الرابط عبر تيليجرام عند اكتمال/حذف التغريدة (تُرسَل مرة واحدة)."""
@@ -307,7 +307,7 @@ class AppService:
         out = []
         for tid, e in load_seen().items():
             chat = e.get("notify_chat")
-            if not chat or tid in sent or not (e.get("completed_at") or e.get("deleted")):
+            if not chat or tid in sent or e.get("cancelled") or not (e.get("completed_at") or e.get("deleted")):
                 continue
             d = self.tweet_detail(tid)
             text = ("🗑 التغريدة <code>{}</code> حُذفت — أُلغي التفاعل.".format(tid) if e.get("deleted") else
@@ -350,7 +350,7 @@ class AppService:
                 "detected_at": e.get("detected_at", ""), "source": e.get("source", "manager"),
                 "accounts": len(q), "total": total, "done": done, "failed": failed,
                 "deleted": bool(e.get("deleted")), "completed": bool(e.get("completed_at")),
-                "priority": bool(e.get("priority")),
+                "priority": bool(e.get("priority")), "cancelled": bool(e.get("cancelled")),
             })
         out.sort(key=lambda x: x["detected_at"], reverse=True)
         return out[:limit]
@@ -359,7 +359,7 @@ class AppService:
         cfg, accounts = load_config(), load_accounts()
         views = [self.account_view(k, v) for k, v in accounts.items()]
         tweets = self.tweets_view(200)
-        pending = sum(max(0, t["total"] - t["done"] - t["failed"]) for t in tweets if not t["deleted"] and not t["completed"])
+        pending = sum(max(0, t["total"] - t["done"] - t["failed"]) for t in tweets if not t["deleted"] and not t["completed"] and not t["cancelled"])
         tg = cfg["telegram"]
         return {
             "engine": self.engine.info(),
@@ -472,6 +472,15 @@ class AppService:
         return job.info()
 
     # ---- التغريدات ----
+    def cancel_tweet(self, tid):
+        from . import monitor
+        if not monitor.cancel_tweet(str(tid)):
+            raise ApiError("التغريدة غير موجودة أو ملغاة مسبقاً", 404)
+
+    def cancel_stale(self):
+        from . import monitor
+        return monitor.cancel_stale(load_config())
+
     def add_tweet(self, body):
         raw = str(body.get("url", "")).strip()
         ids = telegram_bot.extract_tweet_ids(raw) or ([raw] if re.fullmatch(r"\d{5,25}", raw) else [])
@@ -650,6 +659,13 @@ def make_handler(svc, token, port):
 
     @route("POST", "/api/tweets")
     def _(b, **k): return svc.add_tweet(b)
+
+    @route("POST", "/api/tweets/cancel")
+    def _(b, **k):
+        if b.get("stale"):
+            return {"cancelled": svc.cancel_stale()}
+        svc.cancel_tweet(b.get("id", ""))
+        return {"cancelled": 1}
 
     @route("POST", "/api/engine/start")
     def _(b, **k):

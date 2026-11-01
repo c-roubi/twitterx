@@ -558,5 +558,69 @@ class AITests(unittest.TestCase):
             svc.ai_test({"provider": "gemini", "api_key": ""})  # لا مفتاح محفوظ
 
 
+class StaleTweetTests(unittest.TestCase):
+    OLD = "1995205343681413626"  # تغريدة قديمة (أكثر من سنة)
+
+    @staticmethod
+    def fresh(hours_ago=0.5):
+        import time
+        return str((int((time.time() - hours_ago * 3600) * 1000) - 1288834974657) << 22)
+
+    def setUp(self):
+        from app import config, monitor
+        self.m, self.config = monitor, config
+        config.save_seen({})
+        self.cfg = config.load_config()
+        self.cfg["engagement"]["accounts_per_tweet"] = [1, 1]
+        self.acc = {"st1": {"enabled": True}}
+
+    def test_age_from_id(self):
+        self.assertGreater(self.m.tweet_age_hours(self.OLD), 24 * 30)
+        self.assertLess(self.m.tweet_age_hours(self.fresh(0.5)), 0.6)
+        self.assertIsNone(self.m.tweet_age_hours("12345"))
+        self.assertIsNone(self.m.tweet_age_hours("abc"))
+
+    def test_filter_recent(self):
+        items = [{"id": self.OLD, "text": "a"}, {"id": self.fresh(1), "text": "b"}, self.fresh(10), "123"]
+        out = self.m.filter_recent(items, {"monitor": {"max_tweet_age_hours": 6}})
+        ids = [i["id"] if isinstance(i, dict) else i for i in out]
+        self.assertEqual(ids, [items[1]["id"], "123"])  # القديم والعمر 10 ساعات سقطا، والمعرّف غير الصالح يبقى
+        self.assertEqual(len(self.m.filter_recent(items, {"monitor": {"max_tweet_age_hours": 0}})), 4)
+
+    def test_cancel_and_stale_cleanup(self):
+        for tid, src in ((self.OLD, "manager"), (self.fresh(1), "manager"), ("1996000000000000001", "telegram")):
+            self.m.schedule_for_tweet(tid, "t", self.cfg, self.acc, source=src, priority=(src == "telegram"))
+        n = self.m.cancel_stale(self.cfg)
+        self.assertEqual(n, 1)  # القديمة من المدير فقط (التلقائية فقط، لا يدوي/تيليجرام)
+        seen = self.config.load_seen()
+        self.assertTrue(seen[self.OLD]["cancelled"])
+        self.assertFalse(seen["1996000000000000001"].get("cancelled"))
+        self.assertEqual(self.m.due_tasks_for("st1"), [t for t in self.m.due_tasks_for("st1") if t["tweet_id"] != self.OLD])
+        fresh_id = [k for k in seen if k not in (self.OLD, "1996000000000000001")][0]
+        self.assertTrue(self.m.cancel_tweet(fresh_id))
+        self.assertFalse(self.m.cancel_tweet(fresh_id))  # مرة واحدة فقط
+
+    def test_cancelled_not_pending_and_api(self):
+        svc = server.AppService()
+        self.m.schedule_for_tweet(self.fresh(1), "t", self.cfg, self.acc)
+        tid = next(iter(self.config.load_seen()))
+        self.assertGreater(svc.state()["stats"]["pending"], 0)
+        svc.cancel_tweet(tid)
+        self.assertEqual(svc.state()["stats"]["pending"], 0)
+        self.assertTrue(svc.tweets_view()[0]["cancelled"])
+        with self.assertRaises(server.ApiError):
+            svc.cancel_tweet(tid)
+
+    def test_bot_cancel_button(self):
+        svc = server.AppService()
+        self.m.schedule_for_tweet(self.fresh(1), "t", self.cfg, self.acc)
+        tid = next(iter(self.config.load_seen()))
+        v = svc.bot.ui.route(1, "tw:r:" + tid)
+        self.assertTrue(any(d == "tw:x:" + tid for row in v.rows for _, d in row))
+        v = svc.bot.ui.route(1, "tw:x:" + tid)
+        self.assertIn("ملغاة", v.text)
+        self.assertFalse(any(d.startswith("tw:x:") for row in v.rows for _, d in row))
+
+
 if __name__ == "__main__":
     unittest.main()

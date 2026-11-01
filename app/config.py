@@ -23,6 +23,7 @@ DEFAULT_CONFIG = {
     "monitor": {
         "method": "guest",
         "interval_min": [6, 14],
+        "max_tweet_age_hours": 6,
         "use_account": None
     },
     "resilience": {

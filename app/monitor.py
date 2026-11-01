@@ -14,6 +14,41 @@ log = get_logger("monitor")
 TWEET_URL = "https://x.com/twitter/status/{tid}"
 
 
+TWITTER_EPOCH_MS = 1288834974657
+
+
+def tweet_age_hours(tid):
+    """عمر التغريدة بالساعات من معرّفها (Snowflake)، أو None إن لم يكن المعرّف صالحاً."""
+    try:
+        n = int(tid)
+        if n < 10 ** 15:  # ليس معرّف Snowflake حديثاً
+            return None
+        ts = ((n >> 22) + TWITTER_EPOCH_MS) / 1000.0
+    except (TypeError, ValueError):
+        return None
+    if ts < 1.2e9 or ts > time.time() + 86400:
+        return None
+    return max(0.0, (time.time() - ts) / 3600.0)
+
+
+def filter_recent(items, cfg):
+    """يُسقط تغريدات المدير الأقدم من monitor.max_tweet_age_hours (0 = بلا حد) حتى لا يُتفاعل مع القديم."""
+    hours = float(cfg.get("monitor", {}).get("max_tweet_age_hours", 6) or 0)
+    if not hours or not items:
+        return items
+    keep, skipped = [], 0
+    for it in items:
+        tid = it["id"] if isinstance(it, dict) else it
+        age = tweet_age_hours(tid)
+        if age is None or age <= hours:
+            keep.append(it)
+        else:
+            skipped += 1
+    if skipped:
+        log.info(f"تخطّي {skipped} تغريدة أقدم من {hours:g} ساعة")
+    return keep
+
+
 def fetch_manager_tweets(cfg, accounts, dry_run=False):
     """جلب آخر تغريدات المدير. الطريقة: guest (بدون حساب) أو account (بأحد الحسابات)."""
     handle = cfg["manager_handle"].lstrip("@")
@@ -39,7 +74,7 @@ def fetch_manager_tweets(cfg, accounts, dry_run=False):
         else:
             ids, status = _fetch_guest(cfg)
         if ids or not resilience.is_retryable(resilience.error_kind_from_msg(status)):
-            return ids, status
+            return filter_recent(ids, cfg), status
         if attempt < retries:
             d = resilience.backoff_delay(attempt, base)
             log.warning(
@@ -182,6 +217,8 @@ def due_tasks_for(acc_id, seen=None, priority=False):
             continue
         if entry.get("deleted"):
             continue
+        if entry.get("cancelled"):
+            continue
         if bool(entry.get("priority")) != bool(priority):
             continue
         for task in entry.get("queue", []):
@@ -208,6 +245,42 @@ def priority_pending(acc_id):
         return bool(due_tasks_for(acc_id, priority=True))
     except Exception:
         return False
+
+
+@locked_seen
+def cancel_tweet(tid):
+    """إلغاء تغريدة معلّقة: لا تُنفَّذ عملياتها المتبقية."""
+    seen = load_seen()
+    entry = seen.get(tid)
+    if not entry or entry.get("cancelled"):
+        return False
+    entry["cancelled"] = True
+    entry["cancelled_at"] = datetime.now().isoformat(timespec="seconds")
+    save_seen(seen)
+    log.info(f"أُلغيت التغريدة {tid}")
+    return True
+
+
+@locked_seen
+def cancel_stale(cfg):
+    """يلغي تغريدات المدير المعلّقة الأقدم من الحد المسموح (تنظيف تراكمات قديمة). يرجع عددها."""
+    hours = float(cfg.get("monitor", {}).get("max_tweet_age_hours", 6) or 0)
+    if not hours:
+        return 0
+    seen = load_seen()
+    n = 0
+    for tid, e in seen.items():
+        if e.get("source", "manager") != "manager" or e.get("completed_at") or e.get("deleted") or e.get("cancelled"):
+            continue
+        age = tweet_age_hours(tid)
+        if age is not None and age > hours:
+            e["cancelled"] = True
+            e["cancelled_at"] = datetime.now().isoformat(timespec="seconds")
+            n += 1
+    if n:
+        save_seen(seen)
+        log.info(f"أُلغيت {n} تغريدة معلّقة أقدم من {hours:g} ساعة")
+    return n
 
 
 @locked_seen

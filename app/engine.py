@@ -104,6 +104,10 @@ class Engine:
             self.last_error = "تعذّر تحميل وحدات التشغيل: {}".format(e)
             log.error(self.last_error)
             return
+        try:
+            monitor.cancel_stale(load_config())  # تنظيف تراكمات قديمة مجدولة سابقاً
+        except Exception as e:
+            log.warning("تعذّر تنظيف التغريدات القديمة: {}".format(e))
         while not self._stop.is_set():
             try:
                 cfg, accounts = load_config(), load_accounts()

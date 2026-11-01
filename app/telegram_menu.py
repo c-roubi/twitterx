@@ -49,6 +49,7 @@ CATS = [
 ITEMS = [
     ("mh", "gen", "manager_handle", "text", "حساب المدير", "username"),
     ("mi", "gen", "monitor.interval_min", "range", "فاصل فحص المدير (دقيقة)", "6-14"),
+    ("ma", "gen", "monitor.max_tweet_age_hours", "int", "تجاهل تغريدات أقدم من (ساعة)", "6"),
     ("hl", "beh", "browser.headless", "bool", "تشغيل بدون نافذة", ""),
     ("ap", "eng", "engagement.accounts_per_tweet", "range", "عدد الحسابات لكل تغريدة", "6-12"),
     ("sh", "eng", "engagement.spread_hours", "range", "مدة التوزيع (ساعة)", "0.5-4"),
@@ -270,7 +271,7 @@ class BotUI:
         rows = []
         for t in items:
             tag = "⚡" if t.get("priority") else "🕒"
-            st = "🗑 محذوفة" if t["deleted"] else "✅ مكتملة" if t["completed"] else "⏳"
+            st = "🗑 محذوفة" if t["deleted"] else "🛑 ملغاة" if t.get("cancelled") else "✅ مكتملة" if t["completed"] else "⏳"
             lines.append("{} <code>{}</code> {}\n    {} · {}/{} عملية · {} حساب".format(
                 tag, t["id"][-10:], st, bar(t["done"], t["total"]), t["done"], t["total"], t["accounts"]))
             rows.append([("🔎 {}".format(t["id"][-10:]), "tw:r:{}".format(t["id"]))])
@@ -289,10 +290,15 @@ class BotUI:
             if d["by"].get(key, [0, 0])[1]:
                 lines.append("{}: {}/{}".format(name, *d["by"][key]))
         lines.append("👥 الحسابات: {} · فاشلة: {}".format(d["accounts"], d["failed"]))
-        lines.append("الحالة: " + ("🗑 محذوفة" if d["deleted"] else "✅ مكتملة" if d["completed"] else "⏳ قيد التنفيذ"))
+        lines.append("الحالة: " + ("🗑 محذوفة" if d["deleted"] else "🛑 ملغاة" if d.get("cancelled") else "✅ مكتملة" if d["completed"] else "⏳ قيد التنفيذ"))
         if d["url"]:
             lines.append('<a href="{}">فتح التغريدة</a>'.format(esc(d["url"])))
-        return View("\n".join(lines), self._nav([("🔄 تحديث", "tw:r:{}".format(tid)), ("🗂 التغريدات", "tw")], [HOME_BTN]), notice)
+        open_ = not (d["deleted"] or d["completed"] or d.get("cancelled"))
+        rows = [[("🔄 تحديث", "tw:r:{}".format(tid)), ("🗂 التغريدات", "tw")]]
+        if open_:
+            rows.insert(0, [("🛑 إلغاء هذه التغريدة", "tw:x:{}".format(tid))])
+        rows.append([HOME_BTN])
+        return View("\n".join(lines), rows, notice)
 
     # ------------------------------------------------------------------ الإعدادات
     def settings(self):
@@ -504,6 +510,9 @@ class BotUI:
         if head == "tw":
             if len(parts) >= 3 and parts[1] == "r":
                 return self.tweet_detail(parts[2], "تم التحديث")
+            if len(parts) >= 3 and parts[1] == "x":
+                self.svc.cancel_tweet(parts[2])
+                return self.tweet_detail(parts[2], "أُلغيت التغريدة 🛑")
             return self.tweets()
         if head == "set":
             if len(parts) == 1:

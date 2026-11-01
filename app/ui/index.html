@@ -329,6 +329,7 @@ const SCHEMA = [
       {p: "monitor.method", t: "select", label: "طريقة المراقبة", opts: [["guest", "زائر (بدون حساب)"], ["account", "عبر أحد الحسابات"]]},
       {p: "monitor.use_account", t: "account", label: "حساب المراقبة", desc: "يُستخدم عند اختيار «عبر أحد الحسابات» (أكثر ثباتاً عند حجب الزائر)."},
       {p: "monitor.interval_min", t: "range", label: "الفاصل بين فحوصات المدير", desc: "يُختار رقم عشوائي بين الحدّين في كل مرة.", unit: "دقيقة"},
+      {p: "monitor.max_tweet_age_hours", t: "int", label: "تجاهل تغريدات المدير الأقدم من", desc: "لا يتفاعل التطبيق مع التغريدات القديمة (مثلاً عند أول تشغيل). 0 = بلا حد.", unit: "ساعة", min: 0},
     ]},
     {title: "التطبيق", fields: [
       {p: "ui.autostart_engine", t: "bool", label: "تشغيل المحرك تلقائياً عند فتح التطبيق"},
@@ -536,7 +537,7 @@ const SRC = {manager: "المدير", telegram: "تيليجرام", manual: "ي�
 function tweetRow(t) {
   const pct = t.total ? Math.round(t.done / t.total * 100) : 0;
   const flash = t.priority ? '<span class="chip warn" title="تنفيذ فوري بالتتابع">⚡ فوري</span>' : "";
-  const status = flash + (t.deleted ? '<span class="chip err">محذوفة</span>' : t.completed ? '<span class="chip ok">مكتملة</span>' : '<span class="chip info">قيد التنفيذ</span>');
+  const status = flash + (t.cancelled ? '<span class="chip">ملغاة</span>' : t.deleted ? '<span class="chip err">محذوفة</span>' : t.completed ? '<span class="chip ok">مكتملة</span>' : '<span class="chip info">قيد التنفيذ</span>') + (!t.cancelled && !t.deleted && !t.completed ? `<button class="btn subtle icon" data-act="tweet-cancel" data-id="${esc(t.id)}" title="إلغاء" aria-label="إلغاء التغريدة">${ic("x", "sm")}</button>` : "");
   return `<div class="listrow"><div class="grow"><div class="ell ltr" style="text-align:start"><a href="${esc(t.url)}" target="_blank" rel="noopener noreferrer">…/status/${esc(t.id)}</a></div>
     <div class="faint small">${ago(t.detected_at)} · ${SRC[t.source] || esc(t.source)}${t.text ? ` · ${esc(t.text.slice(0, 60))}` : ""}</div></div>
     <div style="width:160px"><div class="bar ${pct === 100 ? "ok" : ""}"><i style="width:${pct}%"></i></div><div class="faint small" style="margin-top:4px"><span class="num">${t.done}/${t.total}</span> عملية · <span class="num">${t.accounts}</span> حساب${t.failed ? ` · <span class="num">${t.failed}</span> فاشلة` : ""}</div></div>${status}</div>`;
@@ -618,7 +619,7 @@ PAGES.tweets = {
         <div class="field"><label for="t-text">نص التغريدة (اختياري)</label><textarea class="txt" id="t-text" rows="2" placeholder="يُستخدم لتوليد تعليقات تناسب المحتوى"></textarea></div>
         <div class="row wrap" style="gap:24px"><label class="row"><span class="lbl" style="font-weight:400">كل الحسابات المفعّلة</span>${sw(false, 'id="t-all"')}</label><label class="row"><span class="lbl" style="font-weight:400" title="مثل تغريدة الأدمن: حساباً بعد حساب فوراً، بلا التقيّد بالحدود اليومية">تنفيذ فوري (يتجاوز الحدود اليومية)</span>${sw(true, 'id="t-fast"')}</label><span style="flex:1"></span>
         <button class="btn accent" data-act="tweet-add">${ic("play", "sm")}بدء التفاعل</button></div></div>
-      <div class="h2">السجل</div><div class="card" id="tw-list"></div></div>`);
+      <div class="row" style="margin-top:20px"><div class="h2" style="margin:0;flex:1">السجل</div><button class="btn" data-act="tweet-stale" title="يلغي تغريدات المدير المعلّقة الأقدم من الحد المحدد في الإعدادات">${ic("trash", "sm")}إلغاء المعلّقة القديمة</button></div><div class="card" id="tw-list" style="margin-top:8px"></div></div>`);
     this.load();
   },
   async load() { try { S.tweets = await api("GET", "/api/tweets"); } catch (e) { toast(e.message, "err"); } this.update(); },
@@ -751,6 +752,8 @@ const ACT = {
   async "engine-stop"() { await api("POST", "/api/engine/stop"); toast("طُلب الإيقاف — ستنتهي الجلسة الجارية أولاً", "info"); await refresh(); },
   async "quick-tweet"(b) { const i = $("#q-url"); busy(b, true); try { const r = await api("POST", "/api/tweets", {url: i.value, fast: true}); i.value = ""; toast(`جُدول التفاعل: ${r.accounts} حساب`); await refresh(); } finally { busy(b, false); } },
   async "tweet-add"(b) { busy(b, true); try { const r = await api("POST", "/api/tweets", {url: $("#t-url").value, text: $("#t-text").value, all: $("#t-all").getAttribute("aria-checked") === "true", fast: $("#t-fast").getAttribute("aria-checked") === "true"}); $("#t-url").value = ""; $("#t-text").value = ""; toast(`جُدول التفاعل: ${r.accounts} حساب${r.skipped.length ? " — تُخطّيت: " + r.skipped.join(" ") : ""}`); await refresh(true); } finally { busy(b, false); } },
+  async "tweet-cancel"(b) { if (await confirmBox("إلغاء التغريدة", "لن تُنفَّذ العمليات المتبقية لهذه التغريدة.", "إلغاء التغريدة")) { await api("POST", "/api/tweets/cancel", {id: b.dataset.id}); toast("أُلغيت التغريدة"); await refresh(true); } },
+  async "tweet-stale"(b) { busy(b, true); try { const r = await api("POST", "/api/tweets/cancel", {stale: true}); toast(r.cancelled ? `أُلغيت ${r.cancelled} تغريدة قديمة` : "لا توجد تغريدات قديمة معلّقة", "info"); await refresh(true); } finally { busy(b, false); } },
   "acc-add"() { accountDialog(null); },
   "acc-edit"(b) { accountDialog(S.accounts.find(a => a.id === b.dataset.id)); },
   async "acc-del"(b) {
