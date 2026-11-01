@@ -973,6 +973,18 @@ class CommentQualityTests(unittest.TestCase):
             nxt = self.c.build_comment_for("Bitcoin is pumping hard today", cfg=self.cfg, acc_id="a2", reserve=False)
             self.assertFalse(self.c.similar(self.c.norm_text(first), self.c.norm_text(nxt)))
 
+    def test_ai_success_is_logged_and_used(self):
+        from unittest import mock
+        cfg = dict(self.cfg)
+        cfg["comments"] = dict(cfg["comments"], contextual=False)
+        cfg["comments"]["ai"] = dict(cfg["comments"]["ai"], enabled=True, api_key="AIzaKEY", min_interval_s=0)
+        with mock.patch("app.ai_comments.generate_ai_comment", return_value="Strong breakout, watching $BTC closely") as g, \
+             self.assertLogs("smartengage.comments", level="INFO") as lg:
+            out = self.c.build_comment_for("BTC breaks resistance", cfg=cfg, reserve=False)
+        self.assertEqual(out, "Strong breakout, watching $BTC closely")
+        self.assertEqual(g.call_args.kwargs["lang"], "en")
+        self.assertTrue(any("بالذكاء الاصطناعي" in m for m in lg.output))
+
     def test_ai_prompt_forces_language(self):
         from unittest import mock
         from app import ai_comments

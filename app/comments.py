@@ -259,6 +259,8 @@ def build_comment_for(tweet_text, used_texts=(), cfg=None, force_unique=True, en
             cand = generate_ai_comment(tweet_text, ai_cfg, net_cfg=cfg.get("telegram"), lang=lang)
             if cand and _ok(cand, blocked, force_unique):
                 text = cand
+                from .logger import get_logger
+                get_logger("comments").info("تعليق مولَّد بالذكاء الاصطناعي ({}): {}".format(lang or "؟", cand[:60]))
             elif cand is None:
                 from .logger import get_logger
                 get_logger("comments").info("لم يُولَّد تعليق بالذكاء الاصطناعي - استُخدم تعليق محلي بديل")
