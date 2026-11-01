@@ -86,6 +86,15 @@ DEFAULT_CONFIG = {
         "test_timeout": 10,
         "rotate": False
     },
+    "warp": {
+        "enabled": False,
+        "accounts_per_ip": 5,
+        "isolate_proxy_mode": True,
+        "proxy_port": 40000,
+        "disconnect_wait_s": 2.5,
+        "connect_wait_s": 4.5,
+        "verify_retries": 3
+    },
     "browser": {
         "headless": False,
         "slow_mo": 30,
