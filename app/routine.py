@@ -10,7 +10,7 @@ from . import selectors
 from .actions import (
     TWEET_ARTICLE, LIKE_BTN, UNLIKE_BTN, RETWEET_BTN, UNRETWEET_BTN,
     comment_on_tweet, like_tweet, retweet_tweet, dismiss_compose_dialog,
-    open_tweet, open_tweet_with_retry,
+    already_replied, open_tweet, open_tweet_with_retry,
     scroll_home,
 )
 from .selectors import RETWEET_CONFIRM_CANDIDATES, TWEET_TEXT
@@ -578,6 +578,11 @@ def _run_due_manager_tasks(page, acc_id, cfg, state, human, acc=None, priority=F
             elif action == "retweet":
                 res, msg = retweet_tweet(page, human)
             elif action == "comment":
+                if already_replied(page, (acc or {}).get("handle", "")):
+                    # سبق لهذا الحساب أن ردّ على التغريدة: نعدّ العملية منجزة دون تعليق مكرر
+                    monitor.mark_done(task["tweet_id"], acc_id, action)
+                    log.info(f"{acc_id} | سبق أن علّق على {task['tweet_id']} - تخطّي")
+                    continue
                 used = _comments_used_for(task["tweet_id"])
                 tweet_text = task.get("text") or ""
                 if not tweet_text:  # روابط تيليجرام/اليدوي: نقرأ النص من الصفحة ونحفظه للحسابات التالية

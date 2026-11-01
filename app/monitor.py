@@ -140,6 +140,41 @@ def _fetch_with_account(cfg, accounts, acc_id):
             pass
 
 
+def _remaining_actions(entry):
+    n = 0
+    for t in entry.get("queue", []):
+        failed = set(t.get("failed", []))
+        n += sum(1 for a in t.get("actions", []) if a not in t.get("done", []) and a not in failed)
+    return n
+
+
+def _expedite_existing(seen, tid, notify_chat=None):
+    """تغريدة مجدولة مسبقاً وصلت من الأدمن: نحوّل المتبقي إلى فوري (دون إعادة ما أُنجز) أو نُعيد الملغاة.
+    يرجع None إن لم يبقَ شيء أو كانت عاجلة أصلاً أو محذوفة."""
+    ex = seen[tid]
+    if ex.get("deleted"):
+        return None
+    revived = bool(ex.get("cancelled"))
+    if not revived and (ex.get("completed_at") or ex.get("priority")):
+        return None
+    remaining = _remaining_actions(ex)
+    if not remaining:
+        return None
+    now = time.time()
+    for t in ex.get("queue", []):
+        failed = set(t.get("failed", []))
+        if any(a not in t.get("done", []) and a not in failed for a in t.get("actions", [])):
+            t["due"] = now
+    ex["priority"] = True
+    ex.pop("cancelled", None)
+    ex.pop("cancelled_at", None)
+    if notify_chat:
+        ex["notify_chat"] = notify_chat
+    save_seen(seen)
+    log.info(f"التغريدة {tid}: {'أُعيدت' if revived else 'سُرّعت'} إلى تنفيذ فوري ({remaining} عملية متبقية)")
+    return dict(ex, _status="revived" if revived else "upgraded", _remaining=remaining)
+
+
 @locked_seen
 def schedule_for_tweet(tid, text="", cfg=None, accounts=None, source="manager", priority=False, notify_chat=None, skipped=None):
     """اختيار مجموعة حسابية عشوائية وتوزيع مهام عليها بجدول متدرج.
@@ -151,7 +186,8 @@ def schedule_for_tweet(tid, text="", cfg=None, accounts=None, source="manager", 
     """
     seen = load_seen()
     if tid in seen and seen[tid].get("scheduled"):
-        return None
+        # تغريدة معروفة: العادية تُتجاهل؛ العاجلة (أدمن) تسرّع المتبقي أو تُعيد المُلغاة
+        return _expedite_existing(seen, tid, notify_chat) if priority else None
 
     enabled = [
         aid for aid, a in accounts.items()
@@ -205,7 +241,7 @@ def schedule_for_tweet(tid, text="", cfg=None, accounts=None, source="manager", 
     }
     save_seen(seen)
     log.info(f"جدولة تفاعل للتغريدة {tid}: {len(queue)} حساب | أول عملية بعد {int((queue[0]['due']-now)/60)} دقيقة")
-    return seen[tid]
+    return dict(seen[tid], _status="new")
 
 
 def due_tasks_for(acc_id, seen=None, priority=False):

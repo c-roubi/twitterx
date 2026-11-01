@@ -223,7 +223,9 @@ class AppService:
     def _schedule(self, tid, text, cfg, source, priority=False, notify_chat=None):
         from . import monitor  # استيراد متأخر (playwright)
         accounts, skipped = load_accounts(), []
-        if priority:
+        if priority and tid in load_seen():
+            pass  # تغريدة معروفة: التسريع/الإحياء لا يحتاج اختيار حسابات جديدة
+        elif priority:
             # العاجلة: فقط الحسابات الجاهزة (جلسة محفوظة ولا تحتاج إعادة دخول) حتى لا تُهدر محاولات فاشلة
             ready = {}
             for aid, a in accounts.items():
@@ -495,8 +497,9 @@ class AppService:
         text = str(body.get("text", ""))[:2000]
         entry = self._schedule(ids[0], text, cfg, "manual", bool(body.get("fast")))
         if not entry:
-            raise ApiError("هذه التغريدة مجدولة مسبقاً")
-        return {"id": ids[0], "accounts": len(entry["queue"]), "skipped": entry.get("skipped", [])}
+            raise ApiError("هذه التغريدة مجدولة مسبقاً (قيد التنفيذ أو اكتملت)")
+        return {"id": ids[0], "accounts": len(entry["queue"]), "skipped": entry.get("skipped", []),
+                "status": entry.get("_status", "new"), "remaining": entry.get("_remaining")}
 
     # ---- الإعدادات والتعليقات ----
     def get_config(self):

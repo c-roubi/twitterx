@@ -256,7 +256,11 @@ class TelegramBot:
         self.handled += 1
         rows = [[("🔎 التقدّم", "tw:r:" + tid), ("🏠 القائمة", "home")]]
         if not entry:
-            return Reply.of("ℹ️ هذه التغريدة مجدولة مسبقاً ({}).".format(tid), rows)
+            return Reply.of("ℹ️ التغريدة <code>{}</code> مجدولة مسبقاً (قيد التنفيذ الفوري أو اكتملت).".format(tid), rows)
+        st = entry.get("_status")
+        if st in ("upgraded", "revived"):
+            what = "♻️ أُعيد تفعيل التغريدة الملغاة" if st == "revived" else "⚡ كانت مجدولة مسبقاً بتوزيع متدرّج"
+            return Reply.of("{} <code>{}</code>\n• حُوّلت العمليات المتبقية (<b>{}</b>) إلى تنفيذ فوري\n• ما أُنجز سابقاً لا يُكرَّر".format(what, tid, entry.get("_remaining", "?")), rows)
         q = entry.get("queue", [])
         acts = sum(len(t["actions"]) for t in q)
         mode = "فوري ⚡ بالتتابع (بلا التقيّد بالحدود اليومية)" if cfg["telegram"].get("instant", True) else "متدرّج"

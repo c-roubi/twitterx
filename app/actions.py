@@ -128,6 +128,22 @@ def open_tweet_with_retry(page, url, cfg):
     return False, last
 
 
+def already_replied(page, handle):
+    """هل يظهر في سلسلة التغريدة المفتوحة رد من هذا الحساب؟ (أفضل جهد: الردود المحمّلة فقط؛ الخطأ = لا).
+
+    يمنع تعليقاً مزدوجاً إذا أُعيدت جدولة التغريدة أو علّق الحساب بنفسه سابقاً.
+    """
+    if not handle:
+        return False
+    try:
+        return bool(page.evaluate(
+            """(h) => [...document.querySelectorAll('article [data-testid="User-Name"] a[href^="/"]')]
+                 .some(a => (a.getAttribute('href') || '').toLowerCase() === '/' + h.toLowerCase())""",
+            handle.lstrip("@")))
+    except Exception:
+        return False
+
+
 def like_tweet(page, human):
     """لايك للتغريدة المفتوحة حالياً."""
     overlays.clear(page)

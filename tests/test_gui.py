@@ -726,5 +726,78 @@ class CommentQualityTests(unittest.TestCase):
         self.assertEqual(monitor.due_tasks_for("cq1", priority=True), [])  # لا تُعاد المحاولة
 
 
+class ExpediteTests(unittest.TestCase):
+    """رابط الأدمن لتغريدة معروفة: تسريع المتبقي، إعادة الملغاة، بلا تكرار ما أُنجز."""
+
+    def setUp(self):
+        from app import config, monitor
+        self.m, self.config = monitor, config
+        config.save_seen({})
+        self.cfg = config.load_config()
+        self.cfg["engagement"]["accounts_per_tweet"] = [2, 2]
+        self.cfg["engagement"]["action_mix"] = {"like": 1.0, "retweet": 1.0, "comment": 0.0}
+        self.accs = {"e1": {"enabled": True}, "e2": {"enabled": True}}
+
+    def test_manager_tweet_then_admin_link_speeds_up(self):
+        e = self.m.schedule_for_tweet("910000000000000001", "t", self.cfg, self.accs, source="manager")
+        self.assertEqual(e["_status"], "new")
+        self.assertEqual(self.m.due_tasks_for("e1"), [])  # موزّعة على ساعات
+        self.m.mark_done("910000000000000001", "e1", "like")  # حساب أنجز عملية
+        r = self.m.schedule_for_tweet("910000000000000001", "t", self.cfg, self.accs, source="telegram", priority=True, notify_chat=5)
+        self.assertEqual(r["_status"], "upgraded")
+        self.assertEqual(r["_remaining"], 3)  # 4 عمليات - المنجزة
+        self.assertEqual(len(self.m.due_tasks_for("e1", priority=True)), 1)
+        self.assertEqual(self.m.due_tasks_for("e1", priority=True)[0]["remaining"], ["retweet"])  # الإعجاب لا يُكرَّر
+        self.assertEqual(self.m.due_tasks_for("e1"), [])  # لم تعد عادية
+        self.assertEqual(self.config.load_seen()["910000000000000001"]["notify_chat"], 5)
+
+    def test_second_admin_link_while_running_is_ignored(self):
+        self.m.schedule_for_tweet("910000000000000002", "t", self.cfg, self.accs, priority=True)
+        self.assertIsNone(self.m.schedule_for_tweet("910000000000000002", "t", self.cfg, self.accs, priority=True))
+
+    def test_normal_duplicate_still_ignored(self):
+        self.m.schedule_for_tweet("910000000000000003", "t", self.cfg, self.accs)
+        self.assertIsNone(self.m.schedule_for_tweet("910000000000000003", "t", self.cfg, self.accs))
+
+    def test_cancelled_tweet_revived_by_admin_but_not_by_manager(self):
+        tid = "910000000000000004"
+        self.m.schedule_for_tweet(tid, "t", self.cfg, self.accs)
+        self.m.cancel_tweet(tid)
+        self.assertIsNone(self.m.schedule_for_tweet(tid, "t", self.cfg, self.accs))  # المدير لا يُحييها
+        r = self.m.schedule_for_tweet(tid, "t", self.cfg, self.accs, priority=True)
+        self.assertEqual(r["_status"], "revived")
+        e = self.config.load_seen()[tid]
+        self.assertFalse(e.get("cancelled"))
+        self.assertTrue(self.m.due_tasks_for("e1", priority=True))
+
+    def test_completed_or_deleted_not_rerun(self):
+        tid = "910000000000000005"
+        self.m.schedule_for_tweet(tid, "t", self.cfg, self.accs)
+        for acc in self.accs:
+            for a in ("like", "retweet"):
+                self.m.mark_done(tid, acc, a)
+        self.assertIsNone(self.m.schedule_for_tweet(tid, "t", self.cfg, self.accs, priority=True))
+        tid2 = "910000000000000006"
+        self.m.schedule_for_tweet(tid2, "t", self.cfg, self.accs)
+        self.m.mark_tweet_deleted(tid2)
+        self.assertIsNone(self.m.schedule_for_tweet(tid2, "t", self.cfg, self.accs, priority=True))
+
+    def test_bot_replies_for_upgrade_and_already_running(self):
+        from unittest import mock
+        svc = server.AppService()
+        svc._save_admins([5])
+        acc = svc.add_account({"handle": "upg_acc"})
+        self.addCleanup(svc.delete_account, acc["id"])
+        self.m.schedule_for_tweet("910000000000000007", "t", self.cfg, self.accs)   # جدولها المدير
+        with mock.patch.object(svc.bot, "engine_running", return_value=True):
+            r = svc.bot.handle_message(5, "https://x.com/boss/status/910000000000000007")
+            self.assertIn("حُوّلت", r[0])
+            self.assertIn("لا يُكرَّر", r[0])
+            r2 = svc.bot.handle_message(5, "https://x.com/boss/status/910000000000000007")
+            self.assertIn("مجدولة مسبقاً", r2[0])
+            self.assertTrue(self.config.load_seen()["910000000000000007"]["priority"])
+            self.assertEqual(self.config.load_seen()["910000000000000007"]["notify_chat"], 5)
+
+
 if __name__ == "__main__":
     unittest.main()
