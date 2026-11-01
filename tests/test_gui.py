@@ -482,7 +482,7 @@ class AITests(unittest.TestCase):
         self.assertEqual(out, "Nice $BTC breakout!")
         self.assertNotIn("KEY", seen["url"])  # المفتاح في الترويسة لا في الرابط
         self.assertEqual(seen["headers"]["x-goog-api-key"], "KEY")
-        self.assertIn("gemini-2.5-flash", seen["url"])
+        self.assertIn("gemini-2.5-flash-lite", seen["url"])  # الأسرع أولاً
 
     def test_model_404_falls_back(self):
         from unittest import mock
@@ -503,7 +503,39 @@ class AITests(unittest.TestCase):
             urls.append(url); return self.gem("fine")
         with mock.patch.object(self.ai, "_call_api", side_effect=fake):
             self.assertEqual(self.ai.generate_ai_comment("x", dict(self.cfg, model="gemini-1.5-flash")), "fine")
-        self.assertIn("gemini-2.5-flash", urls[0])
+        self.assertIn("gemini-2.5-flash-lite", urls[0])
+
+    def test_timeout_moves_to_next_model_then_reports_clearly(self):
+        from unittest import mock
+        tried = []
+        def slow_then_ok(url, headers, body, ctx, timeout=40):
+            tried.append((url.split("models/")[1].split(":")[0], body["generationConfig"].get("thinkingConfig")))
+            if len(tried) == 1:
+                raise self.ai.AIError("TIMEOUT: لم يردّ المزوّد")
+            return self.gem("fast comment")
+        with mock.patch.object(self.ai, "_call_api", side_effect=slow_then_ok):
+            self.assertEqual(self.ai.generate_ai_comment("BTC up", self.cfg, ignore_interval=True), "fast comment")
+        self.assertEqual([m for m, _ in tried], self.ai.GEMINI_FALLBACKS[:2])
+        self.assertEqual(tried[0][1], {"thinkingBudget": 0})              # flash-lite/flash: بلا تفكير طويل
+        with mock.patch.object(self.ai, "_call_api", side_effect=self.ai.AIError("TIMEOUT: لم يردّ المزوّد")) as c:
+            with self.assertRaises(self.ai.AIError) as ex:
+                self.ai.generate_ai_comment("BTC up", self.cfg, raise_errors=True, ignore_interval=True)
+        self.assertEqual(c.call_count, len(self.ai.GEMINI_FALLBACKS))        # جرّب كل النماذج ثم أبلغ
+        self.assertIn("TIMEOUT", str(ex.exception))
+
+    def test_socket_timeout_becomes_readable_error(self):
+        from unittest import mock
+        with mock.patch("urllib.request.urlopen", side_effect=TimeoutError("The read operation timed out")):
+            with self.assertRaises(self.ai.AIError) as ex:
+                self.ai._call_api("https://x", {}, {}, None, timeout=5)
+        self.assertIn("TIMEOUT", str(ex.exception))
+        self.assertIn("5 ثانية", str(ex.exception))
+
+    def test_user_chosen_model_is_not_replaced_on_timeout(self):
+        from unittest import mock
+        with mock.patch.object(self.ai, "_call_api", side_effect=self.ai.AIError("TIMEOUT: x")) as c:
+            self.assertIsNone(self.ai.generate_ai_comment("x", dict(self.cfg, model="gemini-2.5-pro"), ignore_interval=True))
+        self.assertEqual(c.call_count, 1)
 
     def test_new_format_key_retries_via_query_param(self):
         """مفتاح بصيغة AQ. يُرفض في الترويسة ويُقبل عبر ?key= (حالة المستخدم الفعلية)."""
@@ -536,7 +568,8 @@ class AITests(unittest.TestCase):
         from unittest import mock
         with mock.patch.object(self.ai, "_call_api", side_effect=self.ai.AIError("HTTP 429: quota exceeded")) as c:
             self.assertIsNone(self.ai.generate_ai_comment("x", self.cfg, ignore_interval=True))
-        self.assertEqual(c.call_count, 1)
+        self.assertEqual(c.call_count, len(self.ai.GEMINI_FALLBACKS))              # نموذج بعد نموذج، مرة لكل نموذج
+        self.assertFalse(any("?key=" in call.args[0] for call in c.call_args_list))  # بلا إعادة عبر معامل key
 
     def test_key_cleaning_and_provider_detection(self):
         a = self.ai

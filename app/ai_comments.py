@@ -10,6 +10,7 @@
 """
 import json
 import random
+import socket
 import time
 import urllib.error
 import urllib.parse
@@ -22,10 +23,13 @@ log = get_logger("ai")
 
 # نماذج Gemini القديمة (1.5) أُوقفت؛ نجرّب بالترتيب عند خطأ 404 إن لم يحدّد المستخدم نموذجاً
 RETIRED_GEMINI = ("gemini-1.5", "gemini-pro", "gemini-1.0")
-GEMINI_FALLBACKS = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-flash-latest"]
+# الأسرع أولاً (flash-lite لا «يفكّر» طويلاً: مناسب لتعليق من سطر واحد)؛ ننتقل للتالي عند 404 أو مهلة أو ازدحام
+GEMINI_FALLBACKS = ["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-flash-latest"]
+RETRY_NEXT_MODEL = ("HTTP 404", "HTTP 429", "HTTP 500", "HTTP 503", "TIMEOUT")
+REQUEST_TIMEOUT_S = 40
 
 DEFAULT_MODELS = {
-    "gemini": "gemini-2.5-flash",
+    "gemini": "gemini-2.5-flash-lite",
     "openai": "gpt-4o-mini",
     "groq": "llama-3.1-8b-instant",
 }
@@ -99,7 +103,7 @@ class AIError(Exception):
     """خطأ بسبب مفهوم للمستخدم (يُعرض في الاختبار ويُسجَّل في السجلات)."""
 
 
-def _call_api(url, headers, body, ctx, timeout=20):
+def _call_api(url, headers, body, ctx, timeout=REQUEST_TIMEOUT_S):
     req = urllib.request.Request(url, data=json.dumps(body).encode("utf-8"), headers=headers, method="POST")
     try:
         with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
@@ -114,7 +118,11 @@ def _call_api(url, headers, body, ctx, timeout=20):
         if e.code in (400, 401, 403) and "key" in (msg or "").lower():
             hint = " — المفتاح مرفوض من المزوّد: أنشئ مفتاحاً جديداً وانسخه كاملاً (Gemini: aistudio.google.com/apikey، Groq: console.groq.com/keys)"
         raise AIError("HTTP {}: {}{}".format(e.code, (msg or e.reason or "")[:200], hint)) from None
+    except (TimeoutError, socket.timeout):
+        raise AIError("TIMEOUT: لم يردّ المزوّد خلال {} ثانية (بطء شبكة أو ازدحام عند المزوّد أو جدار ناري يعطّل الاتصال)".format(timeout)) from None
     except urllib.error.URLError as e:
+        if isinstance(e.reason, (TimeoutError, socket.timeout)):
+            raise AIError("TIMEOUT: انتهت مهلة الاتصال بالمزوّد (شبكة بطيئة أو محجوبة)") from None
         raise AIError("تعذّر الاتصال بالمزوّد: {}".format(e.reason)) from None
 
 
@@ -196,13 +204,17 @@ def generate_ai_comment(tweet_text, ai_cfg, net_cfg=None, raise_errors=False, ig
             resp = None
             for i, model in enumerate(models):
                 url = "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent".format(model)
-                body = {"contents": [{"parts": [{"text": "{}\n\n{}".format(system, user_msg)}]}]}
+                body = {"contents": [{"parts": [{"text": "{}\n\n{}".format(system, user_msg)}]}],
+                        "generationConfig": {"temperature": 0.9, "maxOutputTokens": 200}}
+                if model.startswith("gemini-2.5-flash"):
+                    body["generationConfig"]["thinkingConfig"] = {"thinkingBudget": 0}  # بدون «تفكير» طويل: أسرع وأرخص
                 try:
                     resp = _gemini_call(url, api_key, body, ctx)
                     break
                 except AIError as e:
-                    if "HTTP 404" in str(e) and i < len(models) - 1:
-                        continue  # النموذج غير متاح: جرّب التالي
+                    if i < len(models) - 1 and str(e).startswith(RETRY_NEXT_MODEL):
+                        log.info("نموذج {} لم ينجح ({}) - تجربة التالي".format(model, str(e)[:60]))
+                        continue
                     raise
         else:
             url = {
