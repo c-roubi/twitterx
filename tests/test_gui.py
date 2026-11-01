@@ -505,12 +505,46 @@ class AITests(unittest.TestCase):
             self.assertEqual(self.ai.generate_ai_comment("x", dict(self.cfg, model="gemini-1.5-flash")), "fine")
         self.assertIn("gemini-2.5-flash", urls[0])
 
+    def test_new_format_key_retries_via_query_param(self):
+        """مفتاح بصيغة AQ. يُرفض في الترويسة ويُقبل عبر ?key= (حالة المستخدم الفعلية)."""
+        from unittest import mock
+        calls = []
+        def fake(url, headers, body, ctx, timeout=20):
+            calls.append((url, dict(headers)))
+            if "x-goog-api-key" in headers:
+                raise self.ai.AIError("HTTP 401: API key not valid. Please pass a valid API key.")
+            return self.gem("works now")
+        key = "AQ.Ab8RN6_test.key-123"
+        with mock.patch.object(self.ai, "_call_api", side_effect=fake):
+            out = self.ai.generate_ai_comment("BTC up", dict(self.cfg, api_key=key), ignore_interval=True)
+        self.assertEqual(out, "works now")
+        self.assertEqual(len(calls), 2)
+        self.assertIn("x-goog-api-key", calls[0][1])
+        self.assertIn("?key=AQ.Ab8RN6_test.key-123", calls[1][0])
+        self.assertNotIn("x-goog-api-key", calls[1][1])
+
+    def test_genuinely_invalid_key_still_reports_after_retry(self):
+        from unittest import mock
+        with mock.patch.object(self.ai, "_call_api", side_effect=self.ai.AIError("HTTP 401: API key not valid")) as c:
+            with self.assertRaises(self.ai.AIError) as ex:
+                self.ai.generate_ai_comment("x", self.cfg, raise_errors=True, ignore_interval=True)
+        self.assertEqual(c.call_count, 2)                      # ترويسة ثم معامل، لا أكثر
+        self.assertIn("401", str(ex.exception))
+        self.assertNotIn("KEY", str(ex.exception))             # المفتاح لا يظهر في رسالة الخطأ
+
+    def test_non_key_errors_do_not_retry_with_query(self):
+        from unittest import mock
+        with mock.patch.object(self.ai, "_call_api", side_effect=self.ai.AIError("HTTP 429: quota exceeded")) as c:
+            self.assertIsNone(self.ai.generate_ai_comment("x", self.cfg, ignore_interval=True))
+        self.assertEqual(c.call_count, 1)
+
     def test_key_cleaning_and_provider_detection(self):
         a = self.ai
         self.assertEqual(a.clean_key('  "AIzaSyABC123"\u200f\n '), "AIzaSyABC123")
         self.assertEqual(a.clean_key("AIza SyABC\n123"), "AIzaSyABC123")
         self.assertEqual([a.detect_key_provider(k) for k in ("AIzaSyX", "gsk_abc", "sk-proj-1", "sk-abc", "xyz")],
                          ["gemini", "groq", "openai", "openai", None])
+        self.assertEqual(a.detect_key_provider("AQ.Ab8RN6JKt5"), "gemini")
 
     def test_provider_mismatch_gives_clear_message(self):
         from unittest import mock

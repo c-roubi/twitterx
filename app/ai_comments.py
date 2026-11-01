@@ -12,6 +12,7 @@ import json
 import random
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 from . import net
@@ -63,13 +64,26 @@ def clean_key(key):
 def detect_key_provider(key):
     """يستنتج مزوّد المفتاح من بادئته (AIza = Gemini، gsk_ = Groq، sk- = OpenAI) أو None."""
     k = clean_key(key)
-    if k.startswith("AIza"):
+    if k.startswith(("AIza", "AQ.")):  # AIza = الصيغة التقليدية، AQ. = صيغة Google الأحدث
         return "gemini"
     if k.startswith("gsk_"):
         return "groq"
     if k.startswith("sk-"):
         return "openai"
     return None
+
+
+def _gemini_call(url, api_key, body, ctx):
+    """نداء Gemini: المفتاح في الترويسة أولاً (لا يظهر في الرابط)، وإن رُفض نعيد عبر ?key= (تعمل بها بعض صيغ المفاتيح الحديثة)."""
+    base = {"Content-Type": "application/json"}
+    try:
+        return _call_api(url, dict(base, **{"x-goog-api-key": api_key}), body, ctx)
+    except AIError as e:
+        s = str(e)
+        if not (s.startswith(("HTTP 400", "HTTP 401", "HTTP 403")) and "key" in s.lower()):
+            raise
+    log.info("Gemini رفض المفتاح في الترويسة - إعادة المحاولة عبر معامل key")
+    return _call_api(url + "?key=" + urllib.parse.quote(api_key, safe=""), base, body, ctx)
 
 
 def check_key_format(provider, key):
@@ -184,7 +198,7 @@ def generate_ai_comment(tweet_text, ai_cfg, net_cfg=None, raise_errors=False, ig
                 url = "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent".format(model)
                 body = {"contents": [{"parts": [{"text": "{}\n\n{}".format(system, user_msg)}]}]}
                 try:
-                    resp = _call_api(url, {"Content-Type": "application/json", "x-goog-api-key": api_key}, body, ctx)
+                    resp = _gemini_call(url, api_key, body, ctx)
                     break
                 except AIError as e:
                     if "HTTP 404" in str(e) and i < len(models) - 1:
