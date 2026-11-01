@@ -5,7 +5,7 @@ import time
 
 from playwright.sync_api import sync_playwright
 
-from . import proxies, selectors
+from . import proxies, selectors, warp
 from .config import PROFILES_DIR, SESSIONS_DIR
 from .humanizer import fingerprint_for, Human
 from .logger import get_logger
@@ -156,6 +156,7 @@ def launch_account(account, cfg, pw=None, owned_pw=True):
     if pw is None:
         pw = sync_playwright().start()
     headless_cfg = cfg["browser"].get("headless", False)
+    warp.before_account(cfg)  # تدوير IP كل N حساب (إن كان WARP مفعّلاً)
     account_proxy = proxies.resolve_for(acc_id, cfg)
 
     def _launch(headless, use_proxy, use_chrome):

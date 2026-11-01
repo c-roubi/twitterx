@@ -43,3 +43,32 @@ class WarpTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class IntegrationTests(unittest.TestCase):
+    def setUp(self):
+        import tempfile
+        self.tmp = tempfile.mkdtemp()
+        self.p1 = mock.patch.object(warp, "_STATE_PATH", os.path.join(self.tmp, "s.json"))
+        self.p1.start()
+        self.addCleanup(self.p1.stop)
+
+    def test_rotates_every_n_accounts(self):
+        cfg = {"warp": {"enabled": True, "accounts_per_ip": 2}}
+        with mock.patch.object(warp, "ensure_ready", return_value=True), \
+             mock.patch.object(warp, "rotate_ip", return_value=True) as rot:
+            res = [warp.before_account(cfg, sleep=lambda s: None) for _ in range(6)]
+        self.assertEqual(res, [False, False, True, False, True, False])
+        self.assertEqual(rot.call_count, 2)
+
+    def test_warp_overrides_proxy_list(self):
+        from app import proxies
+        cfg = {"warp": {"enabled": True}, "proxies": {"enabled": True, "list": ["http://1.2.3.4:80"]}}
+        with mock.patch.object(proxies, "test_proxy", return_value=True):
+            p = proxies.resolve_for("a1", cfg)
+        self.assertEqual((p["host"], p["port"]), ("127.0.0.1", 40000))
+
+    def test_warp_down_falls_back_direct(self):
+        from app import proxies
+        with mock.patch.object(proxies, "test_proxy", return_value=False):
+            self.assertIsNone(proxies.resolve_for("a1", {"warp": {"enabled": True}}))

@@ -11,6 +11,7 @@
 
 إضافة: قفل ملفي بين العمليات حتى لا تدوّر عمليتان من هذه الأداة بنفس الوقت.
 """
+import json
 import os
 import subprocess
 import threading
@@ -29,6 +30,7 @@ WARP_CLI = "warp-cli"
 DEFAULT_PROXY_PORT = 40000
 _LOCK_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                           "data", "warp_rotate.lock")
+_STATE_PATH = os.path.join(os.path.dirname(_LOCK_PATH), "warp_state.json")
 _thread_lock = threading.Lock()
 
 DEFAULTS = {
@@ -126,3 +128,64 @@ def maybe_rotate(index, settings=None, sleep=time.sleep):
     if not s["enabled"] or n <= 0 or index == 0 or index % n != 0:
         return False
     return rotate_ip(s, sleep=sleep)
+
+
+def _settings(cfg):
+    s = dict(DEFAULTS)
+    s.update((cfg or {}).get("warp") or {})
+    return s
+
+
+def enabled(cfg):
+    return bool(_settings(cfg)["enabled"])
+
+
+def _load_count():
+    try:
+        with open(_STATE_PATH, encoding="utf-8") as f:
+            return int(json.load(f).get("count", 0))
+    except (OSError, ValueError, TypeError):
+        return 0
+
+
+def _save_count(n):
+    os.makedirs(os.path.dirname(_STATE_PATH), exist_ok=True)
+    tmp = _STATE_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump({"count": n}, f)
+    os.replace(tmp, _STATE_PATH)
+
+
+def ensure_ready(cfg):
+    """أول استخدام: وضع البروكسي المحلي + الاتصال إن لم يكن متصلاً."""
+    s = _settings(cfg)
+    if not s["enabled"]:
+        return False
+    with _thread_lock, _FileLock():
+        if s["isolate_proxy_mode"]:
+            ensure_proxy_mode(s["proxy_port"])
+        if not is_connected():
+            _run("connect")
+            time.sleep(s["connect_wait_s"])
+        return is_connected()
+
+
+def before_account(cfg, sleep=time.sleep):
+    """يُستدعى قبل فتح كل حساب: يعدّ الحسابات ويدوّر IP كل accounts_per_ip حساب.
+
+    العدّاد محفوظ على القرص فيبقى صحيحاً عبر إعادة التشغيل. يعيد True إذا دُوِّر IP.
+    """
+    s = _settings(cfg)
+    if not s["enabled"]:
+        return False
+    with _thread_lock:
+        index = _load_count()
+        _save_count(index + 1)
+    if index == 0:
+        ensure_ready(cfg)
+        return False
+    rotated = maybe_rotate(index, s, sleep=sleep)
+    if rotated:
+        from . import proxies
+        proxies._cache.clear()  # أعد اختبار منفذ WARP بعد التدوير
+    return rotated
