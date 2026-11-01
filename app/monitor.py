@@ -106,7 +106,7 @@ def _fetch_with_account(cfg, accounts, acc_id):
 
 
 @locked_seen
-def schedule_for_tweet(tid, text="", cfg=None, accounts=None, source="manager", priority=False, notify_chat=None):
+def schedule_for_tweet(tid, text="", cfg=None, accounts=None, source="manager", priority=False, notify_chat=None, skipped=None):
     """اختيار مجموعة حسابية عشوائية وتوزيع مهام عليها بجدول متدرج.
 
     priority=True: تغريدة عاجلة (مثل أوامر الأدمن): تُنفَّذ فوراً وبالتتابع حساباً بعد حساب،
@@ -165,6 +165,7 @@ def schedule_for_tweet(tid, text="", cfg=None, accounts=None, source="manager", 
         "source": source,
         "priority": bool(priority),
         "notify_chat": notify_chat,
+        "skipped": list(skipped or []),
         "queue": queue,
     }
     save_seen(seen)

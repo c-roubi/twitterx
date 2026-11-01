@@ -270,7 +270,10 @@ class TelegramBot:
         q = entry.get("queue", [])
         acts = sum(len(t["actions"]) for t in q)
         mode = "فوري ⚡ بالتتابع (بلا التقيّد بالحدود اليومية)" if cfg["telegram"].get("instant", True) else "متدرّج"
-        return Reply.of("✅ <b>جُدول التفاعل</b> مع التغريدة <code>{}</code>\n• الحسابات: <b>{}</b>\n• العمليات: <b>{}</b>\n• التنفيذ: {}".format(tid, len(q), acts, mode), rows)
+        txt = "✅ <b>جُدول التفاعل</b> مع التغريدة <code>{}</code>\n• الحسابات: <b>{}</b>\n• العمليات: <b>{}</b>\n• التنفيذ: {}".format(tid, len(q), acts, mode)
+        if entry.get("skipped"):
+            txt += "\n⚠️ تُخطّيت (غير جاهزة): {}".format(" ".join(str(s).replace("<", "&lt;") for s in entry["skipped"]))
+        return Reply.of(txt, rows)
 
     def _status_text(self):
         accounts = self.get_accounts()

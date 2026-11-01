@@ -72,6 +72,8 @@ class ApiTests(unittest.TestCase):
         self.call("DELETE", "/api/accounts/" + a)
         c = self.call("POST", "/api/accounts", {"handle": "gap_c"})[1]["data"]["id"]
         self.assertNotEqual(b, c)
+        for x in (b, c):
+            self.call("DELETE", "/api/accounts/" + x)
 
     def test_config_validation_and_masking(self):
         s, r = self.call("POST", "/api/config", {"engagement": {"accounts_per_tweet": [9, 3]}})
@@ -398,9 +400,42 @@ class BotMenuTests(unittest.TestCase):
         r = bot.handle_message(self.chat, "hello")
         self.assertTrue(r[0].markup)  # لا رابط: زر القائمة
 
+    def mark_ready(self, aid):
+        os.makedirs(self.config.SESSIONS_DIR, exist_ok=True)
+        with open(os.path.join(self.config.SESSIONS_DIR, aid + ".json"), "w") as f:
+            f.write("{}")
+
+    def test_instant_full_mix_and_skipped(self):
+        from unittest import mock
+        ids = [self.svc.add_account({"handle": "mix_%d" % i})["id"] for i in range(4)]
+        for aid in ids[:3]:
+            self.mark_ready(aid)           # الرابع بلا جلسة
+        try:
+            with mock.patch.object(self.svc.bot, "engine_running", return_value=True):
+                r = self.svc.bot.handle_message(self.chat, "https://x.com/u/status/1112223334445")
+            self.assertIn("تُخطّيت", r[0])
+            self.assertIn("@mix_3", r[0])
+            e = self.config.load_seen()["1112223334445"]
+            actions = [sorted(q["actions"]) for q in e["queue"]]
+            self.assertEqual(len(actions), 3)
+            self.assertTrue(all(a == ["comment", "like", "retweet"] for a in actions), actions)  # كل حساب يفعل الثلاثة
+            self.assertIn("@mix_3", e["skipped"])
+        finally:
+            for aid in ids:
+                self.svc.delete_account(aid)
+
+    def test_no_ready_accounts_message(self):
+        a = self.svc.add_account({"handle": "noready"})
+        try:
+            r = self.svc.bot.handle_message(self.chat, "https://x.com/u/status/1119998887776")
+            self.assertIn("لا توجد حسابات جاهزة", r[0])
+        finally:
+            self.svc.delete_account(a["id"])
+
     def test_link_reply_has_progress_button(self):
         from unittest import mock
         a = self.svc.add_account({"handle": "lnk_acc"})
+        self.mark_ready(a["id"])
         try:
             with mock.patch.object(self.svc.bot, "engine_running", return_value=True):
                 r = self.svc.bot.handle_message(self.chat, "https://x.com/u/status/9876543210123")

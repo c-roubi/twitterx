@@ -222,7 +222,26 @@ class AppService:
 
     def _schedule(self, tid, text, cfg, source, priority=False, notify_chat=None):
         from . import monitor  # استيراد متأخر (playwright)
-        entry = monitor.schedule_for_tweet(tid, text, cfg, load_accounts(), source=source, priority=priority, notify_chat=notify_chat)
+        accounts, skipped = load_accounts(), []
+        if priority:
+            # العاجلة: فقط الحسابات الجاهزة (جلسة محفوظة ولا تحتاج إعادة دخول) حتى لا تُهدر محاولات فاشلة
+            ready = {}
+            for aid, a in accounts.items():
+                if not a.get("enabled", True):
+                    continue
+                v = self.account_view(aid, a)
+                if v["has_session"] and not v["needs_relogin"]:
+                    ready[aid] = a
+                else:
+                    skipped.append("@" + a.get("handle", aid))
+            if not ready:
+                raise ApiError("لا توجد حسابات جاهزة (سجّل دخول حساب واحد على الأقل)")
+            accounts = ready
+            cfg = copy.deepcopy(cfg)
+            cfg["engagement"]["action_mix"] = dict(cfg["telegram"]["action_mix"])  # مزيج التفاعل العاجل
+            n = len(ready)
+            cfg["engagement"]["accounts_per_tweet"] = [min(cfg["engagement"]["accounts_per_tweet"][0], n), min(cfg["engagement"]["accounts_per_tweet"][1], n)]
+        entry = monitor.schedule_for_tweet(tid, text, cfg, accounts, source=source, priority=priority, notify_chat=notify_chat, skipped=skipped)
         if entry and priority:
             self.engine.wake()
         return entry
@@ -468,7 +487,7 @@ class AppService:
         entry = self._schedule(ids[0], text, cfg, "manual", bool(body.get("fast")))
         if not entry:
             raise ApiError("هذه التغريدة مجدولة مسبقاً")
-        return {"id": ids[0], "accounts": len(entry["queue"])}
+        return {"id": ids[0], "accounts": len(entry["queue"]), "skipped": entry.get("skipped", [])}
 
     # ---- الإعدادات والتعليقات ----
     def get_config(self):
