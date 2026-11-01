@@ -1158,5 +1158,62 @@ class ChannelTests(unittest.TestCase):
         self.assertEqual((row["title"], row["username"]), ("T", "u"))
 
 
+class NetDiagTests(unittest.TestCase):
+    @staticmethod
+    def st(name, ok=True, detail="", warn=False):
+        return {"name": name, "ok": ok, "warn": warn, "ms": 1, "detail": detail}
+
+    def base(self, **over):
+        names = ["بروكسي", "DNS", "اتصال TCP (IPv4)", "اتصال IPv6", "تشفير TLS والشهادة", "فحص المفتاح"]
+        return [self.st(n, **over.get(n, {})) for n in names]
+
+    def test_verdict_generation_blocked_but_network_ok(self):
+        from app import netdiag
+        steps = self.base() + [self.st("POST خفيف"), self.st("توليد (a)", False, "AIError: TIMEOUT: x"), self.st("توليد (b)", False, "AIError: TIMEOUT: x")]
+        self.assertIn("المشكلة عند Google", netdiag.verdict(steps))
+        self.assertIn("جرّب مفتاح Groq", netdiag.verdict(steps))
+
+    def test_verdict_post_blocked(self):
+        from app import netdiag
+        steps = self.base() + [self.st("POST خفيف", False, "AIError: TIMEOUT: x"), self.st("توليد (a)", False, "AIError: TIMEOUT: x")]
+        self.assertIn("جدار ناري", netdiag.verdict(steps))
+
+    def test_verdict_other_cases(self):
+        from app import netdiag
+        self.assertIn("كل شيء يعمل", netdiag.verdict(self.base() + [self.st("توليد (a)")]))
+        self.assertIn("رفض المفتاح", netdiag.verdict(self.base(**{"فحص المفتاح": {"ok": False}})))
+        self.assertIn("الشهادة مبدّلة", netdiag.verdict(self.base(**{"تشفير TLS والشهادة": {"warn": True}}) + [self.st("توليد (a)")]))
+        self.assertIn("بطيء", netdiag.verdict(self.base() + [self.st("توليد (a)", warn=True)]))
+        self.assertIn("DNS", netdiag.verdict(self.base(DNS={"ok": False})))
+
+    def test_issuer_reader_handles_empty_peercert_with_truststore(self):
+        from unittest import mock
+        from app import netdiag
+        s = mock.MagicMock()
+        s.getpeercert.side_effect = lambda binary=False: {} if not binary else None
+        self.assertIsNone(netdiag._issuer(s))               # لا شهادة ثنائية: لا إنذار كاذب (يرجع None)
+        s2 = mock.MagicMock()
+        s2.getpeercert.return_value = {"issuer": ((("organizationName", "Google Trust Services"),), (("commonName", "WR2"),))}
+        self.assertEqual(netdiag._issuer(s2), "Google Trust Services WR2")
+
+    def test_single_model_does_not_fallback(self):
+        from unittest import mock
+        from app import ai_comments as ai
+        ai._last_call = 0
+        with mock.patch.object(ai, "_call_api", side_effect=ai.AIError("TIMEOUT: x")) as c:
+            with self.assertRaises(ai.AIError):
+                ai.generate_ai_comment("BTC", {"provider": "gemini", "api_key": "AIzaKEY", "model": ""}, raise_errors=True, ignore_interval=True, single_model=True, timeout=3)
+        self.assertEqual(c.call_count, 1)
+
+    def test_diagnose_api_redacts_key_and_reports(self):
+        from unittest import mock
+        from app import netdiag
+        svc = server.AppService()
+        with mock.patch.object(netdiag, "run", return_value=[self.st("فحص المفتاح", False, "bad AIzaSECRETKEY here")]):
+            out = svc.ai_diagnose({"provider": "gemini", "api_key": "AIzaSECRETKEY"})
+        self.assertNotIn("AIzaSECRETKEY", str(out))
+        self.assertIn("verdict", out)
+
+
 if __name__ == "__main__":
     unittest.main()

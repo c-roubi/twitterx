@@ -79,17 +79,17 @@ def detect_key_provider(key):
     return None
 
 
-def _gemini_call(url, api_key, body, ctx):
+def _gemini_call(url, api_key, body, ctx, timeout=REQUEST_TIMEOUT_S):
     """نداء Gemini: المفتاح في الترويسة أولاً (لا يظهر في الرابط)، وإن رُفض نعيد عبر ?key= (تعمل بها بعض صيغ المفاتيح الحديثة)."""
     base = {"Content-Type": "application/json"}
     try:
-        return _call_api(url, dict(base, **{"x-goog-api-key": api_key}), body, ctx)
+        return _call_api(url, dict(base, **{"x-goog-api-key": api_key}), body, ctx, timeout=timeout)
     except AIError as e:
         s = str(e)
         if not (s.startswith(("HTTP 400", "HTTP 401", "HTTP 403")) and "key" in s.lower()):
             raise
     log.info("Gemini رفض المفتاح في الترويسة - إعادة المحاولة عبر معامل key")
-    return _call_api(url + "?key=" + urllib.parse.quote(api_key, safe=""), base, body, ctx)
+    return _call_api(url + "?key=" + urllib.parse.quote(api_key, safe=""), base, body, ctx, timeout=timeout)
 
 
 def check_key_format(provider, key):
@@ -237,7 +237,8 @@ def _clean(text):
     return text or None
 
 
-def generate_ai_comment(tweet_text, ai_cfg, net_cfg=None, raise_errors=False, ignore_interval=False, lang=None):
+def generate_ai_comment(tweet_text, ai_cfg, net_cfg=None, raise_errors=False, ignore_interval=False, lang=None,
+                        timeout=REQUEST_TIMEOUT_S, single_model=False):
     """توليد تعليق (إنجليزي غالباً مع $TICKER) من نص التغريدة عبر المزوّد المحدد.
 
     يرجع None عند أي خطأ (مع تسجيل السبب في السجلات)؛ raise_errors=True يرفع AIError لعرضه في الاختبار.
@@ -288,7 +289,9 @@ def generate_ai_comment(tweet_text, ai_cfg, net_cfg=None, raise_errors=False, ig
 
     try:
         if provider == "gemini":
-            models = [user_model] if user_model else GEMINI_FALLBACKS
+            models = [user_model] if (user_model or single_model) else GEMINI_FALLBACKS
+            if single_model and not user_model:
+                models = [DEFAULT_MODELS['gemini']]
             resp = None
             for i, model in enumerate(models):
                 url = "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent".format(model)
@@ -297,7 +300,7 @@ def generate_ai_comment(tweet_text, ai_cfg, net_cfg=None, raise_errors=False, ig
                 if model.startswith("gemini-2.5-flash"):
                     body["generationConfig"]["thinkingConfig"] = {"thinkingBudget": 0}  # بدون «تفكير» طويل: أسرع وأرخص
                 try:
-                    resp = _gemini_call(url, api_key, body, ctx)
+                    resp = _gemini_call(url, api_key, body, ctx, timeout=timeout)
                     break
                 except AIError as e:
                     if i < len(models) - 1 and str(e).startswith(RETRY_NEXT_MODEL):
@@ -317,7 +320,7 @@ def generate_ai_comment(tweet_text, ai_cfg, net_cfg=None, raise_errors=False, ig
                 "temperature": 0.9,
                 "max_tokens": 60,
             }
-            resp = _call_api(url, {"Content-Type": "application/json", "Authorization": "Bearer " + api_key}, body, ctx)
+            resp = _call_api(url, {"Content-Type": "application/json", "Authorization": "Bearer " + api_key}, body, ctx, timeout=timeout)
     except AIError as e:
         return fail(str(e))
     except Exception as e:  # شبكة/شهادات/وقت
