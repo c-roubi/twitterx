@@ -537,6 +537,10 @@ def _run_due_manager_tasks(page, acc_id, cfg, state, human, acc=None, priority=F
     if not tasks:
         return
     fast = cfg.get("telegram", {}).get("action_delay_s", [2, 6])
+    if priority:  # عاجل: لا نؤخّر التعليق بسبب فاصل الذكاء الاصطناعي بين الطلبات
+        import copy as _copy
+        cfg = _copy.deepcopy(cfg)
+        cfg.setdefault("comments", {}).setdefault("ai", {})["min_interval_s"] = 0
     for task in tasks:
         ok, status = open_tweet_with_retry(page, task["url"], cfg)
         if not ok:
@@ -572,7 +576,13 @@ def _run_due_manager_tasks(page, acc_id, cfg, state, human, acc=None, priority=F
                 res, msg = retweet_tweet(page, human)
             elif action == "comment":
                 used = _comments_used_for(task["tweet_id"])
-                text = build_comment_for(task.get("text") or "", used_texts=used, cfg=cfg, en_ratio=en_ratio)
+                tweet_text = task.get("text") or ""
+                if not tweet_text:  # روابط تيليجرام/اليدوي: نقرأ النص من الصفحة ونحفظه للحسابات التالية
+                    tweet_text = _extract_open_tweet_text(page)
+                    if tweet_text:
+                        task["text"] = tweet_text
+                        monitor.set_tweet_text(task["tweet_id"], tweet_text)
+                text = build_comment_for(tweet_text, used_texts=used, cfg=cfg, en_ratio=en_ratio)
                 res, msg = comment_on_tweet(page, text, human)
                 if res:
                     _record_comment(task["url"], text, task["tweet_id"])

@@ -17,6 +17,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+from . import net as _net
 from .logger import get_logger
 
 log = get_logger("telegram")
@@ -45,18 +46,7 @@ def strip_links(text):
     return re.sub(r"\s+", " ", _URL_RE.sub("", text or "")).strip()
 
 
-def ssl_context(tcfg):
-    """سياق TLS: ملف شهادات مخصّص > مخزن النظام (truststore) > الافتراضي. التعطيل خيار أخير صريح."""
-    if tcfg.get("insecure_ssl"):
-        return ssl._create_unverified_context()
-    ca = (tcfg.get("ca_bundle") or os.environ.get("SSL_CERT_FILE") or "").strip()
-    if ca and os.path.isfile(ca):
-        return ssl.create_default_context(cafile=ca)
-    try:
-        import truststore  # يستخدم التحقق الأصلي في ويندوز (يجلب شهادات الجذر الناقصة عند الحاجة)
-        return truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-    except Exception:
-        return ssl.create_default_context()
+ssl_context = _net.ssl_context  # للتوافق مع الاستخدامات السابقة
 
 
 def valid_token(token):

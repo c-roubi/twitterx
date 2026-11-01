@@ -460,5 +460,103 @@ class BotMenuTests(unittest.TestCase):
         self.assertEqual(self.svc.completion_notices(), [])
 
 
+class AITests(unittest.TestCase):
+    def setUp(self):
+        from app import ai_comments
+        self.ai = ai_comments
+        ai_comments._last_call = 0.0
+        self.cfg = {"provider": "gemini", "api_key": "KEY", "model": "", "min_interval_s": 30}
+
+    def gem(self, text):
+        return {"candidates": [{"content": {"parts": [{"text": text}]}}]}
+
+    def test_success_and_headers(self):
+        from unittest import mock
+        seen = {}
+        def fake(url, headers, body, ctx, timeout=20):
+            seen.update(url=url, headers=headers)
+            return self.gem('"Nice $BTC breakout!"')
+        with mock.patch.object(self.ai, "_call_api", side_effect=fake):
+            out = self.ai.generate_ai_comment("BTC breaks 70k", self.cfg)
+        self.assertEqual(out, "Nice $BTC breakout!")
+        self.assertNotIn("KEY", seen["url"])  # المفتاح في الترويسة لا في الرابط
+        self.assertEqual(seen["headers"]["x-goog-api-key"], "KEY")
+        self.assertIn("gemini-2.5-flash", seen["url"])
+
+    def test_model_404_falls_back(self):
+        from unittest import mock
+        tried = []
+        def fake(url, headers, body, ctx, timeout=20):
+            tried.append(url.split("models/")[1].split(":")[0])
+            if len(tried) == 1:
+                raise self.ai.AIError("HTTP 404: model not found")
+            return self.gem("ok comment")
+        with mock.patch.object(self.ai, "_call_api", side_effect=fake):
+            self.assertEqual(self.ai.generate_ai_comment("tweet", self.cfg), "ok comment")
+        self.assertEqual(tried, self.ai.GEMINI_FALLBACKS[:2])
+
+    def test_retired_model_name_ignored(self):
+        from unittest import mock
+        urls = []
+        def fake(url, headers, body, ctx, timeout=20):
+            urls.append(url); return self.gem("fine")
+        with mock.patch.object(self.ai, "_call_api", side_effect=fake):
+            self.assertEqual(self.ai.generate_ai_comment("x", dict(self.cfg, model="gemini-1.5-flash")), "fine")
+        self.assertIn("gemini-2.5-flash", urls[0])
+
+    def test_errors_are_reported_not_silent(self):
+        from unittest import mock
+        with self.assertRaises(self.ai.AIError) as c:
+            self.ai.generate_ai_comment("", self.cfg, raise_errors=True)
+        self.assertIn("فارغ", str(c.exception))
+        with self.assertRaises(self.ai.AIError):
+            self.ai.generate_ai_comment("x", dict(self.cfg, api_key=""), raise_errors=True)
+        with mock.patch.object(self.ai, "_call_api", side_effect=self.ai.AIError("HTTP 403: API key not valid")):
+            with self.assertRaises(self.ai.AIError) as c:
+                self.ai.generate_ai_comment("x", self.cfg, raise_errors=True)
+        self.assertIn("403", str(c.exception))
+        with mock.patch.object(self.ai, "_call_api", side_effect=ValueError("[SSL: CERTIFICATE_VERIFY_FAILED]")):
+            self.assertIsNone(self.ai.generate_ai_comment("x", self.cfg))  # العادي: None مع تسجيل
+
+    def test_interval_skip_unless_ignored(self):
+        from unittest import mock
+        with mock.patch.object(self.ai, "_call_api", return_value=self.gem("one")):
+            self.assertEqual(self.ai.generate_ai_comment("x", self.cfg), "one")
+            self.assertIsNone(self.ai.generate_ai_comment("x", self.cfg))             # ضمن 30ث
+            self.assertEqual(self.ai.generate_ai_comment("x", self.cfg, ignore_interval=True), "one")
+
+    def test_priority_comment_reads_text_from_page_and_ignores_interval(self):
+        from unittest import mock
+        from app import config, monitor, routine
+        config.save_seen({})
+        cfg = config.load_config()
+        cfg["engagement"]["accounts_per_tweet"] = [1, 1]
+        cfg["engagement"]["action_mix"] = {"like": 0.0, "retweet": 0.0, "comment": 1.0}
+        cfg["comments"]["ai"].update(enabled=True, api_key="K", min_interval_s=30)
+        monitor.schedule_for_tweet("777888999", "", cfg, {"ai1": {"enabled": True}}, priority=True)
+        got = {}
+        def fake_build(text, **kw):
+            got["text"], got["interval"] = text, kw["cfg"]["comments"]["ai"]["min_interval_s"]
+            return "AI comment"
+        with mock.patch.object(routine, "open_tweet_with_retry", return_value=(True, "ok")), \
+             mock.patch.object(routine, "_extract_open_tweet_text", return_value="$ETH looks strong"), \
+             mock.patch.object(routine, "build_comment_for", side_effect=fake_build), \
+             mock.patch.object(routine, "comment_on_tweet", return_value=(True, "ok")), \
+             mock.patch.object(routine, "save_state"):
+            state = {"done": {"likes": 0, "retweets": 0, "comments": 0, "follows": 0}, "caps": {"likes": 9, "retweets": 9, "comments": 9, "follows": 9}}
+            routine._run_due_manager_tasks(mock.MagicMock(), "ai1", cfg, state, mock.MagicMock(), priority=True)
+        self.assertEqual(got, {"text": "$ETH looks strong", "interval": 0})
+        self.assertEqual(config.load_seen()["777888999"]["text"], "$ETH looks strong")  # محفوظ للحسابات التالية
+
+    def test_api_endpoint(self):
+        from unittest import mock
+        svc = server.AppService()
+        with mock.patch.object(self.ai, "_call_api", return_value=self.gem("great")):
+            r = svc.ai_test({"provider": "gemini", "api_key": "K"})
+        self.assertEqual(r["comment"], "great")
+        with self.assertRaises(server.ApiError):
+            svc.ai_test({"provider": "gemini", "api_key": ""})  # لا مفتاح محفوظ
+
+
 if __name__ == "__main__":
     unittest.main()

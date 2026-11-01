@@ -46,7 +46,7 @@ DEFAULT_CONFIG = {
             "enabled": False,
             "provider": "gemini",
             "api_key": "",
-            "model": "gemini-1.5-flash",
+            "model": "",
             "min_interval_s": 30
         }
     },

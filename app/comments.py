@@ -93,9 +93,12 @@ def build_comment_for(tweet_text, used_texts=(), cfg=None, force_unique=True, en
         try:
             from .ai_comments import generate_ai_comment
 
-            text = generate_ai_comment(tweet_text, ai_cfg)
+            text = generate_ai_comment(tweet_text, ai_cfg, net_cfg=cfg.get("telegram"))
             if text and _unique(text, used, force_unique):
                 return text
+            if text is None:
+                from .logger import get_logger
+                get_logger("comments").info("لم يُولَّد تعليق بالذكاء الاصطناعي - استُخدم تعليق محلي بديل")
         except Exception:
             pass
 

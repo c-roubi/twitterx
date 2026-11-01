@@ -401,6 +401,7 @@ const SCHEMA = [
       {p: "comments.ai.model", t: "text", label: "النموذج", desc: "اتركه فارغاً لاستخدام الافتراضي.", ltr: true},
       {p: "comments.ai.min_interval_s", t: "int", label: "أقل فاصل بين الطلبات", min: 0, unit: "ثانية"},
     ]},
+    {title: "اختبار الذكاء الاصطناعي", custom: "aitest"},
     {title: "قوالب التعليقات", custom: "templates"},
   ]},
   {id: "warp", title: "الشبكة (WARP)", groups: [
@@ -688,7 +689,8 @@ PAGES.settings = {
     $$(".pivot button").forEach(b => b.setAttribute("aria-selected", b.dataset.id === sec.id));
     if (sec.id === "comments" && this.tpl == null) { try { this.tpl = (await api("GET", "/api/comments")).text; } catch (e) { this.tpl = ""; } this.tplOrig = this.tpl; }
     $("#set-body").innerHTML = `<div class="stack">` + sec.groups.map(g => `<div><div class="h2">${g.title}</div><div class="card group">` +
-      (g.custom === "templates" ? `<div class="srow block"><div class="d" style="margin:0">تعليق في كل سطر (بحد أقصى 280 حرفاً). تُستخدم عند عدم توفر تعليق سياقي أو ذكاء اصطناعي.</div><textarea class="txt" id="tpl" rows="10" spellcheck="false" style="min-height:200px">${esc(this.tpl || "")}</textarea></div>`
+      (g.custom === "aitest" ? `<div class="srow block"><div class="d" style="margin:0">يستخدم القيم الظاهرة أعلاه (حتى قبل الحفظ). الصق نص تغريدة وسيولّد تعليقاً — وإن فشل ستظهر لك أسباب الفشل بوضوح.</div><textarea class="txt" id="ai-text" rows="2" placeholder="نص تغريدة للتجربة (اختياري)"></textarea><div class="row"><button class="btn accent" data-act="ai-test">${ic("flask", "sm")}اختبار التوليد</button></div><div id="ai-out" class="hint"></div></div>`
+      : g.custom === "templates" ? `<div class="srow block"><div class="d" style="margin:0">تعليق في كل سطر (بحد أقصى 280 حرفاً). تُستخدم عند عدم توفر تعليق سياقي أو ذكاء اصطناعي.</div><textarea class="txt" id="tpl" rows="10" spellcheck="false" style="min-height:200px">${esc(this.tpl || "")}</textarea></div>`
         : g.custom === "warptools" ? `<div class="srow"><div class="txtcol"><div class="t">حالة WARP</div><div class="d" id="warp-st">اضغط «فحص» لمعرفة الحالة والـ IP الحالي.</div></div><div class="c"><button class="btn" data-act="warp-status">${ic("refresh", "sm")}فحص</button></div></div>
           <div class="srow"><div class="txtcol"><div class="t">تجهيز WARP</div><div class="d">تثبيت وتسجيل وتفعيل وضع البروكسي المحلي والاتصال (مرة واحدة).</div></div><div class="c"><button class="btn" data-act="warp-setup">تجهيز الآن</button></div></div>
           <div class="srow"><div class="txtcol"><div class="t">تجربة التدوير</div><div class="d">يغيّر الـ IP الآن ويعرض العنوان قبل وبعد.</div></div><div class="c"><button class="btn" data-act="warp-rotate">${ic("refresh", "sm")}تدوير الآن</button></div></div>`
@@ -785,6 +787,14 @@ const ACT = {
   async "set-reset"() { S.config = await api("GET", "/api/config"); PAGES.settings.tpl = null; PAGES.settings.tplOrig = null; S.dirty = false; $("#savebar").classList.remove("show"); await PAGES.settings.paint(); },
   "log-level"(b) { S.logLevel = b.dataset.id; $$("[data-act=log-level]").forEach(x => x.setAttribute("aria-pressed", x === b)); PAGES.logs.load(); },
   "log-refresh"() { PAGES.logs.load(); },
+  async "ai-test"(b) {
+    PAGES.settings.stash(); const a = S.config.comments.ai, o = $("#ai-out"); busy(b, true); o.textContent = "";
+    try {
+      const r = await api("POST", "/api/ai/test", {provider: a.provider, model: a.model, api_key: a.api_key, text: $("#ai-text").value});
+      o.innerHTML = `<span class="chip ok">${ic("check", "sm")}يعمل</span> &nbsp;<b>${esc(r.comment)}</b>`;
+    } catch (e) { o.innerHTML = `<span class="chip err">${ic("warn", "sm")}فشل</span> &nbsp;<span class="err-t">${esc(e.message)}</span>`; }
+    finally { busy(b, false); }
+  },
   async "warp-status"(b) {
     busy(b, true); const o = $("#warp-st");
     try { const r = await api("GET", "/api/warp/status"); o.innerHTML = r.installed ? `${r.connected ? '<span class="chip ok">متصل</span>' : '<span class="chip warn">غير متصل</span>'} &nbsp;IP: <b class="ltr num">${esc(r.ip || "—")}</b>` : '<span class="chip err">غير مثبّت</span> — اضغط «تجهيز الآن» للتثبيت.'; } finally { busy(b, false); }

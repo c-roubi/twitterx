@@ -11,10 +11,20 @@
 import json
 import random
 import time
+import urllib.error
 import urllib.request
 
+from . import net
+from .logger import get_logger
+
+log = get_logger("ai")
+
+# نماذج Gemini القديمة (1.5) أُوقفت؛ نجرّب بالترتيب عند خطأ 404 إن لم يحدّد المستخدم نموذجاً
+RETIRED_GEMINI = ("gemini-1.5", "gemini-pro", "gemini-1.0")
+GEMINI_FALLBACKS = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-flash-latest"]
+
 DEFAULT_MODELS = {
-    "gemini": "gemini-1.5-flash",
+    "gemini": "gemini-2.5-flash",
     "openai": "gpt-4o-mini",
     "groq": "llama-3.1-8b-instant",
 }
@@ -40,10 +50,24 @@ _SYSTEM_PROMPT = (
 _last_call = 0.0
 
 
-def _call_api(url, headers, body, timeout=15):
+class AIError(Exception):
+    """خطأ بسبب مفهوم للمستخدم (يُعرض في الاختبار ويُسجَّل في السجلات)."""
+
+
+def _call_api(url, headers, body, ctx, timeout=20):
     req = urllib.request.Request(url, data=json.dumps(body).encode("utf-8"), headers=headers, method="POST")
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+    try:
+        with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        try:
+            msg = json.loads(e.read().decode("utf-8")).get("error", {})
+            msg = msg.get("message") if isinstance(msg, dict) else str(msg)
+        except Exception:
+            msg = ""
+        raise AIError("HTTP {}: {}".format(e.code, (msg or e.reason or "")[:200]), ) from None
+    except urllib.error.URLError as e:
+        raise AIError("تعذّر الاتصال بالمزوّد: {}".format(e.reason)) from None
 
 
 def _extract_text(resp, provider):
@@ -69,53 +93,76 @@ def _clean(text):
     return text or None
 
 
-def generate_ai_comment(tweet_text, ai_cfg):
-    """توليد تعليق (إنجليزي غالباً مع $TICKER) من نص التغريدة عبر المزوّد المحدد. None عند أي خطأ."""
+def generate_ai_comment(tweet_text, ai_cfg, net_cfg=None, raise_errors=False, ignore_interval=False):
+    """توليد تعليق (إنجليزي غالباً مع $TICKER) من نص التغريدة عبر المزوّد المحدد.
+
+    يرجع None عند أي خطأ (مع تسجيل السبب في السجلات)؛ raise_errors=True يرفع AIError لعرضه في الاختبار.
+    """
     global _last_call
-    if not tweet_text or not tweet_text.strip():
+
+    def fail(msg):
+        log.warning("الذكاء الاصطناعي: " + msg)
+        if raise_errors:
+            raise AIError(msg)
         return None
 
+    if not tweet_text or not tweet_text.strip():
+        return fail("نص التغريدة فارغ - لا يمكن تحليلها (تعذّر قراءة النص من الصفحة)")
     api_key = (ai_cfg.get("api_key") or "").strip()
     if not api_key:
-        return None
+        return fail("مفتاح API فارغ")
 
-    # تباعد زمني بين الطلبات (حماية من الحظر + احترام حدود الطبقة المجانية)
-    min_interval = float(ai_cfg.get("min_interval_s", 30) or 30)
+    # تباعد زمني بين الطلبات (حماية الطبقة المجانية). لا يُطبَّق على الاختبار ولا على التنفيذ العاجل.
+    min_interval = float(ai_cfg.get("min_interval_s", 30) or 0)
     now = time.time()
-    if now - _last_call < min_interval:
+    if not ignore_interval and now - _last_call < min_interval:
+        log.info("الذكاء الاصطناعي: تخطّي (أقل من {} ثانية عن الطلب السابق) - يُستخدم تعليق محلي".format(int(min_interval)))
         return None
     _last_call = now
 
     provider = ai_cfg.get("provider", "gemini")
-    model = (ai_cfg.get("model") or "").strip() or DEFAULT_MODELS.get(provider, DEFAULT_MODELS["gemini"])
+    user_model = (ai_cfg.get("model") or "").strip()
+    if provider == "gemini" and user_model.startswith(RETIRED_GEMINI):
+        log.warning("النموذج {} متقاعد - سيُستخدم نموذج حديث تلقائياً (فرّغ حقل النموذج في الإعدادات)".format(user_model))
+        user_model = ""
     persona = random.choice(_PERSONAS)
-    user_msg = f"Persona: {persona}.\n\nTweet:\n{tweet_text[:500]}\n\nWrite only the comment."
+    user_msg = "Persona: {}.\n\nTweet:\n{}\n\nWrite only the comment.".format(persona, tweet_text[:500])
+    ctx = net.ssl_context(net_cfg)
 
     try:
         if provider == "gemini":
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
-            body = {"contents": [{"parts": [{"text": f"{_SYSTEM_PROMPT}\n\n{user_msg}"}]}]}
-            headers = {"Content-Type": "application/json"}
-            resp = _call_api(url, headers, body)
+            models = [user_model] if user_model else GEMINI_FALLBACKS
+            resp = None
+            for i, model in enumerate(models):
+                url = "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent".format(model)
+                body = {"contents": [{"parts": [{"text": "{}\n\n{}".format(_SYSTEM_PROMPT, user_msg)}]}]}
+                try:
+                    resp = _call_api(url, {"Content-Type": "application/json", "x-goog-api-key": api_key}, body, ctx)
+                    break
+                except AIError as e:
+                    if "HTTP 404" in str(e) and i < len(models) - 1:
+                        continue  # النموذج غير متاح: جرّب التالي
+                    raise
         else:
             url = {
                 "openai": "https://api.openai.com/v1/chat/completions",
                 "groq": "https://api.groq.com/openai/v1/chat/completions",
             }.get(provider)
             if not url:
-                return None
+                return fail("مزوّد غير مدعوم: {}".format(provider))
             body = {
-                "model": model,
-                "messages": [
-                    {"role": "system", "content": _SYSTEM_PROMPT},
-                    {"role": "user", "content": user_msg},
-                ],
+                "model": user_model or DEFAULT_MODELS.get(provider),
+                "messages": [{"role": "system", "content": _SYSTEM_PROMPT}, {"role": "user", "content": user_msg}],
                 "temperature": 0.9,
                 "max_tokens": 60,
             }
-            headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
-            resp = _call_api(url, headers, body)
-    except Exception:
-        return None
+            resp = _call_api(url, {"Content-Type": "application/json", "Authorization": "Bearer " + api_key}, body, ctx)
+    except AIError as e:
+        return fail(str(e))
+    except Exception as e:  # شبكة/شهادات/وقت
+        return fail("{}: {}".format(type(e).__name__, str(e)[:160]))
 
-    return _clean(_extract_text(resp, provider))
+    text = _clean(_extract_text(resp, provider))
+    if not text:
+        return fail("ردّ المزوّد فارغ أو محجوب")
+    return text

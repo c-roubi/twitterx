@@ -555,6 +555,23 @@ class AppService:
         cfg["telegram"]["admin_ids"] = ids
         save_config(cfg)
 
+    # ---- الذكاء الاصطناعي ----
+    def ai_test(self, body):
+        from . import ai_comments
+        cfg = load_config()
+        ai = dict(cfg["comments"]["ai"])
+        for k in ("provider", "model", "api_key"):
+            if isinstance(body.get(k), str):
+                ai[k] = body[k].strip()
+        if ai.get("api_key") in ("", MASK):
+            ai["api_key"] = cfg["comments"]["ai"]["api_key"]
+        text = str(body.get("text") or "").strip() or "$BTC breaks above 70k resistance with strong volume. Next target 75k if it holds this level."
+        try:
+            out = ai_comments.generate_ai_comment(text, ai, net_cfg=cfg["telegram"], raise_errors=True, ignore_interval=True)
+        except ai_comments.AIError as e:
+            raise ApiError(str(e))
+        return {"comment": out, "tweet": text}
+
     # ---- WARP ----
     def warp_status(self):
         cfg = load_config()["warp"]
@@ -661,6 +678,9 @@ def make_handler(svc, token, port):
 
     @route("DELETE", r"/api/telegram/admins/(?P<cid>-?\d+)")
     def _(b, cid, **k): svc.tg_remove_admin(cid); return {}
+
+    @route("POST", "/api/ai/test")
+    def _(b, **k): return svc.ai_test(b)
 
     @route("GET", "/api/warp/status")
     def _(b, **k): return svc.warp_status()

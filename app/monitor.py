@@ -211,6 +211,16 @@ def priority_pending(acc_id):
 
 
 @locked_seen
+def set_tweet_text(tid, text):
+    """حفظ نص التغريدة المقروء من الصفحة (لتعليقات الذكاء الاصطناعي والتعليقات السياقية)."""
+    seen = load_seen()
+    entry = seen.get(tid)
+    if entry is not None and not entry.get("text") and text:
+        entry["text"] = text[:2000]
+        save_seen(seen)
+
+
+@locked_seen
 def mark_done(tid, acc_id, action):
     seen = load_seen()
     entry = seen.get(tid)
