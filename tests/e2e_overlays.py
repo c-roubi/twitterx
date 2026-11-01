@@ -25,13 +25,16 @@ UNLOCK = """<div role="dialog" id="unlock" style="width:300px;height:200px"><h2>
 NOTNOW = """<div role="dialog" id="prem" style="width:300px;height:200px"><p>Upgrade to Premium</p>
 <button onclick="document.getElementById('prem').remove()">Not now</button><button onclick="window.__bad=1">Subscribe</button></div>"""
 CLOSEONLY = """<div role="dialog" id="cl" style="width:300px;height:200px"><button aria-label="Close" onclick="document.getElementById('cl').remove()">x</button></div>"""
+PLUS = """<div role="dialog" id="plus" style="width:300px;height:200px"><h2>Want more people to see your reply?</h2><p>Subscribe to Plus to have your Replies boosted</p>
+<button onclick="window.__bad=2">Upgrade to Plus</button><button onclick="document.getElementById('plus').remove()">Maybe later</button></div>"""
+PLUS_AR = """<div role="dialog" id="plusar" style="width:300px;height:200px"><button onclick="window.__bad=3">ترقية</button><button onclick="document.getElementById('plusar').remove()">ربما لاحقًا</button></div>"""
 COMPOSE = """<div role="dialog" id="cmp" style="width:300px;height:200px"><div data-testid="tweetTextarea_0" contenteditable>hi</div>
 <button data-testid="tweetButton">Reply</button><button onclick="document.getElementById('cmp').remove()">Close</button></div>"""
 PREMIUM_CARD = """<div data-testid="sidebarColumn"><aside role="complementary" id="card" style="height:50px">Subscribe to Premium</aside></div>"""
 LOGIN = """<div role="dialog" id="lg" style="width:300px;height:200px"><input name="password"><button>Close</button></div>"""
 
 PAGES = {
-    "https://x.com/home": html(UNLOCK + NOTNOW + CLOSEONLY + COMPOSE + PREMIUM_CARD),
+    "https://x.com/home": html(UNLOCK + NOTNOW + CLOSEONLY + COMPOSE + PREMIUM_CARD + PLUS + PLUS_AR),
     "https://x.com/i/flow/login": html(LOGIN + UNLOCK),
 }
 
@@ -51,7 +54,9 @@ with sync_playwright() as p:
     gone = lambda sel: pg.locator(sel).count() == 0
     check("أُغلقت «Unlock more on X» بزر Got it", gone("#unlock"))
     check("أُغلق عرض Premium بـ Not now", gone("#prem"))
-    check("لم يضغط زر «Subscribe»", pg.evaluate("window.__bad") is None)
+    check("أُغلقت نافذة «Upgrade to Plus» بـ Maybe later", gone("#plus"))
+    check("أُغلقت صيغتها العربية", gone("#plusar"))
+    check("لم يضغط أي زر اشتراك/ترقية", pg.evaluate("window.__bad") is None)
     check("أُغلق حوار بزر Close فقط", gone("#cl"))
     check("لم يمسّ نافذة الكتابة/التعليق", pg.locator("#cmp").count() == 1)
     check("أُخفيت بطاقة Premium الجانبية", not pg.locator("#card").is_visible())

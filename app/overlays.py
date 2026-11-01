@@ -17,7 +17,7 @@ GUARD_JS = r"""
   window.__seGuard = true;
 
   // نصوص أزرار «تخطّي/إغلاق» فقط. لا نضغط أزرار تؤكّد إجراءً (حذف، موافق...).
-  const DISMISS = /^(got it|not now|maybe later|skip for now|skip|no thanks|dismiss|later|close|حسن[اًا]?|حسنًا|حسناً|فهمت|ليس الآن|ليس الان|لاحقًا|لاحقاً|تخطي|تخطّي|إغلاق|لا شكرا|لا، شكرًا|لا، شكراً)$/i;
+  const DISMISS = /^(got it|not now|maybe later|skip for now|skip|no thanks|dismiss|later|close|حسن[اًا]?|حسنًا|حسناً|فهمت|ليس الآن|ليس الان|لاحقًا|لاحقاً|ربما لاحقًا|ربما لاحقاً|تخطي|تخطّي|إغلاق|لا شكرا|لا، شكرًا|لا، شكراً)$/i;
   const KEEP = [
     '[data-testid^="tweetTextarea"]', '[data-testid="tweetButton"]', '[data-testid="tweetButtonInline"]',
     '[data-testid="confirmationSheetConfirm"]', '[data-testid="retweetConfirm"]', '[data-testid="unretweetConfirm"]',
