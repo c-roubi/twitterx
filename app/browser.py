@@ -5,7 +5,7 @@ import time
 
 from playwright.sync_api import sync_playwright
 
-from . import proxies, selectors, warp
+from . import overlays, proxies, selectors, warp
 from .config import PROFILES_DIR, SESSIONS_DIR
 from .humanizer import fingerprint_for, Human
 from .logger import get_logger
@@ -100,7 +100,7 @@ def launch_guest(cfg, pw):
             "headless": headless,
             "slow_mo": cfg["browser"].get("slow_mo", 0),
             "ignore_default_args": ["--enable-automation"],
-            "args": ["--disable-blink-features=AutomationControlled"],
+            "args": ["--disable-blink-features=AutomationControlled", "--test-type"],  # --test-type يخفي شريط تحذير الأعلام غير المدعومة
         }
         if use_chrome:
             launch_kwargs["channel"] = "chrome"
@@ -116,6 +116,7 @@ def launch_guest(cfg, pw):
             ctx_kwargs["proxy"] = proxies.proxy_args(use_proxy)
         context = browser.new_context(**ctx_kwargs)
         _apply_fingerprint(context, fp, use_chrome)
+        overlays.install(context)
         return context
 
     last_err = None
@@ -168,7 +169,7 @@ def launch_account(account, cfg, pw=None, owned_pw=True):
             "locale": fp.get("locale", "ar"),
             "timezone_id": fp.get("timezone_id", "Asia/Riyadh"),
             "ignore_default_args": ["--enable-automation"],
-            "args": ["--disable-blink-features=AutomationControlled"],
+            "args": ["--disable-blink-features=AutomationControlled", "--test-type"],  # --test-type يخفي شريط تحذير الأعلام غير المدعومة
         }
         if use_chrome:
             ctx_kwargs["channel"] = "chrome"
@@ -178,6 +179,7 @@ def launch_account(account, cfg, pw=None, owned_pw=True):
             ctx_kwargs["proxy"] = proxies.proxy_args(use_proxy)
         context = pw.chromium.launch_persistent_context(**ctx_kwargs)
         _apply_fingerprint(context, fp, use_chrome)
+        overlays.install(context)
         page = context.pages[0] if context.pages else context.new_page()
         return pw, context, page, pw_owned
 
