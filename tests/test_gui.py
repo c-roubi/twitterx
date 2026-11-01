@@ -505,6 +505,49 @@ class AITests(unittest.TestCase):
             self.assertEqual(self.ai.generate_ai_comment("x", dict(self.cfg, model="gemini-1.5-flash")), "fine")
         self.assertIn("gemini-2.5-flash", urls[0])
 
+    def test_key_cleaning_and_provider_detection(self):
+        a = self.ai
+        self.assertEqual(a.clean_key('  "AIzaSyABC123"\u200f\n '), "AIzaSyABC123")
+        self.assertEqual(a.clean_key("AIza SyABC\n123"), "AIzaSyABC123")
+        self.assertEqual([a.detect_key_provider(k) for k in ("AIzaSyX", "gsk_abc", "sk-proj-1", "sk-abc", "xyz")],
+                         ["gemini", "groq", "openai", "openai", None])
+
+    def test_provider_mismatch_gives_clear_message(self):
+        from unittest import mock
+        with mock.patch.object(self.ai, "_call_api") as call:
+            with self.assertRaises(self.ai.AIError) as c:
+                self.ai.generate_ai_comment("tweet", dict(self.cfg, provider="gemini", api_key="gsk_abcdef"), raise_errors=True)
+            self.assertIn("Groq", str(c.exception))
+            call.assert_not_called()                               # لا طلب شبكة بمفتاح مزوّد آخر
+
+    def test_dirty_pasted_key_is_cleaned_before_request(self):
+        from unittest import mock
+        seen = {}
+        def fake(url, headers, body, ctx, timeout=20):
+            seen["h"] = headers; return self.gem("ok")
+        with mock.patch.object(self.ai, "_call_api", side_effect=fake):
+            self.assertEqual(self.ai.generate_ai_comment("tweet", dict(self.cfg, api_key='  "AIzaSyKEY123"\n'), ignore_interval=True), "ok")
+        self.assertEqual(seen["h"]["x-goog-api-key"], "AIzaSyKEY123")
+
+    def test_foreign_model_name_ignored_for_other_providers(self):
+        from unittest import mock
+        seen = {}
+        def fake(url, headers, body, ctx, timeout=20):
+            seen["model"] = body["model"]
+            return {"choices": [{"message": {"content": "nice"}}]}
+        with mock.patch.object(self.ai, "_call_api", side_effect=fake):
+            self.ai.generate_ai_comment("tweet", {"provider": "groq", "api_key": "gsk_abc", "model": "gemini-1.5-flash", "min_interval_s": 0})
+        self.assertEqual(seen["model"], self.ai.DEFAULT_MODELS["groq"])
+
+    def test_401_error_has_actionable_hint(self):
+        import io, urllib.error
+        from unittest import mock
+        err = urllib.error.HTTPError("u", 401, "Unauthorized", {}, io.BytesIO(b'{"error": {"message": "API key not valid. Please pass a valid API key."}}'))
+        with mock.patch("urllib.request.urlopen", side_effect=err):
+            with self.assertRaises(self.ai.AIError) as c:
+                self.ai._call_api("https://x", {}, {}, None)
+        self.assertIn("aistudio.google.com/apikey", str(c.exception))
+
     def test_errors_are_reported_not_silent(self):
         from unittest import mock
         with self.assertRaises(self.ai.AIError) as c:

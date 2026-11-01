@@ -585,6 +585,7 @@ class AppService:
                 ai[k] = body[k].strip()
         if ai.get("api_key") in ("", MASK):
             ai["api_key"] = cfg["comments"]["ai"]["api_key"]
+        ai["api_key"] = ai_comments.clean_key(ai.get("api_key"))
         text = str(body.get("text") or "").strip() or "$BTC breaks above 70k resistance with strong volume. Next target 75k if it holds this level."
         try:
             out = ai_comments.generate_ai_comment(text, ai, net_cfg=cfg["telegram"], raise_errors=True, ignore_interval=True)

@@ -50,6 +50,37 @@ _SYSTEM_PROMPT = (
 _last_call = 0.0
 
 
+_ZW = dict.fromkeys(map(ord, "\u200b\u200c\u200d\u200e\u200f\u202a\u202b\u202c\u2060\ufeff"))
+PROVIDER_NAMES = {"gemini": "Google Gemini", "groq": "Groq", "openai": "OpenAI"}
+
+
+def clean_key(key):
+    """ينظّف المفتاح الملصوق: مسافات، علامات اقتباس، أسطر، ورموز اتجاه مخفية."""
+    k = (key or "").translate(_ZW).strip().strip("\"'`").strip()
+    return "".join(k.split())
+
+
+def detect_key_provider(key):
+    """يستنتج مزوّد المفتاح من بادئته (AIza = Gemini، gsk_ = Groq، sk- = OpenAI) أو None."""
+    k = clean_key(key)
+    if k.startswith("AIza"):
+        return "gemini"
+    if k.startswith("gsk_"):
+        return "groq"
+    if k.startswith("sk-"):
+        return "openai"
+    return None
+
+
+def check_key_format(provider, key):
+    """يرمي AIError برسالة مفهومة إن بدا المفتاح لمزوّد آخر. البادئة غير المعروفة لا تُرفض (قد تتغير صيغ المفاتيح)."""
+    k = clean_key(key)
+    seen = detect_key_provider(k)
+    if seen and seen != provider:
+        raise AIError("هذا المفتاح يبدو مفتاح {} وأنت مختار المزوّد «{}». غيّر المزوّد إلى «{}» أو ضع مفتاحاً من المزوّد المختار.".format(
+            PROVIDER_NAMES[seen], PROVIDER_NAMES.get(provider, provider), PROVIDER_NAMES[seen]))
+
+
 class AIError(Exception):
     """خطأ بسبب مفهوم للمستخدم (يُعرض في الاختبار ويُسجَّل في السجلات)."""
 
@@ -65,7 +96,10 @@ def _call_api(url, headers, body, ctx, timeout=20):
             msg = msg.get("message") if isinstance(msg, dict) else str(msg)
         except Exception:
             msg = ""
-        raise AIError("HTTP {}: {}".format(e.code, (msg or e.reason or "")[:200]), ) from None
+        hint = ""
+        if e.code in (400, 401, 403) and "key" in (msg or "").lower():
+            hint = " — المفتاح مرفوض من المزوّد: أنشئ مفتاحاً جديداً وانسخه كاملاً (Gemini: aistudio.google.com/apikey، Groq: console.groq.com/keys)"
+        raise AIError("HTTP {}: {}{}".format(e.code, (msg or e.reason or "")[:200], hint)) from None
     except urllib.error.URLError as e:
         raise AIError("تعذّر الاتصال بالمزوّد: {}".format(e.reason)) from None
 
@@ -108,9 +142,13 @@ def generate_ai_comment(tweet_text, ai_cfg, net_cfg=None, raise_errors=False, ig
 
     if not tweet_text or not tweet_text.strip():
         return fail("نص التغريدة فارغ - لا يمكن تحليلها (تعذّر قراءة النص من الصفحة)")
-    api_key = (ai_cfg.get("api_key") or "").strip()
+    api_key = clean_key(ai_cfg.get("api_key"))
     if not api_key:
         return fail("مفتاح API فارغ")
+    try:
+        check_key_format(ai_cfg.get("provider", "gemini"), api_key)
+    except AIError as e:
+        return fail(str(e))
 
     # تباعد زمني بين الطلبات (حماية الطبقة المجانية). لا يُطبَّق على الاختبار ولا على التنفيذ العاجل.
     min_interval = float(ai_cfg.get("min_interval_s", 30) or 0)
@@ -122,6 +160,9 @@ def generate_ai_comment(tweet_text, ai_cfg, net_cfg=None, raise_errors=False, ig
 
     provider = ai_cfg.get("provider", "gemini")
     user_model = (ai_cfg.get("model") or "").strip()
+    if provider != "gemini" and user_model.lower().startswith("gemini"):
+        log.warning("اسم النموذج «{}» خاص بـ Gemini وليس لـ {} - سيُستخدم النموذج الافتراضي".format(user_model, provider))
+        user_model = ""
     if provider == "gemini" and user_model.startswith(RETIRED_GEMINI):
         log.warning("النموذج {} متقاعد - سيُستخدم نموذج حديث تلقائياً (فرّغ حقل النموذج في الإعدادات)".format(user_model))
         user_model = ""

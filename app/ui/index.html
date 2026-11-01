@@ -835,7 +835,14 @@ document.addEventListener("click", e => {
   if (b.classList.contains("sw") && b.dataset.act === "acc-toggle") { /* التبديل يتم في مستمع .sw أولاً */ }
   guard(ACT[b.dataset.act])(b);
 });
-document.addEventListener("input", e => { if (e.target.closest("#set-body") && !e.target.closest("[data-nodirty]")) markDirty(); });
+document.addEventListener("input", e => {
+  if (e.target.closest("#set-body") && !e.target.closest("[data-nodirty]")) markDirty();
+  if (e.target.matches('[data-p="comments.ai.api_key"]')) {  // اختيار المزوّد تلقائياً من بادئة المفتاح
+    const v = e.target.value.trim(), prov = v.startsWith("AIza") ? "gemini" : v.startsWith("gsk_") ? "groq" : v.startsWith("sk-") ? "openai" : null;
+    const sel = $('[data-p="comments.ai.provider"]'), model = $('[data-p="comments.ai.model"]');
+    if (prov && sel && sel.value !== prov) { sel.value = prov; if (prov !== "gemini" && model && /^gemini/i.test(model.value)) model.value = ""; toast("اختير المزوّد تلقائياً: " + sel.options[sel.selectedIndex].text, "info"); }
+  }
+});
 document.addEventListener("change", e => { if (e.target.closest("#set-body")) markDirty(); });
 function markDirty() { if (S.page !== "settings") return; S.dirty = true; $("#savebar")?.classList.add("show"); }
 window.addEventListener("beforeunload", e => { if (S.dirty) { e.preventDefault(); e.returnValue = ""; } });
