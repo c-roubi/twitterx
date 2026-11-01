@@ -604,6 +604,21 @@ class AppService:
         return [{"id": cid, "title": v["title"], "username": v["username"], "age_s": int(time.time() - v["ts"])}
                 for cid, v in sorted(self.bot.channels_seen.items(), key=lambda kv: -kv[1]["ts"]) if cid is not None]
 
+    def ai_diagnose(self, body):
+        from . import ai_comments, netdiag
+        cfg = load_config()
+        ai = dict(cfg["comments"]["ai"])
+        for k in ("provider", "model", "api_key"):
+            if isinstance(body.get(k), str):
+                ai[k] = body[k].strip()
+        if ai.get("api_key") in ("", MASK):
+            ai["api_key"] = cfg["comments"]["ai"]["api_key"]
+        steps = netdiag.run(ai.get("provider", "gemini"), ai.get("api_key", ""), ai.get("model", ""), cfg["telegram"])
+        key = ai_comments.clean_key(ai.get("api_key"))
+        for s in steps:  # لا يظهر المفتاح في أي ناتج
+            s["detail"] = s["detail"].replace(key, "***") if key else s["detail"]
+        return {"steps": steps, "verdict": netdiag.verdict(steps)}
+
     # ---- WARP ----
     def warp_status(self):
         cfg = load_config()["warp"]
@@ -726,6 +741,9 @@ def make_handler(svc, token, port):
 
     @route("POST", "/api/ai/test")
     def _(b, **k): return svc.ai_test(b)
+
+    @route("POST", "/api/ai/diagnose")
+    def _(b, **k): return svc.ai_diagnose(b)
 
     @route("GET", "/api/warp/status")
     def _(b, **k): return svc.warp_status()

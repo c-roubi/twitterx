@@ -8,9 +8,11 @@
 
 أي خطأ في الشبكة أو المفتاح -> إرجاع None ليقع المحرك على البديل السياقي المحلي.
 """
+import http.client
 import json
 import random
 import socket
+import ssl
 import time
 import urllib.error
 import urllib.parse
@@ -103,27 +105,113 @@ class AIError(Exception):
     """خطأ بسبب مفهوم للمستخدم (يُعرض في الاختبار ويُسجَّل في السجلات)."""
 
 
-def _call_api(url, headers, body, ctx, timeout=REQUEST_TIMEOUT_S):
-    req = urllib.request.Request(url, data=json.dumps(body).encode("utf-8"), headers=headers, method="POST")
+USER_AGENT = "SmartEngage/1.0 (+https://github.com/c-roubi/twitterx)"
+
+
+class _V4HTTPSConnection(http.client.HTTPSConnection):
+    """اتصال HTTPS عبر IPv4 فقط: كثير من الخوادم (وWARP) لا تملك مسار IPv6 فيبقى الاتصال معلّقاً حتى المهلة."""
+
+    def connect(self):
+        host = self.host
+        infos = socket.getaddrinfo(host, self.port, socket.AF_INET, socket.SOCK_STREAM)
+        last = None
+        for fam, typ, proto, _, addr in infos:
+            try:
+                self.sock = socket.create_connection(addr, self.timeout)
+                break
+            except OSError as e:
+                last = e
+        else:
+            raise last or OSError("no IPv4 address for " + host)
+        self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        if self._tunnel_host:
+            self._tunnel()
+            host = self._tunnel_host
+        self.sock = self._context.wrap_socket(self.sock, server_hostname=host)
+
+
+def _env_proxy(host):
+    """بروكسي من متغيرات البيئة فقط (مثل curl) - لا نقرأ إعدادات بروكسي ويندوز التي قد تعطّل الطلبات."""
     try:
-        with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
-            return json.loads(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError as e:
+        if urllib.request.proxy_bypass_environment(host):
+            return None
+        p = urllib.request.getproxies_environment().get("https")
+    except Exception:
+        return None
+    if not p:
+        return None
+    u = urllib.parse.urlsplit(p if "//" in p else "http://" + p)
+    if not u.hostname:
+        return None
+    hdr = {}
+    if u.username:
+        import base64
+        tok = base64.b64encode("{}:{}".format(urllib.parse.unquote(u.username), urllib.parse.unquote(u.password or "")).encode()).decode()
+        hdr["Proxy-Authorization"] = "Basic " + tok
+    return u.hostname, u.port or 8080, hdr
+
+
+def _http(method, url, headers, data, ctx, timeout):
+    """طلب HTTPS واحد عبر http.client. يرجع (status, bytes). يرفع TimeoutError/OSError كما هي."""
+    u = urllib.parse.urlsplit(url)
+    path = u.path + ("?" + u.query if u.query else "")
+    proxy = _env_proxy(u.hostname)
+    if proxy:
+        conn = _V4HTTPSConnection(proxy[0], proxy[1], timeout=timeout, context=ctx)
+        conn.set_tunnel(u.hostname, u.port or 443, headers=proxy[2])
+    else:
+        conn = _V4HTTPSConnection(u.hostname, u.port or 443, timeout=timeout, context=ctx)
+    hdrs = dict(headers)
+    hdrs.setdefault("User-Agent", USER_AGENT)
+    hdrs.setdefault("Accept", "application/json")
+    hdrs["Connection"] = "close"
+    try:
+        conn.request(method, path, body=data, headers=hdrs)
+        resp = conn.getresponse()
+        return resp.status, resp.read()
+    finally:
         try:
-            msg = json.loads(e.read().decode("utf-8")).get("error", {})
+            conn.close()
+        except Exception:
+            pass
+
+
+def _http_post(url, headers, data, ctx, timeout):
+    return _http("POST", url, headers, data, ctx, timeout)
+
+
+def _http_get(url, headers, ctx, timeout):
+    return _http("GET", url, headers, None, ctx, timeout)
+
+
+def _call_api(url, headers, body, ctx, timeout=REQUEST_TIMEOUT_S, method="POST"):
+    try:
+        if method == "GET":
+            status, raw = _http_get(url, headers, ctx, timeout)
+        else:
+            status, raw = _http_post(url, headers, json.dumps(body).encode("utf-8"), ctx, timeout)
+    except (TimeoutError, socket.timeout):
+        raise AIError("TIMEOUT: لم يردّ المزوّد خلال {} ثانية (بطء شبكة أو ازدحام عند المزوّد أو جدار ناري/بروكسي يعطّل الاتصال)".format(timeout)) from None
+    except ssl.SSLError as e:
+        raise AIError("خطأ شهادة TLS: {} — راجع خيارات SSL في تبويب تيليجرام (ملف شهادات مخصّص)".format(str(e)[:120])) from None
+    except OSError as e:
+        raise AIError("تعذّر الاتصال بالمزوّد: {}".format(str(e)[:140])) from None
+    if status >= 400:
+        try:
+            msg = json.loads(raw.decode("utf-8", "replace")).get("error", {})
             msg = msg.get("message") if isinstance(msg, dict) else str(msg)
         except Exception:
-            msg = ""
+            msg = raw.decode("utf-8", "replace")[:120]
         hint = ""
-        if e.code in (400, 401, 403) and "key" in (msg or "").lower():
+        if status in (400, 401, 403) and "key" in (msg or "").lower():
             hint = " — المفتاح مرفوض من المزوّد: أنشئ مفتاحاً جديداً وانسخه كاملاً (Gemini: aistudio.google.com/apikey، Groq: console.groq.com/keys)"
-        raise AIError("HTTP {}: {}{}".format(e.code, (msg or e.reason or "")[:200], hint)) from None
-    except (TimeoutError, socket.timeout):
-        raise AIError("TIMEOUT: لم يردّ المزوّد خلال {} ثانية (بطء شبكة أو ازدحام عند المزوّد أو جدار ناري يعطّل الاتصال)".format(timeout)) from None
-    except urllib.error.URLError as e:
-        if isinstance(e.reason, (TimeoutError, socket.timeout)):
-            raise AIError("TIMEOUT: انتهت مهلة الاتصال بالمزوّد (شبكة بطيئة أو محجوبة)") from None
-        raise AIError("تعذّر الاتصال بالمزوّد: {}".format(e.reason)) from None
+        elif status == 403 and "1010" in (msg or ""):
+            hint = " — الجدار الحامي للمزوّد رفض هوية البرنامج (غير مفتاح)"
+        raise AIError("HTTP {}: {}{}".format(status, (msg or "")[:200], hint))
+    try:
+        return json.loads(raw.decode("utf-8"))
+    except ValueError:
+        raise AIError("ردّ غير مفهوم من المزوّد: {}".format(raw[:80].decode("utf-8", "replace"))) from None
 
 
 def _extract_text(resp, provider):

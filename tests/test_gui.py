@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """اختبارات الواجهة: خادم API + بوت تيليجرام + التحقق من الإعدادات (بدون متصفح)."""
+import http.client
 import json
 import os
 import sys
@@ -525,11 +526,34 @@ class AITests(unittest.TestCase):
 
     def test_socket_timeout_becomes_readable_error(self):
         from unittest import mock
-        with mock.patch("urllib.request.urlopen", side_effect=TimeoutError("The read operation timed out")):
+        with mock.patch.object(self.ai, "_http_post", side_effect=TimeoutError("The read operation timed out")):
             with self.assertRaises(self.ai.AIError) as ex:
                 self.ai._call_api("https://x", {}, {}, None, timeout=5)
         self.assertIn("TIMEOUT", str(ex.exception))
         self.assertIn("5 ثانية", str(ex.exception))
+
+    def test_transport_errors_are_readable(self):
+        import ssl
+        from unittest import mock
+        with mock.patch.object(self.ai, "_http_post", side_effect=ssl.SSLError("CERTIFICATE_VERIFY_FAILED")):
+            with self.assertRaises(self.ai.AIError) as ex:
+                self.ai._call_api("https://x", {}, {}, None)
+        self.assertIn("شهادة", str(ex.exception))
+        with mock.patch.object(self.ai, "_http_post", side_effect=ConnectionResetError("reset")):
+            with self.assertRaises(self.ai.AIError) as ex:
+                self.ai._call_api("https://x", {}, {}, None)
+        self.assertIn("تعذّر الاتصال", str(ex.exception))
+
+    def test_cloudflare_1010_hint_and_bad_json(self):
+        from unittest import mock
+        with mock.patch.object(self.ai, "_http_post", return_value=(403, b"error code: 1010")):
+            with self.assertRaises(self.ai.AIError) as ex:
+                self.ai._call_api("https://x", {}, {}, None)
+        self.assertIn("1010", str(ex.exception))
+        with mock.patch.object(self.ai, "_http_post", return_value=(200, b"<html>captive portal</html>")):
+            with self.assertRaises(self.ai.AIError) as ex:
+                self.ai._call_api("https://x", {}, {}, None)
+        self.assertIn("ردّ غير مفهوم", str(ex.exception))
 
     def test_user_chosen_model_is_not_replaced_on_timeout(self):
         from unittest import mock
@@ -607,13 +631,62 @@ class AITests(unittest.TestCase):
         self.assertEqual(seen["model"], self.ai.DEFAULT_MODELS["groq"])
 
     def test_401_error_has_actionable_hint(self):
-        import io, urllib.error
         from unittest import mock
-        err = urllib.error.HTTPError("u", 401, "Unauthorized", {}, io.BytesIO(b'{"error": {"message": "API key not valid. Please pass a valid API key."}}'))
-        with mock.patch("urllib.request.urlopen", side_effect=err):
-            with self.assertRaises(self.ai.AIError) as c:
+        body = b'{"error": {"message": "API key not valid. Please pass a valid API key."}}'
+        with mock.patch.object(self.ai, "_http_post", return_value=(401, body)):
+            with self.assertRaises(self.ai.AIError) as ex:
                 self.ai._call_api("https://x", {}, {}, None)
-        self.assertIn("aistudio.google.com/apikey", str(c.exception))
+        self.assertIn("aistudio.google.com/apikey", str(ex.exception))
+        self.assertTrue(str(ex.exception).startswith("HTTP 401"))
+
+    def test_transport_sends_ua_ipv4_and_no_keepalive(self):
+        """نتحقق من الترويسات الفعلية عبر خادم محلي (بدون شبكة خارجية)."""
+        import http.server, json, threading
+        seen = {}
+        class H(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):
+                seen["ua"] = self.headers.get("User-Agent"); seen["conn"] = self.headers.get("Connection")
+                seen["body"] = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+                out = json.dumps({"ok": True}).encode()
+                self.send_response(200); self.send_header("Content-Length", str(len(out))); self.end_headers(); self.wfile.write(out)
+            def log_message(self, *a): pass
+        srv = http.server.HTTPServer(("127.0.0.1", 0), H)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        import socket
+        from unittest import mock
+        class PassCtx:                        # سياق TLS وهمي يمرّر المقبس كما هو (الخادم المحلي HTTP عادي)
+            def wrap_socket(self, sock, server_hostname=None):
+                seen["sni"] = server_hostname
+                return sock
+        real = socket.getaddrinfo
+        families = []
+        def spy(host, port, family=0, *a, **k):
+            if host == "example.invalid":
+                families.append(family)
+            return real("127.0.0.1" if host == "example.invalid" else host, srv.server_address[1] if host == "example.invalid" else port, family, *a, **k)
+        try:
+            with mock.patch("socket.getaddrinfo", side_effect=spy), mock.patch.object(self.ai, "_env_proxy", return_value=None):
+                status, raw = self.ai._http("POST", "https://example.invalid:%d/x" % srv.server_address[1],
+                                            {"Content-Type": "application/json"}, json.dumps({"a": 1}).encode(), PassCtx(), 5)
+        finally:
+            srv.shutdown()
+            srv.server_close()
+        self.assertEqual(families, [socket.AF_INET])          # IPv4 فقط
+        self.assertEqual(seen["sni"], "example.invalid")      # اسم الخادم للتشفير
+        self.assertEqual((status, json.loads(raw)), (200, {"ok": True}))
+        self.assertTrue(seen["ua"].startswith("SmartEngage/"))
+        self.assertEqual((seen["conn"], seen["body"]), ("close", {"a": 1}))
+
+    def test_env_proxy_only_not_registry(self):
+        from unittest import mock
+        with mock.patch("urllib.request.getproxies_environment", return_value={"https": "http://u:p@px.local:3128"}), \
+             mock.patch("urllib.request.proxy_bypass_environment", return_value=False):
+            host, port, hdr = self.ai._env_proxy("generativelanguage.googleapis.com")
+        self.assertEqual((host, port), ("px.local", 3128))
+        self.assertIn("Proxy-Authorization", hdr)
+        with mock.patch("urllib.request.getproxies_environment", return_value={}), \
+             mock.patch("urllib.request.getproxies", return_value={"https": "http://registry-proxy:8080"}):
+            self.assertIsNone(self.ai._env_proxy("generativelanguage.googleapis.com"))   # بروكسي ويندوز يُتجاهل مثل curl
 
     def test_errors_are_reported_not_silent(self):
         from unittest import mock
