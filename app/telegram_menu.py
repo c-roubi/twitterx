@@ -552,6 +552,14 @@ class BotUI:
                 return self.comment_delete_list(int(parts[2]))
             if sub == "rm":
                 return self.comment_remove(int(parts[2]), parts[3])
+        if head == "ch" and len(parts) == 3 and parts[1] == "set":
+            try:
+                cid = int(parts[2])
+                self.svc.patch_config({"telegram": {"channel": {"chat_id": cid, "enabled": True}}})
+            except Exception as e:
+                return View("❌ لم يُحفظ: {}".format(esc(e)), self._nav([HOME_BTN]))
+            return View("✅ اعتُمدت القناة <code>{}</code> وفُعّلت مراقبتها.\nانشر في القناة منشوراً ليتفاعل التطبيق معه.".format(cid),
+                        self._nav([("🛠 إعدادات القناة", "set:c:tg"), HOME_BTN]), "تم الاعتماد ✅")
         if head == "wp":
             if len(parts) == 1:
                 return self.warp()

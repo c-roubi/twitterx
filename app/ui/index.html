@@ -657,7 +657,9 @@ PAGES.telegram = {
       <div class="step" id="s4"><div class="n">4</div><div class="body"><div class="title">قناة الأدمن 📣 (بدل الفحص المتكرر لـX)</div>
         <div class="muted">أضف البوت <b>أدمن</b> في قناتك. عند نزول أي منشور فيها: إن كان فيه رابط تغريدة يُجدول التفاعل فوراً، وإن لم يكن يُفحص حساب المدير في X مباشرة (مع إعادة محاولة). والفحص الدوري يصبح احتياطياً نادراً.</div>
         <div class="srow" style="padding:0;min-height:0;border:0"><div class="txtcol"><div class="t">مراقبة القناة</div></div><div class="c">${sw(ch.enabled, 'id="ch-en"')}</div></div>
-        <div class="srow" style="padding:0;min-height:0;border:0"><div class="txtcol"><div class="t">معرّف القناة</div><div class="d">يبدأ عادةً بـ <span class="ltr">-100</span>. انشر أي شيء في القناة ثم اضغط «تحديث» ليظهر لك أدناه فتعتمده بضغطة.</div></div><div class="c"><input class="inp ltr num" id="ch-id" type="number" value="${ch.chat_id || ""}" placeholder="-1001234567890" style="width:200px"></div></div>
+        <div class="srow" style="padding:0;min-height:0;border:0"><div class="txtcol"><div class="t">معرّف القناة</div><div class="d">يبدأ عادةً بـ <span class="ltr">-100</span>. أسهل طرق معرفته بلا نشر: اكتب اسم القناة العام أدناه، أو حوّل أي منشور قديم من القناة إلى البوت.</div></div><div class="c"><input class="inp ltr num" id="ch-id" type="number" value="${ch.chat_id || ""}" placeholder="-1001234567890" style="width:200px"></div></div>
+        <div class="row"><input class="inp ltr" id="ch-name" placeholder="@channelname أو t.me/channelname" style="max-width:300px" autocomplete="off" spellcheck="false"><button class="btn" data-act="ch-resolve">تحديد من الاسم</button></div><div id="ch-resolved" class="hint"></div>
+        <div class="hint">قناة خاصة؟ حوّل (Forward) أي منشور قديم منها إلى محادثة البوت، فيعرض لك المعرّف وزر اعتماد.</div>
         <div id="ch-found" class="stack" style="gap:6px"></div><div class="row"><button class="btn" data-act="ch-refresh">${ic("refresh", "sm")}تحديث القنوات</button></div>
         <div class="srow" style="padding:0;min-height:0;border:0"><div class="txtcol"><div class="t">تنفيذ فوري لتغريدات القناة ⚡</div><div class="d">مثل رابط الأدمن: حساباً بعد حساب دون التقيّد بالحدود اليومية.</div></div><div class="c">${sw(ch.instant, 'id="ch-instant"')}</div></div>
         <div class="srow" style="padding:0;min-height:0;border:0"><div class="txtcol"><div class="t">الفحص الاحتياطي لـX</div><div class="d">شبكة أمان لما فات القناة (نشر على X فقط). يُفضَّل أن يكون نادراً لتستريح الحسابات.</div></div><div class="c"><div class="rng" id="ch-fb"><span>من</span><input class="inp sm num r0" type="number" min="1" value="${ch.fallback_interval_min[0]}"><span>إلى</span><input class="inp sm num r1" type="number" min="1" value="${ch.fallback_interval_min[1]}"><span class="unit">دقيقة</span></div></div></div>
@@ -783,6 +785,11 @@ const ACT = {
     catch (e) { out.innerHTML = `<span class="err-t">${esc(e.message)}</span>`; } finally { busy(b, false); }
   },
   "ch-refresh"() { PAGES.telegram.update(); },
+  async "ch-resolve"(b) {
+    busy(b, true); const o = $("#ch-resolved");
+    try { const r = await api("POST", "/api/telegram/channel/resolve", {name: $("#ch-name").value}); $("#ch-id").value = r.id; o.innerHTML = `<span class="chip ok">${ic("check", "sm")}${esc(r.title)}</span> <span class="num">${r.id}</span> — اضغط حفظ`; }
+    catch (e) { o.innerHTML = `<span class="err-t">${esc(e.message)}</span>`; } finally { busy(b, false); }
+  },
   "ch-pick"(b) { $("#ch-id").value = b.dataset.id; toast("اعتُمد المعرّف — اضغط حفظ", "info"); },
   async "tg-pair"() { const r = await api("POST", "/api/telegram/pair"); S.tg.code = r.code; PAGES.telegram.update(); },
   async "tg-unlink"(b) { if (await confirmBox("إلغاء الربط", "لن يتمكن هذا الأدمن من التحكم بالبوت بعد الآن.", "إلغاء الربط")) { await api("DELETE", `/api/telegram/admins/${b.dataset.id}`); toast("تم إلغاء الربط"); await refresh(); } },

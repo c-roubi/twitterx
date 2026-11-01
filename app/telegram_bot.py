@@ -146,6 +146,20 @@ class TelegramBot:
         except Exception as e:
             log.debug("answerCallbackQuery: {}".format(e))
 
+    def resolve_channel(self, name):
+        """معرّف قناة عامة من اسمها (@name أو رابط t.me/name) عبر getChat."""
+        name = (name or "").strip()
+        name = name.replace("https://", "").replace("http://", "")
+        if name.startswith("t.me/"):
+            name = name[5:]
+        name = name.split("?")[0].strip("/").lstrip("@")
+        if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{3,31}", name):
+            raise RuntimeError("اسم القناة غير صالح (مثال: @mychannel). القنوات الخاصة: حوّل منها منشوراً للبوت")
+        chat = self._api("getChat", {"chat_id": "@" + name}, timeout=15)
+        if chat.get("type") != "channel":
+            raise RuntimeError("هذا ليس اسم قناة")
+        return {"id": chat["id"], "title": chat.get("title", ""), "username": chat.get("username", name)}
+
     def test_token(self, token):
         """يعيد معلومات البوت (username) أو يرمي استثناء برسالة واضحة."""
         if not valid_token(token):
@@ -270,6 +284,32 @@ class TelegramBot:
         txt = "✅ <b>جُدول التفاعل</b> مع التغريدة <code>{}</code>\n• الحسابات: <b>{}</b>\n• العمليات: <b>{}</b>\n• التنفيذ: {}".format(tid, len(q), acts, mode)
         if entry.get("skipped"):
             txt += "\n⚠️ تُخطّيت (غير جاهزة): {}".format(" ".join(str(s).replace("<", "&lt;") for s in entry["skipped"]))
+        return Reply.of(txt, rows)
+
+    # ---------- تحديد القناة بدون نشر ----------
+    @staticmethod
+    def forwarded_channel(msg):
+        """القناة التي حُوّل منها المنشور (إن وُجدت): يدعم forward_origin الجديد وforward_from_chat القديم."""
+        origin = msg.get("forward_origin") or {}
+        chat = origin.get("chat") if origin.get("type") == "channel" else None
+        chat = chat or msg.get("forward_from_chat")
+        if chat and chat.get("type") == "channel":
+            return chat
+        return None
+
+    def handle_forward(self, chat_id, msg):
+        """أدمن حوّل منشوراً من قناة إلى البوت: نعرض المعرّف وزر اعتماده. يرجع Reply أو None."""
+        if not self._is_admin(chat_id):
+            return None
+        ch = self.forwarded_channel(msg)
+        if not ch:
+            return Reply("ℹ️ لم أستطع معرفة القناة من هذا المنشور (قد تكون القناة تخفي مصدر التحويل). جرّب إدخال اسمها العام في التطبيق.")
+        self.channels_seen[ch["id"]] = {"title": ch.get("title", ""), "username": ch.get("username", ""), "ts": time.time()}
+        cur = int((self.get_cfg()["telegram"].get("channel") or {}).get("chat_id") or 0)
+        txt = "📣 <b>{}</b>\nالمعرّف: <code>{}</code>{}".format(
+            str(ch.get("title", "قناة")).replace("<", "&lt;"), ch["id"], "\n✅ هذه هي القناة المعتمدة حالياً." if cur == ch["id"] else "")
+        rows = [] if cur == ch["id"] else [[("✅ اعتماد كقناة الأدمن وتفعيل المراقبة", "ch:set:{}".format(ch["id"]))]]
+        rows.append([("🏠 القائمة", "home")])
         return Reply.of(txt, rows)
 
     # ---------- قناة الأدمن ----------
@@ -429,6 +469,11 @@ class TelegramBot:
                         self.handle_callback(cq["message"]["chat"]["id"], cq["message"]["message_id"], cq["id"], cq.get("data", ""))
                         continue
                     msg = upd.get("message") or {}
+                    if msg.get("chat", {}).get("type") == "private" and (msg.get("forward_origin") or msg.get("forward_from_chat") or msg.get("forward_date")):
+                        r = self.handle_forward(msg["chat"]["id"], msg)
+                        if r:
+                            self.send(msg["chat"]["id"], str(r), r.markup)
+                        continue
                     if msg.get("chat", {}).get("type") != "private" or "text" not in msg:
                         continue
                     who = (msg.get("from") or {}).get("username", "")

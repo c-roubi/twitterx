@@ -592,6 +592,12 @@ class AppService:
             raise ApiError(str(e))
         return {"comment": out, "tweet": text}
 
+    def tg_resolve_channel(self, name):
+        try:
+            return self.bot.resolve_channel(name)
+        except Exception as e:
+            raise ApiError("تعذّر تحديد القناة: {}".format(e))
+
     def tg_channels(self):
         """القنوات التي رآها البوت مؤخراً (للتعرّف على معرّف القناة من الواجهة)."""
         return [{"id": cid, "title": v["title"], "username": v["username"], "age_s": int(time.time() - v["ts"])}
@@ -707,6 +713,9 @@ def make_handler(svc, token, port):
 
     @route("GET", "/api/telegram/channels")
     def _(b, **k): return svc.tg_channels()
+
+    @route("POST", "/api/telegram/channel/resolve")
+    def _(b, **k): return svc.tg_resolve_channel(b.get("name", ""))
 
     @route("POST", "/api/telegram/pair")
     def _(b, **k): return {"code": svc.bot.new_pair_code(), "ttl_min": telegram_bot.PAIR_TTL_S // 60}

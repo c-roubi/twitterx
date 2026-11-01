@@ -920,6 +920,54 @@ class ChannelTests(unittest.TestCase):
         out = svc.set_config({"telegram": {"channel": {"chat_id": -1009876543210, "fallback_interval_min": [60, 90]}}})
         self.assertEqual(out["telegram"]["channel"]["chat_id"], -1009876543210)
 
+    # ---- تحديد القناة بدون نشر ----
+    def test_resolve_public_channel_name(self):
+        calls = []
+        self.bot._api = lambda m, params=None, **k: calls.append((m, params)) or {"id": self.CH, "type": "channel", "title": "Boss", "username": "boss_ch"}
+        for raw in ("@boss_ch", "https://t.me/boss_ch", "t.me/boss_ch?x=1", "boss_ch"):
+            self.assertEqual(self.bot.resolve_channel(raw)["id"], self.CH)
+        self.assertEqual(calls[0], ("getChat", {"chat_id": "@boss_ch"}))
+        with self.assertRaises(RuntimeError):
+            self.bot.resolve_channel("a b!")                      # اسم غير صالح
+        self.bot._api = lambda *a, **k: {"id": 5, "type": "private"}
+        with self.assertRaises(RuntimeError):
+            self.bot.resolve_channel("someuser")                   # ليست قناة
+
+    def test_forwarded_channel_post_shows_id_with_confirm_button(self):
+        new_style = {"forward_origin": {"type": "channel", "chat": {"id": self.CH, "type": "channel", "title": "Boss"}}}
+        old_style = {"forward_from_chat": {"id": self.CH, "type": "channel", "title": "Boss"}}
+        cfg = self.config.load_config(); cfg["telegram"]["channel"]["chat_id"] = 0; self.config.save_config(cfg)  # لم تُعتمد قناة بعد
+        for msg in (new_style, old_style):
+            r = self.bot.handle_forward(5, msg)
+            self.assertIn(str(self.CH), r)
+            self.assertTrue(any(d == "ch:set:%d" % self.CH for row in r.markup for _, d in row))
+            self.assertTrue(all(len(d.encode()) <= 64 for row in r.markup for _, d in row))
+        self.assertIn(self.CH, self.bot.channels_seen)
+
+    def test_forward_from_non_admin_or_hidden_origin(self):
+        msg = {"forward_origin": {"type": "channel", "chat": {"id": self.CH, "type": "channel", "title": "x"}}}
+        self.assertIsNone(self.bot.handle_forward(999, msg))                       # غير أدمن
+        self.assertIn("لم أستطع", self.bot.handle_forward(5, {"forward_origin": {"type": "hidden_user"}}))
+        self.assertIn("لم أستطع", self.bot.handle_forward(5, {"forward_origin": {"type": "user"}}))
+
+    def test_confirm_button_saves_channel(self):
+        svc = server.AppService()
+        cfg = self.config.load_config(); cfg["telegram"]["channel"].update(enabled=False, chat_id=0); self.config.save_config(cfg)
+        v = svc.bot.ui.route(5, "ch:set:%d" % self.CH)
+        got = self.config.load_config()["telegram"]["channel"]
+        self.assertEqual((got["enabled"], got["chat_id"]), (True, self.CH))
+        self.assertIn("اعتُمدت", v.text)
+        r = svc.bot.handle_forward(5, {"forward_from_chat": {"id": self.CH, "type": "channel", "title": "B"}})
+        self.assertIn("المعتمدة حالياً", r)                                          # لا زر بعد الاعتماد
+        self.assertFalse(any(d.startswith("ch:set") for row in r.markup for _, d in row))
+
+    def test_resolve_api_error_is_readable(self):
+        svc = server.AppService()
+        svc.bot._api = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("Bad Request: chat not found"))
+        with self.assertRaises(server.ApiError) as c:
+            svc.tg_resolve_channel("@nochannel")
+        self.assertIn("chat not found", str(c.exception))
+
     def test_channels_api(self):
         svc = server.AppService()
         svc.bot.channels_seen[-100777] = {"title": "T", "username": "u", "ts": time.time() - 5}
