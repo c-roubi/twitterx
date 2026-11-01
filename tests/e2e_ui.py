@@ -61,6 +61,9 @@ with sync_playwright() as p:
     a = api("GET", "/api/accounts")[0]
     check("تعديل الحساب", a["notes"] == "ملاحظة" and a["en_ratio"] == 0.4 and a["enabled"])
 
+    from app.config import SESSIONS_DIR  # الحساب يلزمه جلسة محفوظة ليُدرَج في التفاعل العاجل
+    os.makedirs(SESSIONS_DIR, exist_ok=True)
+    open(os.path.join(SESSIONS_DIR, api("GET", "/api/accounts")[0]["id"] + ".json"), "w").write("{}")
     print("التغريدات")
     pg.goto(BASE + "/#/tweets"); pg.wait_for_selector("#t-url")
     pg.fill("#t-url", "not a link"); pg.click("[data-act=tweet-add]"); pg.wait_for_selector(".toast.err")
