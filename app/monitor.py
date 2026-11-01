@@ -33,7 +33,7 @@ def tweet_age_hours(tid):
 
 def filter_recent(items, cfg):
     """يُسقط تغريدات المدير الأقدم من monitor.max_tweet_age_hours (0 = بلا حد) حتى لا يُتفاعل مع القديم."""
-    hours = float(cfg.get("monitor", {}).get("max_tweet_age_hours", 6) or 0)
+    hours = float(cfg.get("monitor", {}).get("max_tweet_age_hours", 12) or 0)
     if not hours or not items:
         return items
     keep, skipped = [], 0
@@ -264,7 +264,7 @@ def cancel_tweet(tid):
 @locked_seen
 def cancel_stale(cfg):
     """يلغي تغريدات المدير المعلّقة الأقدم من الحد المسموح (تنظيف تراكمات قديمة). يرجع عددها."""
-    hours = float(cfg.get("monitor", {}).get("max_tweet_age_hours", 6) or 0)
+    hours = float(cfg.get("monitor", {}).get("max_tweet_age_hours", 12) or 0)
     if not hours:
         return 0
     seen = load_seen()

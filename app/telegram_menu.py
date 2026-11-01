@@ -49,7 +49,7 @@ CATS = [
 ITEMS = [
     ("mh", "gen", "manager_handle", "text", "حساب المدير", "username"),
     ("mi", "gen", "monitor.interval_min", "range", "فاصل فحص المدير (دقيقة)", "6-14"),
-    ("ma", "gen", "monitor.max_tweet_age_hours", "int", "تجاهل تغريدات أقدم من (ساعة)", "6"),
+    ("ma", "gen", "monitor.max_tweet_age_hours", "int", "تجاهل تغريدات أقدم من (ساعة)", "12"),
     ("hl", "beh", "browser.headless", "bool", "تشغيل بدون نافذة", ""),
     ("ap", "eng", "engagement.accounts_per_tweet", "range", "عدد الحسابات لكل تغريدة", "6-12"),
     ("sh", "eng", "engagement.spread_hours", "range", "مدة التوزيع (ساعة)", "0.5-4"),
