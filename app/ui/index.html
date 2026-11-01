@@ -633,7 +633,11 @@ PAGES.telegram = {
     view(head("تيليجرام", "أرسل رابط تغريدة للبوت فتتفاعل معها الحسابات تلقائياً", `<span id="tg-chip"></span>`) + `<div class="card">
       <div class="step ${st.configured ? "done" : ""}" id="s1"><div class="n">1</div><div class="body"><div class="title">إنشاء البوت وإضافة التوكن</div>
         <div class="muted">افتح <b>@BotFather</b> في تيليجرام، أرسل <span class="ltr">/newbot</span> واتبع الخطوات، ثم الصق التوكن هنا.</div>
-        <div class="row"><input class="inp ltr" id="tg-token" type="password" value="${esc(tg.bot_token)}" placeholder="123456789:AA…" style="max-width:420px" autocomplete="off"><button class="btn" data-act="tg-test">اختبار الاتصال</button></div><div id="tg-test" class="hint"></div></div></div>
+        <div class="row"><input class="inp ltr" id="tg-token" type="password" value="${esc(tg.bot_token)}" placeholder="123456789:AA…" style="max-width:420px" autocomplete="off"><button class="btn" data-act="tg-test">اختبار الاتصال</button></div><div id="tg-test" class="hint"></div>
+        <details class="hint" style="margin-top:4px"><summary style="cursor:pointer;color:var(--accent)">خطأ في الشهادة (SSL)؟ خيارات متقدمة</summary>
+          <div class="stack" style="gap:10px;margin-top:10px">
+            <div class="field"><label for="tg-ca">ملف شهادات مخصّص (.pem) — اختياري</label><input class="inp ltr" id="tg-ca" value="${esc(tg.ca_bundle)}" placeholder="C:\\certs\\ca.pem" autocomplete="off"><span class="hint">للشبكات التي تعترض HTTPS (بروكسي الشركة أو برنامج الحماية): ضع هنا شهادة الجذر الخاصة بها.</span></div>
+            <div class="row"><span style="flex:1"><b>تعطيل التحقق من الشهادة</b><br><span class="err-t">غير آمن: قد يسمح لوسيط بقراءة توكن البوت. استخدمه كحل أخير فقط.</span></span>${sw(tg.insecure_ssl, 'id="tg-insecure"')}</div></div></details></div></div>
       <div class="step ${tg.admin_ids.length ? "done" : ""}" id="s2"><div class="n">2</div><div class="body"><div class="title">ربط حسابك كأدمن</div>
         <div class="muted">للأمان، لا ينفّذ البوت إلا أوامر الأدمن المربوطين. أنشئ رمزاً ثم أرسله للبوت.</div>
         <div class="row"><button class="btn" data-act="tg-pair">${ic("key", "sm")}إنشاء رمز ربط</button></div><div id="tg-pair"></div>
@@ -748,7 +752,7 @@ const ACT = {
   async "acc-login"(b) { const a = S.accounts.find(x => x.id === b.dataset.id); await api("POST", `/api/accounts/${a.id}/login`); loginDialog(a); },
   async "tg-test"(b) {
     busy(b, true); const out = $("#tg-test");
-    try { const r = await api("POST", "/api/telegram/test", {token: $("#tg-token").value}); out.innerHTML = `<span class="chip ok">${ic("check", "sm")}متصل: @${esc(r.username)}</span>`; }
+    try { await api("POST", "/api/config", {telegram: {ca_bundle: $("#tg-ca").value.trim(), insecure_ssl: $("#tg-insecure").getAttribute("aria-checked") === "true"}}); const r = await api("POST", "/api/telegram/test", {token: $("#tg-token").value}); out.innerHTML = `<span class="chip ok">${ic("check", "sm")}متصل: @${esc(r.username)}</span>`; }
     catch (e) { out.innerHTML = `<span class="err-t">${esc(e.message)}</span>`; } finally { busy(b, false); }
   },
   async "tg-pair"() { const r = await api("POST", "/api/telegram/pair"); S.tg.code = r.code; PAGES.telegram.update(); },
@@ -756,7 +760,7 @@ const ACT = {
   async "tg-save"(b) {
     const sp = $("#tg-spread"); busy(b, true);
     try {
-      S.config = await api("POST", "/api/config", {telegram: {bot_token: $("#tg-token").value.trim(), enabled: $("#tg-en").getAttribute("aria-checked") === "true", spread_hours: [parseFloat($(".r0", sp).value), parseFloat($(".r1", sp).value)]}});
+      S.config = await api("POST", "/api/config", {telegram: {bot_token: $("#tg-token").value.trim(), ca_bundle: $("#tg-ca").value.trim(), insecure_ssl: $("#tg-insecure").getAttribute("aria-checked") === "true", enabled: $("#tg-en").getAttribute("aria-checked") === "true", spread_hours: [parseFloat($(".r0", sp).value), parseFloat($(".r1", sp).value)]}});
       toast("تم حفظ إعدادات تيليجرام"); await refresh();
     } finally { busy(b, false); }
   },

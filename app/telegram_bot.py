@@ -7,8 +7,10 @@
 """
 import copy
 import json
+import os
 import re
 import secrets
+import ssl
 import threading
 import time
 import urllib.error
@@ -43,6 +45,20 @@ def strip_links(text):
     return re.sub(r"\s+", " ", _URL_RE.sub("", text or "")).strip()
 
 
+def ssl_context(tcfg):
+    """سياق TLS: ملف شهادات مخصّص > مخزن النظام (truststore) > الافتراضي. التعطيل خيار أخير صريح."""
+    if tcfg.get("insecure_ssl"):
+        return ssl._create_unverified_context()
+    ca = (tcfg.get("ca_bundle") or os.environ.get("SSL_CERT_FILE") or "").strip()
+    if ca and os.path.isfile(ca):
+        return ssl.create_default_context(cafile=ca)
+    try:
+        import truststore  # يستخدم التحقق الأصلي في ويندوز (يجلب شهادات الجذر الناقصة عند الحاجة)
+        return truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    except Exception:
+        return ssl.create_default_context()
+
+
 def valid_token(token):
     return bool(TOKEN_RE.match((token or "").strip()))
 
@@ -68,11 +84,12 @@ class TelegramBot:
 
     # ---------- واجهة تيليجرام ----------
     def _api(self, method, params=None, timeout=35, token=None):
-        token = token or self.get_cfg()["telegram"]["bot_token"].strip()
+        tcfg = self.get_cfg()["telegram"]
+        token = token or tcfg["bot_token"].strip()
         data = urllib.parse.urlencode(params or {}).encode()
         req = urllib.request.Request(API.format(token=token, method=method), data=data)
         try:
-            with urllib.request.urlopen(req, timeout=timeout) as r:
+            with urllib.request.urlopen(req, timeout=timeout, context=ssl_context(tcfg)) as r:
                 body = json.loads(r.read().decode("utf-8"))
         except urllib.error.HTTPError as e:
             try:

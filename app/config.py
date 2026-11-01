@@ -91,7 +91,9 @@ DEFAULT_CONFIG = {
         "bot_token": "",
         "admin_ids": [],
         "notify": True,
-        "spread_hours": [0.1, 1.0]
+        "spread_hours": [0.1, 1.0],
+        "ca_bundle": "",
+        "insecure_ssl": False
     },
     "ui": {
         "autostart_engine": False
