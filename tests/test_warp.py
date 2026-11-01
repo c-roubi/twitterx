@@ -27,7 +27,9 @@ class WarpTests(unittest.TestCase):
             calls.append(a)
             return 0, "Status update: Connected" if a == ("status",) else "ok"
         cfg = {"enabled": True, "isolate_proxy_mode": False}
-        with mock.patch.object(warp, "_run", side_effect=fake):
+        with mock.patch.object(warp, "_run", side_effect=fake), \
+             mock.patch.object(warp, "is_installed", return_value=True), \
+             mock.patch.object(warp, "get_exit_ip", return_value=None):
             self.assertTrue(warp.rotate_ip(cfg, sleep=sleeps.append))
         self.assertEqual(calls[:2], [("disconnect",), ("connect",)])
         self.assertEqual(sleeps[:2], [2.5, 4.5])
@@ -37,12 +39,38 @@ class WarpTests(unittest.TestCase):
             self.assertFalse(warp.is_connected())
 
     def test_missing_cli(self):
-        with mock.patch.object(warp, "_run", return_value=(127, "x")):
+        with mock.patch.object(warp, "_run", return_value=(127, "x")), \
+             mock.patch.object(warp, "is_installed", return_value=True), \
+             mock.patch.object(warp, "get_exit_ip", return_value=None):
             self.assertFalse(warp.rotate_ip({"enabled": True, "isolate_proxy_mode": False}, sleep=lambda s: None))
 
 
-if __name__ == "__main__":
-    unittest.main()
+    def test_same_ip_retries_then_renews_registration(self):
+        calls = []
+        def fake(*a, **k):
+            calls.append(a)
+            return 0, "Connected"
+        cfg = {"enabled": True, "isolate_proxy_mode": False, "max_ip_attempts": 3}
+        with mock.patch.object(warp, "_run", side_effect=fake), \
+             mock.patch.object(warp, "is_installed", return_value=True), \
+             mock.patch.object(warp, "get_exit_ip", return_value="1.1.1.1"):
+            self.assertFalse(warp.rotate_ip(cfg, sleep=lambda s: None))
+        self.assertIn(("registration", "delete"), calls)
+
+    def test_new_ip_accepted_first_try(self):
+        ips = iter(["1.1.1.1", "2.2.2.2"])
+        cfg = {"enabled": True, "isolate_proxy_mode": False}
+        with mock.patch.object(warp, "_run", return_value=(0, "Connected")), \
+             mock.patch.object(warp, "is_installed", return_value=True), \
+             mock.patch.object(warp, "get_exit_ip", side_effect=lambda *a, **k: next(ips)):
+            self.assertTrue(warp.rotate_ip(cfg, sleep=lambda s: None))
+
+    def test_auto_install_called_when_missing(self):
+        cfg = {"enabled": True, "isolate_proxy_mode": False}
+        with mock.patch.object(warp, "is_installed", return_value=False), \
+             mock.patch.object(warp, "install_warp", return_value=False) as inst:
+            self.assertFalse(warp.rotate_ip(cfg, sleep=lambda s: None))
+        inst.assert_called_once()
 
 
 class IntegrationTests(unittest.TestCase):
@@ -72,3 +100,7 @@ class IntegrationTests(unittest.TestCase):
         from app import proxies
         with mock.patch.object(proxies, "test_proxy", return_value=False):
             self.assertIsNone(proxies.resolve_for("a1", {"warp": {"enabled": True}}))
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -93,7 +93,10 @@ DEFAULT_CONFIG = {
         "proxy_port": 40000,
         "disconnect_wait_s": 2.5,
         "connect_wait_s": 4.5,
-        "verify_retries": 3
+        "verify_retries": 3,
+        "auto_install": True,
+        "ensure_new_ip": True,
+        "max_ip_attempts": 3
     },
     "browser": {
         "headless": False,
