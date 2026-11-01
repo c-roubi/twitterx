@@ -1,0 +1,4 @@
+__pycache__/
+*.pyc
+data/warp_rotate.lock
+data/logs/
