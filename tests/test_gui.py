@@ -1353,6 +1353,17 @@ class DailySummaryTests(unittest.TestCase):
         self.assertEqual((d["tweets"][0]["done"], d["tweets"][0]["total"], d["tweets"][0]["failed"]), (2, 3, 1))
         self.assertTrue(any("@beta" in a for a in d["attention"]))
 
+    def test_cancelled_tweets_not_counted_as_pending_work(self):
+        seen = self.config.load_seen()
+        seen["3"] = {"scheduled": True, "detected_at": self.summary._today() + "T09:00:00", "cancelled": True,
+                     "queue": [{"actions": ["like", "retweet", "comment"], "done": []}] * 4}
+        self.config.save_seen(seen)
+        d = self.summary.collect()
+        html = self.summary.format_html(d)
+        self.assertIn("2 من 3 مطلوبة", html)            # الملغاة (12 عملية) خارج المطلوب
+        self.assertIn("1 ملغاة/محذوفة", html)
+        self.assertNotIn("/15", html)
+
     def test_format_html_is_telegram_safe_and_complete(self):
         import re
         html = self.summary.format_html(self.summary.collect())

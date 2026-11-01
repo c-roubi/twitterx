@@ -101,11 +101,14 @@ def format_html(d):
              "الإجمالي: <b>{}</b> عملية".format(acts)]
     tw = d["tweets"]
     if tw:
+        live = [x for x in tw if not (x["deleted"] or x["cancelled"])]   # الملغاة/المحذوفة لن تُنفَّذ: لا تُحسب في المطلوب
         ops_done = sum(x["done"] for x in tw)
-        ops_total = sum(x["total"] for x in tw)
+        ops_total = sum(x["total"] for x in live)
         failed = sum(x["failed"] for x in tw)
-        lines += ["", "🗂 <b>التغريدات المجدولة اليوم: {}</b> ({} فورية ⚡)".format(len(tw), sum(1 for x in tw if x["priority"])),
-                  "العمليات عليها: {}/{}{}".format(ops_done, ops_total, " · فاشلة: {}".format(failed) if failed else "")]
+        skipped = len(tw) - len(live)
+        lines += ["", "🗂 <b>التغريدات المجدولة اليوم: {}</b> ({} فورية ⚡{})".format(
+            len(tw), sum(1 for x in tw if x["priority"]), " · {} ملغاة/محذوفة".format(skipped) if skipped else ""),
+                  "العمليات المنفّذة: {} من {} مطلوبة{}".format(ops_done, ops_total, " · فاشلة: {}".format(failed) if failed else "")]
         for x in sorted(tw, key=lambda y: -y["done"])[:5]:
             tag = "🗑" if x["deleted"] else "🛑" if x["cancelled"] else "✅" if x["completed"] else "⏳"
             lines.append("{} <code>{}</code> {}{}/{}".format(tag, x["id"][-10:], "⚡ " if x["priority"] else "", x["done"], x["total"]))
