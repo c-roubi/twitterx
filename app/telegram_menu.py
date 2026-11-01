@@ -85,6 +85,8 @@ ITEMS = [
     ("tc", "tg", "telegram.action_mix.comment", "pct", "⚡ احتمال التعليق (فوري)", "100"),
     ("td", "tg", "telegram.action_delay_s", "range", "تأخير بين عمليات الحساب (ثانية)", "2-6"),
     ("tn", "tg", "telegram.notify", "bool", "إشعار عند اكتمال التفاعل", ""),
+    ("ds", "tg", "telegram.daily_summary.enabled", "bool", "📈 ملخص يومي في آخر اليوم", ""),
+    ("dt", "tg", "telegram.daily_summary.time", "time", "وقت إرسال الملخص", "23:50"),
     ("ce2", "tg", "telegram.channel.enabled", "bool", "📣 مراقبة قناة الأدمن", ""),
     ("ci", "tg", "telegram.channel.instant", "bool", "تنفيذ فوري لتغريدات القناة", ""),
     ("cf", "tg", "telegram.channel.fallback_interval_min", "range", "الفحص الاحتياطي لـX (دقيقة)", "60-90"),
@@ -143,6 +145,11 @@ def parse_value(kind, text):
         if len(nums) != 2 or nums[0] > nums[1] or nums[0] < 0:
             raise ValueError("أرسل مجالاً صحيحاً مثل: 6-12")
         return [int(n) if n == int(n) else n for n in nums]
+    if kind == "time":
+        m = re.fullmatch(r"(\d{1,2}):(\d{2})", t)
+        if not m or int(m.group(1)) > 23 or int(m.group(2)) > 59:
+            raise ValueError("أرسل الوقت مثل: 23:50")
+        return "{:02d}:{}".format(int(m.group(1)), m.group(2))
     if kind == "timerange":
         m = re.fullmatch(r"(\d{1,2}):(\d{2})\s*[-–—\s]+\s*(\d{1,2}):(\d{2})", t)
         if not m:
@@ -198,7 +205,8 @@ class BotUI:
         rows = self._nav(
             [("📊 الحالة", "st"), ("⚙️ المحرك", "eng")],
             [("👥 الحسابات", "acc:0"), ("🗂 التغريدات", "tw")],
-            [("🔑 الكلمات المفتاحية", "kw"), ("💬 التعليقات", "cm")],
+            [("📈 ملخص اليوم", "sum"), ("🔑 الكلمات المفتاحية", "kw")],
+            [("💬 التعليقات", "cm")],
             [("🛠 الإعدادات", "set"), ("🌐 WARP", "wp")],
         )
         return View(text, rows)
@@ -217,6 +225,9 @@ class BotUI:
         lines.append("📡 المصادر: " + ("المدير @{}".format(esc(st["manager_handle"])) if st["manager_handle"] else "المدير غير محدد") +
                      " · تيليجرام " + ("✅" if tg["state"] == "running" else "⏸"))
         return View("\n".join(lines), self._nav([("🔄 تحديث", "st"), HOME_BTN]))
+
+    def summary(self, notice=None):
+        return View(self.svc.summary_text(), self._nav([("🔄 تحديث", "sum"), ("📤 إرسال للأدمن", "sum:send")], [HOME_BTN]), notice)
 
     # ------------------------------------------------------------------ المحرك
     def engine(self, notice=None):
@@ -338,7 +349,7 @@ class BotUI:
         self._set_pending(chat_id, kind="setting", key=key)
         cur = fmt_value(kind, get_path(self.svc.cfg(), path))
         hint = {"range": "مجال من رقمين مثل <code>{}</code>", "pct": "نسبة مئوية مثل <code>{}</code>", "int": "رقم صحيح مثل <code>{}</code>",
-                "timerange": "مجال وقت مثل <code>{}</code>", "text": "نص مثل <code>{}</code> (أرسل <code>-</code> لتفريغه)"}.get(kind, "{}").format(esc(ex))
+                "timerange": "مجال وقت مثل <code>{}</code>", "text": "نص مثل <code>{}</code> (أرسل <code>-</code> لتفريغه)", "time": "وقت مثل <code>{}</code>"}.get(kind, "{}").format(esc(ex))
         return View("✏️ <b>{}</b>\nالقيمة الحالية: <b>{}</b>\n\nأرسل القيمة الجديدة — {}".format(esc(name), cur, hint),
                     self._nav([("❌ إلغاء", "set:c:" + cat)]))
 
@@ -487,7 +498,7 @@ class BotUI:
         parts = data.split(":")
         head = parts[0]
         if head != "set" or len(parts) < 2 or parts[1] != "i":
-            if head in ("home", "st", "eng", "acc", "tw", "set", "kw", "cm", "wp"):
+            if head in ("home", "st", "eng", "acc", "tw", "set", "kw", "cm", "wp", "sum"):
                 self.cancel(chat_id)  # أي تنقّل يلغي الإدخال المعلّق
         if data == "home":
             return self.home()
@@ -495,6 +506,14 @@ class BotUI:
             return self.home()
         if data == "st":
             return self.status()
+        if head == "sum":
+            if len(parts) > 1 and parts[1] == "send":
+                try:
+                    self.svc.send_summary_now()
+                    return self.summary("أُرسل الملخص ✅")
+                except Exception as e:
+                    return View("❌ {}".format(esc(e)), self._nav([HOME_BTN]))
+            return self.summary("تم التحديث")
         if head == "eng":
             if len(parts) == 1:
                 return self.engine()

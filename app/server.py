@@ -15,7 +15,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 
-from . import telegram_bot, telegram_menu, warp
+from . import summary, telegram_bot, telegram_menu, warp
 from .config import (
     COMMENTS_PATH, DEFAULT_CONFIG, LOGS_DIR, PROFILES_DIR, SESSIONS_DIR, STATE_DIR,
     _atomic_save, _deep_merge, ensure_initial_files, load_accounts, load_config,
@@ -128,6 +128,9 @@ def sanitize_config(incoming, current):
         for x in (v if isinstance(v, list) else [v] if v != {} else []):
             if not lo <= x <= hi:
                 raise ApiError("القيمة خارج النطاق ({}–{}): {}".format(lo, hi, ".".join(path)))
+    t = _get_path(clean, ("telegram", "daily_summary", "time"))
+    if t != {} and not re.match(r"^([01]\d|2[0-3]):[0-5]\d$", str(t)):
+        raise ApiError("وقت الملخص اليومي بصيغة HH:MM (مثل 23:50)")
     for path in (("engagement", "action_mix", "like"), ("engagement", "action_mix", "retweet"),
                  ("engagement", "action_mix", "comment"), ("behavior", "rest_day_chance"),
                  ("follow", "visit_only_chance"), ("warmup", "browse_probability"), ("comments", "en_ratio")):
@@ -201,6 +204,7 @@ class AppService:
             notices=self.completion_notices,
         )
         self.bot.ui = telegram_menu.BotUI(self)
+        self.bot.daily_hook = lambda: summary.tick(self.bot)
         self.bot.request_check = self.engine.request_check
         self.engine.schedule_cb = lambda tid, text, cfg, instant: self._schedule(tid, text, cfg, "channel", instant)
         self.engine.notify_cb = self.bot.notify_admins
@@ -599,6 +603,15 @@ class AppService:
         except Exception as e:
             raise ApiError("تعذّر تحديد القناة: {}".format(e))
 
+    def summary_text(self, day=None):
+        return summary.format_html(summary.get_day(day or summary._today()) or summary.collect())
+
+    def send_summary_now(self):
+        if not load_config()["telegram"].get("admin_ids"):
+            raise ApiError("لا يوجد أدمن مربوط - اربط حسابك أولاً من تبويب تيليجرام")
+        self.bot.send_summary(self.summary_text())
+        return {"sent": True}
+
     def tg_channels(self):
         """القنوات التي رآها البوت مؤخراً (للتعرّف على معرّف القناة من الواجهة)."""
         return [{"id": cid, "title": v["title"], "username": v["username"], "age_s": int(time.time() - v["ts"])}
@@ -726,6 +739,9 @@ def make_handler(svc, token, port):
 
     @route("POST", "/api/telegram/test")
     def _(b, **k): return svc.tg_test(b.get("token", ""))
+
+    @route("POST", "/api/telegram/summary")
+    def _(b, **k): return svc.send_summary_now()
 
     @route("GET", "/api/telegram/channels")
     def _(b, **k): return svc.tg_channels()

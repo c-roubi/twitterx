@@ -70,7 +70,7 @@ def _kb(rows):
     return json.dumps({"inline_keyboard": [[{"text": l, "callback_data": d} for l, d in row] for row in rows]}, ensure_ascii=False)
 
 
-COMMANDS = [("menu", "القائمة الرئيسية"), ("status", "حالة التطبيق"), ("help", "المساعدة"), ("cancel", "إلغاء الإدخال الحالي")]
+COMMANDS = [("menu", "القائمة الرئيسية"), ("status", "حالة التطبيق"), ("summary", "ملخص اليوم"), ("help", "المساعدة"), ("cancel", "إلغاء الإدخال الحالي")]
 
 
 class TelegramBot:
@@ -89,6 +89,7 @@ class TelegramBot:
         self._send_override = sender
         self.ui = ui
         self.notices = notices
+        self.daily_hook = None               # callable() : يستدعي الملخص اليومي في كل دورة (يضعها الخادم)
         self.request_check = request_check   # callable(ts) -> bool : يطلب فحص حساب المدير في X (يضعها الخادم)
         self.channels_seen = {}              # chat_id -> {title, username, ts} للتعرّف على القناة من الواجهة
         self._stop = threading.Event()
@@ -231,6 +232,8 @@ class TelegramBot:
                 return [self._view(self.ui.home(greeting=low.startswith("/start")))]
             if low.startswith("/status"):
                 return [self._view(self.ui.status())]
+            if low.startswith("/summary"):
+                return [self._view(self.ui.summary())]
         if low.startswith(("/start", "/help")):
             return [Reply.of(
                 "مرحباً 👋 أنا بوت SmartEngage.\n"
@@ -409,6 +412,12 @@ class TelegramBot:
         v = self.ui.warp(info=info)
         self.edit(chat_id, message_id, v.text, v.rows)
 
+    def send_summary(self, html, rows=None):
+        """الملخص اليومي يُرسل للأدمن حتى لو أُوقفت إشعارات الاكتمال (له مفتاحه الخاص)."""
+        rows = rows or [[("🔄 تحديث ملخص اليوم", "sum"), ("🏠 القائمة", "home")]]
+        for cid in self.get_cfg()["telegram"].get("admin_ids", []):
+            self.send(int(cid), html, rows)
+
     def send_notices(self):
         if not self.notices or not self.get_cfg()["telegram"].get("notify", True):
             return
@@ -480,6 +489,11 @@ class TelegramBot:
                     for r in self.handle_message(msg["chat"]["id"], msg["text"], who):
                         self.send(msg["chat"]["id"], str(r), r.markup)
                 self.send_notices()
+                if self.daily_hook:
+                    try:
+                        self.daily_hook()
+                    except Exception:
+                        log.exception("خطأ في الملخص اليومي")
             except Exception as e:
                 self.state, self.error = "error", str(e)[:160]
                 log.warning("خطأ بوت تيليجرام: {}".format(e))

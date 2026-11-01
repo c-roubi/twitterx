@@ -1320,5 +1320,112 @@ class NetDiagTests(unittest.TestCase):
         self.assertIn("verdict", out)
 
 
+class DailySummaryTests(unittest.TestCase):
+    def setUp(self):
+        from app import config, summary
+        self.config, self.summary = config, summary
+        for p in (summary.STATS_PATH, summary.SENT_PATH):
+            if os.path.exists(p):
+                os.remove(p)
+        summary._last_tick["snap"] = 0
+        config.save_seen({})
+        accs = {"s1": {"handle": "alpha", "enabled": True}, "s2": {"handle": "beta", "enabled": True}, "s3": {"handle": "gamma", "enabled": False}}
+        config.save_accounts(accs)
+        today = summary._today()
+        config.save_state("s1", {"date": today, "done": {"likes": 12, "retweets": 3, "comments": 2, "follows": 4}, "caps": {}})
+        config.save_state("s2", {"date": today, "done": {"likes": 5, "retweets": 1, "comments": 0, "follows": 2}, "needs_relogin": True, "rest_day": False})
+        config.save_state("s3", {"date": "2000-01-01", "done": {"likes": 99, "retweets": 0, "comments": 0, "follows": 0}})
+        cfg = config.load_config()
+        cfg["telegram"]["admin_ids"] = [5]
+        cfg["telegram"]["daily_summary"] = {"enabled": True, "time": "23:50"}
+        config.save_config(cfg)
+        seen = {"1": {"scheduled": True, "detected_at": today + "T10:00:00", "priority": True, "source": "telegram", "completed_at": "x",
+                      "queue": [{"actions": ["like", "retweet"], "done": ["like", "retweet"]}, {"actions": ["like"], "done": [], "failed": ["like"]}]},
+                "2": {"scheduled": True, "detected_at": "2000-01-01T10:00:00", "queue": []}}
+        config.save_seen(seen)
+        self.sent = []
+        self.bot = type("B", (), {"send_summary": lambda s, html, rows=None: self.sent.append(html)})()
+
+    def test_collect_totals_and_attention(self):
+        d = self.summary.collect()
+        self.assertEqual(d["totals"], {"likes": 17, "retweets": 4, "comments": 2, "follows": 6})   # يوم قديم لا يُحسب (gamma)
+        self.assertEqual([t["id"] for t in d["tweets"]], ["1"])                                       # تغريدات اليوم فقط
+        self.assertEqual((d["tweets"][0]["done"], d["tweets"][0]["total"], d["tweets"][0]["failed"]), (2, 3, 1))
+        self.assertTrue(any("@beta" in a for a in d["attention"]))
+
+    def test_format_html_is_telegram_safe_and_complete(self):
+        import re
+        html = self.summary.format_html(self.summary.collect())
+        for want in ("@alpha", "@beta", "17", "⚡", "تحتاج انتباه", "حسب الحساب"):
+            self.assertIn(want, html)
+        self.assertNotIn("@gamma", html)                                      # المعطّل لا يظهر
+        self.assertTrue(set(re.findall(r"</?(\w+)", html)) <= {"b", "code", "a", "i"})
+        self.assertLess(len(html), 4000)
+
+    def test_not_sent_before_time_sent_once_after(self):
+        from datetime import datetime
+        today = self.summary.datetime.now().strftime("%Y-%m-%d")
+        early, late = datetime.strptime(today + " 12:00", "%Y-%m-%d %H:%M"), datetime.strptime(today + " 23:51", "%Y-%m-%d %H:%M")
+        self.assertEqual(self.summary.tick(self.bot, now=early), [])
+        self.assertEqual(self.summary.tick(self.bot, now=late), [today])
+        self.assertEqual(self.summary.tick(self.bot, now=late), [])            # مرة واحدة فقط
+        self.assertEqual(len(self.sent), 1)
+        self.assertIn("ملخص يوم " + today, self.sent[0])
+
+    def test_catch_up_when_app_was_closed_at_send_time(self):
+        from datetime import datetime
+        today = self.summary.datetime.now().strftime("%Y-%m-%d")
+        store = {"2025-12-30": self.summary.collect("2025-12-30"), "2025-12-31": dict(self.summary.collect("2025-12-31"), date="2025-12-31")}
+        self.config._atomic_save(store, self.summary.STATS_PATH)
+        morning = datetime.strptime(today + " 08:00", "%Y-%m-%d %H:%M")
+        out = self.summary.tick(self.bot, now=morning)
+        self.assertEqual(out, ["2025-12-30", "2025-12-31"])                    # أيام فائتة تُرسل عند التشغيل التالي
+        self.assertEqual(self.summary.tick(self.bot, now=morning), [])
+
+    def test_disabled_or_no_admin_sends_nothing(self):
+        from datetime import datetime
+        late = datetime.strptime(self.summary.datetime.now().strftime("%Y-%m-%d") + " 23:59", "%Y-%m-%d %H:%M")
+        cfg = self.config.load_config(); cfg["telegram"]["daily_summary"]["enabled"] = False; self.config.save_config(cfg)
+        self.assertEqual(self.summary.tick(self.bot, now=late), [])
+        cfg["telegram"]["daily_summary"]["enabled"] = True; cfg["telegram"]["admin_ids"] = []; self.config.save_config(cfg)
+        self.assertEqual(self.summary.tick(self.bot, now=late), [])
+        self.assertEqual(self.sent, [])
+
+    def test_snapshot_persists_today(self):
+        d = self.summary.snapshot()
+        with open(self.summary.STATS_PATH, encoding="utf-8") as f:
+            stored = json.load(f)
+        self.assertEqual(stored[d["date"]]["totals"]["likes"], 17)
+
+    def test_bot_command_menu_button_and_api(self):
+        svc = server.AppService()
+        svc._save_admins([5])
+        r = svc.bot.handle_message(5, "/summary")
+        self.assertIn("ملخص يوم", r[0])
+        self.assertTrue(any(d == "sum" for row in r[0].markup for _, d in row))
+        home = svc.bot.ui.home()
+        self.assertTrue(any(d == "sum" for row in home.rows for _, d in row))
+        sent = []
+        svc.bot.send = lambda cid, text, markup=None: sent.append((cid, text))
+        v = svc.bot.ui.route(5, "sum:send")
+        self.assertEqual(v.notice, "أُرسل الملخص ✅")
+        self.assertEqual(sent[0][0], 5)
+
+    def test_send_now_requires_admin_and_time_validation(self):
+        svc = server.AppService()
+        cfg = self.config.load_config(); cfg["telegram"]["admin_ids"] = []; self.config.save_config(cfg)
+        with self.assertRaises(server.ApiError):
+            svc.send_summary_now()
+        with self.assertRaises(server.ApiError):
+            svc.set_config({"telegram": {"daily_summary": {"time": "25:99"}}})
+        self.assertEqual(svc.set_config({"telegram": {"daily_summary": {"time": "22:30"}}})["telegram"]["daily_summary"]["time"], "22:30")
+
+    def test_menu_time_item_parses(self):
+        from app import telegram_menu as m
+        self.assertEqual(m.parse_value("time", "9:50"), "09:50")
+        with self.assertRaises(ValueError):
+            m.parse_value("time", "24:00")
+
+
 if __name__ == "__main__":
     unittest.main()

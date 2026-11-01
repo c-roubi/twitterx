@@ -109,6 +109,7 @@ DEFAULT_CONFIG = {
             "retries": 3,
             "fallback_interval_min": [60, 90]
         },
+        "daily_summary": {"enabled": True, "time": "23:50"},
         "ca_bundle": "",
         "insecure_ssl": False
     },

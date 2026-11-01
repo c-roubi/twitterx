@@ -5,3 +5,6 @@ data/logs/
 data/warp_state.json
 data/comment_history.json
 data/notified.json
+data/daily_stats.json
+data/summary_sent.json
+data/ai_state.json
