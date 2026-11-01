@@ -230,8 +230,14 @@ def is_login_wall(page):
     return False
 
 
-def login_account(account, cfg):
-    """تسجيل دخول يدوي أول مرة: يفتح المتصفح ويستلم من المستخدم، ثم يحفظ الجلسة."""
+def login_account(account, cfg, confirm=None, on_status=None):
+    """تسجيل دخول يدوي أول مرة: يفتح المتصفح ويستلم من المستخدم، ثم يحفظ الجلسة.
+
+    confirm: دالة تنتظر تأكيد المستخدم (للواجهة الرسومية)؛ بدونها يُستخدم input() في الطرفية.
+    on_status: دالة اختيارية تستقبل مراحل العملية.
+    """
+    gui = confirm is not None
+    say = on_status or (lambda s: None)
     acc_id = account.get("id", "unknown")
     pw = sync_playwright().start()
     try:
@@ -243,23 +249,34 @@ def login_account(account, cfg):
         # ✅ التعديل تم هنا لتسريع التحميل وتجنب الـ Timeout
         page.goto("https://x.com/login", timeout=60000, wait_until="domcontentloaded")
         
-        print("=" * 60)
-        print("  سجّل الدخول يدوياً الآن في النافذة المفتوحة (اسم مستخدم + كلمة مرور / رمز تحقق).")
-        print("  بعد اكتمال الدخول والوصول للصفحة الرئيسية، ارجع للطرفية واضغط Enter.")
-        print("=" * 60)
-        input("  اضغط Enter بعد تسجيل الدخول... ")
+        say("waiting_user")
+        if gui:
+            if not confirm():
+                return False
+        else:
+            print("=" * 60)
+            print("  سجّل الدخول يدوياً الآن في النافذة المفتوحة (اسم مستخدم + كلمة مرور / رمز تحقق).")
+            print("  بعد اكتمال الدخول والوصول للصفحة الرئيسية، ارجع للطرفية واضغط Enter.")
+            print("=" * 60)
+            input("  اضغط Enter بعد تسجيل الدخول... ")
+        say("saving")
         for _ in range(30):
             if is_logged_in(page):
                 break
             time.sleep(2)
         if not is_logged_in(page):
+            if gui:
+                log.warning("{} | لم يتم رصد حالة الدخول - لم تُحفظ الجلسة".format(acc_id))
+                return False
             print("! لم يتم رصد حالة الدخول. هل أنت متأكد أنك سجّلت الدخول؟")
             ans = input("  اكتب yes للمتابعة وحفظ الجلسة رغم ذلك: ").strip().lower()
             if ans != "yes":
                 print("تم الإلغاء.")
                 return False
         state_path = os.path.join(SESSIONS_DIR, f"{acc_id}.json")
+        os.makedirs(SESSIONS_DIR, exist_ok=True)
         context.storage_state(path=state_path)
+        log.info("{} | تم حفظ الجلسة".format(acc_id))
         print(f"✓ تم حفظ الجلسة للحساب {acc_id} في {state_path}")
         return True
     finally:

@@ -12,6 +12,7 @@
   python main.py daily <acc_id> [--dry-run] تشغيل جلسة يومية لحساب معين
   python main.py warmup <acc_id> [--dry-run] جلسة إحماء خفيفة (فتح + كريبتو)
   python main.py status                     حالة الحسابات والجداول
+  python main.py gui                        فتح الواجهة الرسومية (موصى به)
 """
 import argparse
 import json
@@ -235,6 +236,12 @@ def cmd_warmup(args):
     routine.run_warmup(args.account, cfg, accounts, dry_run=args.dry_run)
 
 
+def cmd_gui(args):
+    """فتح واجهة التطبيق الرسومية."""
+    from app import gui
+    gui.run(port=args.port, no_window=args.no_window)
+
+
 def cmd_status(args):
     cfg = load_config()
     accounts = load_accounts()
@@ -307,6 +314,10 @@ def main():
 
     sub.add_parser("status", help="حالة الحسابات")
 
+    a = sub.add_parser("gui", help="فتح الواجهة الرسومية")
+    a.add_argument("--port", type=int, default=8765)
+    a.add_argument("--no-window", action="store_true", help="تشغيل الخادم فقط (افتح الرابط يدوياً)")
+
     args = p.parse_args()
     if not args.cmd:
         p.print_help()
@@ -316,7 +327,7 @@ def main():
     handlers = {
         "init": cmd_init, "add": cmd_add, "list": cmd_list, "login": cmd_login,
         "check": cmd_check, "monitor": cmd_monitor, "daily": cmd_daily,
-        "warmup": cmd_warmup, "status": cmd_status,
+        "warmup": cmd_warmup, "status": cmd_status, "gui": cmd_gui,
     }
     handlers[args.cmd](args)
 

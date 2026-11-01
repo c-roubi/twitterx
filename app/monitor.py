@@ -105,7 +105,7 @@ def _fetch_with_account(cfg, accounts, acc_id):
             pass
 
 
-def schedule_for_tweet(tid, text="", cfg=None, accounts=None):
+def schedule_for_tweet(tid, text="", cfg=None, accounts=None, source="manager"):
     """اختيار مجموعة حسابية عشوائية وتوزيع مهام عليها بجدول متدرج.
 
     text: نص التغريدة (يُحفظ لاستخدامه في التوليد السياقي للتعليقات).
@@ -158,6 +158,7 @@ def schedule_for_tweet(tid, text="", cfg=None, accounts=None):
         "text": (text or "")[:2000],
         "detected_at": datetime.now().isoformat(timespec="seconds"),
         "scheduled": True,
+        "source": source,
         "queue": queue,
     }
     save_seen(seen)

@@ -5,7 +5,7 @@ import os
 import sys
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA_DIR = os.path.join(BASE_DIR, "data")
+DATA_DIR = os.environ.get("SMARTENGAGE_DATA") or os.path.join(BASE_DIR, "data")
 CONFIG_PATH = os.path.join(DATA_DIR, "config.json")
 ACCOUNTS_PATH = os.path.join(DATA_DIR, "accounts.json")
 COMMENTS_PATH = os.path.join(DATA_DIR, "comments.txt")
@@ -85,6 +85,16 @@ DEFAULT_CONFIG = {
         "fallback_to_direct": True,
         "test_timeout": 10,
         "rotate": False
+    },
+    "telegram": {
+        "enabled": False,
+        "bot_token": "",
+        "admin_ids": [],
+        "notify": True,
+        "spread_hours": [0.1, 1.0]
+    },
+    "ui": {
+        "autostart_engine": False
     },
     "warp": {
         "enabled": False,

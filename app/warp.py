@@ -20,6 +20,7 @@ import sys
 import threading
 import time
 
+from .config import DATA_DIR
 from .logger import get_logger
 
 try:
@@ -31,8 +32,7 @@ log = get_logger("warp")
 
 WARP_CLI = "warp-cli"
 DEFAULT_PROXY_PORT = 40000
-_LOCK_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                          "data", "warp_rotate.lock")
+_LOCK_PATH = os.path.join(DATA_DIR, "warp_rotate.lock")
 _STATE_PATH = os.path.join(os.path.dirname(_LOCK_PATH), "warp_state.json")
 _thread_lock = threading.Lock()
 
