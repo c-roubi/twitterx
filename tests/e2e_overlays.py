@@ -45,7 +45,7 @@ with sync_playwright() as p:
     b = p.chromium.launch(**kw)
     ctx = b.new_context()
     overlays.install(ctx)
-    ctx.route("https://x.com/**", lambda r: r.fulfill(status=200, content_type="text/html", body=PAGES[r.request.url]))
+    ctx.route("https://x.com/**", lambda r: r.fulfill(status=200, content_type="text/html; charset=utf-8", body=PAGES[r.request.url]))
     pg = ctx.new_page()
 
     print("صفحة عادية")
