@@ -1112,6 +1112,35 @@ class ChannelTests(unittest.TestCase):
     def post(self, text="", chat=None, **extra):
         return dict({"chat": {"id": chat or self.CH, "title": "Boss channel", "type": "channel"}, "text": text}, **extra)
 
+    def test_every_channel_post_leaves_a_diagnostic_event(self):
+        b = self.bot
+        b.handle_channel_post(self.post("hi", chat=-100999))                                   # قناة أخرى
+        self.assertIn("قناة أخرى", b.channel_events[-1]["result"])
+        cfg = self.config.load_config(); cfg["telegram"]["channel"]["enabled"] = False; self.config.save_config(cfg)
+        b.handle_channel_post(self.post("hi"))
+        self.assertIn("غير مفعّلة", b.channel_events[-1]["result"])
+        cfg["telegram"]["channel"].update(enabled=True, chat_id=0); self.config.save_config(cfg)
+        b.handle_channel_post(self.post("hi"))
+        self.assertIn("لم يُحفظ معرّف", b.channel_events[-1]["result"])
+        cfg["telegram"]["channel"]["chat_id"] = self.CH; self.config.save_config(cfg)
+        b.handle_channel_post(self.post("see https://x.com/b/status/1234567890123"))
+        self.assertIn("جُدول التفاعل", b.channel_events[-1]["result"])
+        b.handle_channel_post(self.post("no link"))
+        self.assertIn("فحص حساب المدير", b.channel_events[-1]["result"])
+        b.request_check = lambda ts: False
+        b.handle_channel_post(self.post("no link 2"))
+        self.assertIn("المحرك متوقف", b.channel_events[-1]["result"])
+        self.assertEqual(len(b.channel_events), 6)
+
+    def test_channel_events_api_newest_first_and_capped(self):
+        svc = server.AppService()
+        for i in range(12):
+            svc.bot._chan_event(-1001, "Boss", "نتيجة %d" % i)
+        ev = svc.tg_channel_events()
+        self.assertEqual(len(ev), 5)
+        self.assertEqual(ev[0]["result"], "نتيجة 11")
+        self.assertEqual(len(svc.bot.channel_events), 10)
+
     def test_other_channel_ignored_but_remembered(self):
         self.assertEqual(self.bot.handle_channel_post(self.post("hi", chat=-100999)), "ignored")
         self.assertIn(-100999, self.bot.channels_seen)

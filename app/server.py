@@ -625,6 +625,10 @@ class AppService:
         self.bot.send_summary(self.summary_text())
         return {"sent": True}
 
+    def tg_channel_events(self):
+        return [{"age_s": int(time.time() - e["ts"]), "title": e["title"], "chat": e["chat"], "result": e["result"]}
+                for e in reversed(self.bot.channel_events[-5:])]
+
     def tg_channels(self):
         """القنوات التي رآها البوت مؤخراً (للتعرّف على معرّف القناة من الواجهة)."""
         return [{"id": cid, "title": v["title"], "username": v["username"], "age_s": int(time.time() - v["ts"])}
@@ -755,6 +759,9 @@ def make_handler(svc, token, port):
 
     @route("POST", "/api/telegram/summary")
     def _(b, **k): return svc.send_summary_now()
+
+    @route("GET", "/api/telegram/channel/events")
+    def _(b, **k): return svc.tg_channel_events()
 
     @route("GET", "/api/telegram/channels")
     def _(b, **k): return svc.tg_channels()

@@ -92,6 +92,7 @@ class TelegramBot:
         self.daily_hook = None               # callable() : يستدعي الملخص اليومي في كل دورة (يضعها الخادم)
         self.request_check = request_check   # callable(ts) -> bool : يطلب فحص حساب المدير في X (يضعها الخادم)
         self.channels_seen = {}              # chat_id -> {title, username, ts} للتعرّف على القناة من الواجهة
+        self.channel_events = []             # آخر منشورات القنوات التي وصلت البوت ونتيجة التعامل معها (للتشخيص)
         self._stop = threading.Event()
         self._thread = None
         self._lock = threading.Lock()
@@ -323,6 +324,11 @@ class TelegramBot:
         for cid in cfg.get("admin_ids", []):
             self.send(int(cid), text, rows)
 
+    def _chan_event(self, cid, title, result):
+        self.channel_events.append({"ts": time.time(), "chat": cid, "title": title or "", "result": result})
+        del self.channel_events[:-10]
+        log.info("منشور قناة [{}] ({}): {}".format(title or "؟", cid, result))
+
     def handle_channel_post(self, post):
         """منشور جديد في قناة الأدمن: رابط تغريدة ← جدولة فورية، وإلا ← طلب فحص حساب المدير في X.
 
@@ -337,7 +343,15 @@ class TelegramBot:
             wanted = int(ch.get("chat_id") or 0)
         except (TypeError, ValueError):
             wanted = 0
-        if not ch.get("enabled") or not wanted or wanted != cid:
+        title = chat.get("title", "")
+        if not ch.get("enabled"):
+            self._chan_event(cid, title, "تُجوهل: «مراقبة القناة» غير مفعّلة في الإعدادات")
+            return "ignored"
+        if not wanted:
+            self._chan_event(cid, title, "تُجوهل: لم يُحفظ معرّف القناة بعد (اضغط «اعتماد» ثم «حفظ»)")
+            return "ignored"
+        if wanted != cid:
+            self._chan_event(cid, title, "تُجوهل: هذه قناة أخرى (المعتمدة {})".format(wanted))
             return "ignored"
         text = post.get("text") or post.get("caption") or ""
         ents = (post.get("entities") or []) + (post.get("caption_entities") or [])
@@ -361,12 +375,15 @@ class TelegramBot:
                     self.notify_admins("📣 <b>منشور جديد في القناة</b>\n{} مع <code>{}</code> · الحسابات: <b>{}</b>".format(what, tid, len(q)),
                                        [[("🔎 التقدّم", "tw:r:" + tid), ("🏠 القائمة", "home")]])
             self.handled += len(done)
+            self._chan_event(cid, title, "جُدول التفاعل مع {} تغريدة".format(len(done)) if done else "فيه رابط لكن لم يُجدول (مكرر أو لا حسابات جاهزة أو فشل)")
             return "scheduled:" + ",".join(done)
         # بلا رابط: نفحص صفحة المدير في X (مع إعادة محاولة لأن التغريدة قد تتأخر)
         ok = bool(self.request_check and self.request_check(time.time()))
         if ok:
+            self._chan_event(cid, title, "بلا رابط: طُلب فحص حساب المدير في X")
             self.notify_admins("📣 منشور جديد في القناة بلا رابط — أفحص حساب المدير في X الآن…")
             return "check-requested"
+        self._chan_event(cid, title, "بلا رابط لكن المحرك متوقف: لم يُفحص شيء")
         self.notify_admins("⚠️ منشور جديد في القناة لكن المحرك متوقف — شغّله ليُفحص حساب المدير.", [[("▶️ تشغيل المحرك", "eng:start")]])
         return "engine-stopped"
 
