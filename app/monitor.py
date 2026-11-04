@@ -86,9 +86,12 @@ def fetch_manager_tweets(cfg, accounts, dry_run=False):
 
 def _fetch_guest(cfg):
     from playwright.sync_api import sync_playwright
+    from ._pw_cleanup import cleanup_asyncio_loop
 
-    pw = sync_playwright().start()
+    pw = None
     try:
+        cleanup_asyncio_loop()
+        pw = sync_playwright().start()
         ctx = browser.launch_guest(cfg, pw)
         page = ctx.new_page()
         human = humanizer.Human(page)
@@ -106,22 +109,25 @@ def _fetch_guest(cfg):
         log.error(f"فشل جلب تغريدات المدير (guest): {e}")
         return [], f"error:{e}"[:100]
     finally:
-        try:
-            pw.stop()
-        except Exception:
-            pass
+        if pw is not None:
+            try:
+                pw.stop()
+            except Exception:
+                pass
 
 
 def _fetch_with_account(cfg, accounts, acc_id):
     from playwright.sync_api import sync_playwright
+    from ._pw_cleanup import cleanup_asyncio_loop
 
     acc = dict(accounts[acc_id])
     acc["id"] = acc_id
-    pw = sync_playwright().start()
+    pw = None
     try:
+        cleanup_asyncio_loop()
+        pw = sync_playwright().start()
         _, ctx, page, pw_owned = browser.launch_account(acc, cfg, pw=pw, owned_pw=False)
         if not browser.is_logged_in(page):
-            # ✅ تم التعديل هنا: إضافة wait_until="domcontentloaded" لتسريع التحميل وتجنب الـ Timeout
             page.goto("https://x.com/home", timeout=60000, wait_until="domcontentloaded")
             page.wait_for_timeout(3000)
         human = humanizer.Human(page)
@@ -134,10 +140,11 @@ def _fetch_with_account(cfg, accounts, acc_id):
         log.error(f"فشل جلب تغريدات المدير (account {acc_id}): {e}")
         return [], f"error:{e}"[:100]
     finally:
-        try:
-            pw.stop()
-        except Exception:
-            pass
+        if pw is not None:
+            try:
+                pw.stop()
+            except Exception:
+                pass
 
 
 def _remaining_actions(entry):

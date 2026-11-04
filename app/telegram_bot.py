@@ -588,13 +588,20 @@ class TelegramBot:
                     except Exception:
                         log.exception("خطأ في الملخص اليومي")
             except Exception as e:
-                self.state, self.error = "error", str(e)[:160]
-                log.warning("خطأ بوت تيليجرام: {}".format(e))
-                if "Conflict" in str(e) and "webhook" in str(e).lower():
+                err_msg = str(e)
+                is_network = any(s in err_msg for s in ("WinError", "urlopen error", "Connection", "timed out", "EOF", "RemoteDisconnected"))
+                if is_network:
+                    log.debug("خطأ شبكة بوت تيليجرام: {}".format(e))
+                else:
+                    self.state = "error"
+                    self.error = err_msg[:160]
+                    log.warning("خطأ بوت تيليجرام: {}".format(e))
+                if "Conflict" in err_msg and "webhook" in err_msg.lower():
                     try:
                         self._api("deleteWebhook", {"drop_pending_updates": "false"}, timeout=15)
                     except Exception:
                         pass
-                token_used = None if "Unauthorized" in str(e) else token_used
-                self._stop.wait(backoff)
-                backoff = min(backoff * 2, 60)
+                token_used = None if "Unauthorized" in err_msg else token_used
+                wait = min(backoff, 10) if is_network else backoff
+                self._stop.wait(wait)
+                backoff = min(backoff * 2, 60) if not is_network else min(backoff + 1, 10)

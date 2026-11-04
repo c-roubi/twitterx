@@ -150,7 +150,9 @@ def _run_session(acc_id, cfg, accounts, dry_run=False):
     pw, ctx, page, pw_owned = None, None, None, False
     try:
         from playwright.sync_api import sync_playwright
+        from ._pw_cleanup import cleanup_asyncio_loop
 
+        cleanup_asyncio_loop()
         pw = sync_playwright().start()
         _, ctx, page, pw_owned = browser.launch_account(acc, cfg, pw=pw, owned_pw=False)
         human.page = page
@@ -173,13 +175,13 @@ def _run_session(acc_id, cfg, accounts, dry_run=False):
 
         # 1) تصفح عشوائي وتفاعلات طبيعية
         _browse_and_interact(page, acc_id, cfg, state, human, session_secs, session_start, acc=acc)
-        save_state(acc_id, state)  # حفظ تقدم الجلسة بعد التصفح (حماية من الانهيار)
+        save_state(acc_id, state)
 
         # 2) نشاط الكريبتو اليومي: تصفح بحث + متابعات بطيئة للمهتمين
         remaining = max(0, int(session_secs - (time.time() - session_start)))
         if not monitor.priority_pending(acc_id):
             crypto_activity(page, acc_id, cfg, state, human, max(120, min(remaining, 900)))
-        save_state(acc_id, state)  # حفظ تقدم الكريبتو (لايك/متابعات)
+        save_state(acc_id, state)
 
         # 3) تنفيذ مهام المدير المستحقة لهذا الحساب
         _run_due_manager_tasks(page, acc_id, cfg, state, human, acc=acc)
@@ -203,7 +205,7 @@ def _run_session(acc_id, cfg, accounts, dry_run=False):
                 ctx.close()
             except Exception:
                 pass
-        if pw is not None:   # أنشأناه محلياً: يجب إيقافه دائماً وإلا يتسرّب ويفشل كل استدعاء لاحق (Sync API inside the asyncio loop)
+        if pw is not None:
             try:
                 pw.stop()
             except Exception:
@@ -240,7 +242,9 @@ def _run_warmup(acc_id, cfg, accounts, dry_run=False):
     pw, ctx, page, pw_owned = None, None, None, False
     try:
         from playwright.sync_api import sync_playwright
+        from ._pw_cleanup import cleanup_asyncio_loop
 
+        cleanup_asyncio_loop()
         pw = sync_playwright().start()
         _, ctx, page, pw_owned = browser.launch_account(acc, cfg, pw=pw, owned_pw=False)
         human.page = page
@@ -260,7 +264,6 @@ def _run_warmup(acc_id, cfg, accounts, dry_run=False):
         minutes = cfg.get("warmup", {}).get("session_minutes", [8, 15])
         budget_s = randint(minutes[0], minutes[1]) * 60
 
-        # تصفح خفيف للرئيسية ثم نشاط كريبتو (بحث + متابعات بطيئة)
         scroll_home(page, human, steps=randint(1, 2))
         human.mouse_wander(page)
         crypto_activity(page, acc_id, cfg, state, human, budget_s)
@@ -280,7 +283,7 @@ def _run_warmup(acc_id, cfg, accounts, dry_run=False):
                 ctx.close()
             except Exception:
                 pass
-        if pw is not None:   # أنشأناه محلياً: يجب إيقافه دائماً وإلا يتسرّب ويفشل كل استدعاء لاحق (Sync API inside the asyncio loop)
+        if pw is not None:
             try:
                 pw.stop()
             except Exception:
@@ -628,6 +631,8 @@ def run_priority_session(acc_id, cfg, accounts, dry_run=False):
         if dry_run:
             return True
         from playwright.sync_api import sync_playwright
+        from ._pw_cleanup import cleanup_asyncio_loop
+        cleanup_asyncio_loop()
         pw = sync_playwright().start()
         _, ctx, page, _ = browser.launch_account(acc, cfg, pw=pw, owned_pw=False)
         human.page = page

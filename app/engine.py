@@ -85,11 +85,20 @@ class Engine:
             log.info("بدء المحرك" + (" (وضع المحاكاة)" if dry_run else ""))
             return True
 
-    def _respawn(self):
+    def _respawn(self, delay=0):
         """يستبدل خيط الحلقة الرئيسية بخيط جديد (الخيط الجديد بلا نسخ Playwright عالقة)."""
-        with self._lock:
-            self._thread = threading.Thread(target=self._run, name="engine", daemon=True)
-            self._thread.start()
+        def _delayed_start():
+            if delay and not self._stop.wait(delay):
+                pass
+            with self._lock:
+                self._thread = threading.Thread(target=self._run, name="engine", daemon=True)
+                self._thread.start()
+        if delay:
+            threading.Thread(target=_delayed_start, daemon=True).start()
+        else:
+            with self._lock:
+                self._thread = threading.Thread(target=self._run, name="engine", daemon=True)
+                self._thread.start()
 
     def stop(self, wait=0):
         """يطلب الإيقاف؛ تنتهي الجلسة الجارية أولاً حتى لا يُقطع متصفح في منتصف عملية."""
@@ -237,7 +246,11 @@ class Engine:
                 cfg, accounts = load_config(), load_accounts()
                 now = time.time()
                 if cfg.get("manager_handle") and now >= self.next_manager_check:
-                    tweets, status = monitor.fetch_manager_tweets(cfg, accounts, dry_run=self.dry_run)
+                    try:
+                        tweets, status = monitor.fetch_manager_tweets(cfg, accounts, dry_run=self.dry_run)
+                    except Exception as fe:
+                        tweets, status = [], "error:{}".format(str(fe)[:100])
+                        log.warning("تعذّر فحص المدير: {}".format(fe))
                     log.info("فحص المدير: {} | جديد: {}".format(status, len(tweets)))
                     seen = load_seen()
                     ch = cfg["telegram"]["channel"]
@@ -267,9 +280,8 @@ class Engine:
                 self.last_error = str(e)[:200]
                 log.error("خطأ في دورة المحرك: {}".format(e))
                 if is_loop_leak(e) and not self._stop.is_set():
-                    # Playwright عالق في هذا الخيط (نسخة لم تُغلق): لا علاج داخله، نبدأ خيطاً جديداً نظيفاً
-                    log.warning("إعادة تشغيل خيط المحرك بسبب خطأ Playwright العالق")
-                    self._respawn()
+                    log.warning("إعادة تشغيل خيط المحرك بعد 30 ثانية بسبب خطأ Playwright العالق")
+                    self._respawn(delay=30)
                     return
             self.cycles += 1
             self.last_cycle = time.time()
