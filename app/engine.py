@@ -13,6 +13,14 @@ log = get_logger("engine")
 TICK_S = 60
 
 
+_LOOP_LEAK_SIGNS = ("Sync API inside the asyncio loop", "asyncio loop")
+
+
+def is_loop_leak(err):
+    """خطأ Playwright الشهير عند بقاء نسخة sync غير مغلقة في نفس الخيط."""
+    return any(s.lower() in str(err).lower() for s in _LOOP_LEAK_SIGNS)
+
+
 class Engine:
     def __init__(self):
         self._thread = None
@@ -76,6 +84,12 @@ class Engine:
             self._check_thread.start()
             log.info("بدء المحرك" + (" (وضع المحاكاة)" if dry_run else ""))
             return True
+
+    def _respawn(self):
+        """يستبدل خيط الحلقة الرئيسية بخيط جديد (الخيط الجديد بلا نسخ Playwright عالقة)."""
+        with self._lock:
+            self._thread = threading.Thread(target=self._run, name="engine", daemon=True)
+            self._thread.start()
 
     def stop(self, wait=0):
         """يطلب الإيقاف؛ تنتهي الجلسة الجارية أولاً حتى لا يُقطع متصفح في منتصف عملية."""
@@ -252,6 +266,11 @@ class Engine:
             except Exception as e:
                 self.last_error = str(e)[:200]
                 log.error("خطأ في دورة المحرك: {}".format(e))
+                if is_loop_leak(e) and not self._stop.is_set():
+                    # Playwright عالق في هذا الخيط (نسخة لم تُغلق): لا علاج داخله، نبدأ خيطاً جديداً نظيفاً
+                    log.warning("إعادة تشغيل خيط المحرك بسبب خطأ Playwright العالق")
+                    self._respawn()
+                    return
             self.cycles += 1
             self.last_cycle = time.time()
             self._stop.wait(TICK_S)

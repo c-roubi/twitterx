@@ -1438,5 +1438,62 @@ class DailySummaryTests(unittest.TestCase):
             m.parse_value("time", "24:00")
 
 
+class PlaywrightLeakTests(unittest.TestCase):
+    """سبب خطأ «Sync API inside the asyncio loop»: نسخة Playwright المحلية كانت لا تُغلق بعد كل جلسة."""
+
+    def setUp(self):
+        from unittest import mock
+        from app import config, routine
+        self.routine, self.config = routine, config
+        self.mock = mock
+        config.save_accounts({"lk1": {"handle": "leak", "enabled": True}})
+        self.cfg = config.load_config()
+        self.pw = mock.MagicMock()
+        self.ctx = mock.MagicMock()
+        fake_module = mock.MagicMock()
+        fake_module.sync_playwright.return_value.start.return_value = self.pw
+        self.patches = [mock.patch.dict("sys.modules", {"playwright.sync_api": fake_module}),
+                        mock.patch.object(routine, "save_state")]
+        for p in self.patches:
+            p.start()
+            self.addCleanup(p.stop)
+
+    def test_session_stops_playwright_on_early_return(self):
+        with self.mock.patch.object(self.routine.browser, "launch_account", return_value=(self.pw, self.ctx, self.mock.MagicMock(), False)), \
+             self.mock.patch.object(self.routine.resilience, "goto_with_retry", return_value=(False, "network")):
+            self.routine._run_session("lk1", self.cfg, self.config.load_accounts())
+        self.pw.stop.assert_called_once()
+        self.ctx.close.assert_called_once()
+
+    def test_session_stops_playwright_when_launch_fails(self):
+        with self.mock.patch.object(self.routine.browser, "launch_account", side_effect=RuntimeError("boom")):
+            self.routine._run_session("lk1", self.cfg, self.config.load_accounts())
+        self.pw.stop.assert_called_once()
+
+    def test_warmup_stops_playwright_even_on_error(self):
+        with self.mock.patch.object(self.routine.browser, "launch_account", side_effect=RuntimeError("boom")):
+            self.routine._run_warmup("lk1", self.cfg, self.config.load_accounts())
+        self.pw.stop.assert_called_once()
+
+    def test_priority_session_stops_playwright(self):
+        with self.mock.patch.object(self.routine.browser, "launch_account", return_value=(self.pw, self.ctx, self.mock.MagicMock(), False)), \
+             self.mock.patch.object(self.routine, "_run_due_manager_tasks"):
+            self.routine.run_priority_session("lk1", self.cfg, self.config.load_accounts())
+        self.pw.stop.assert_called_once()
+
+    def test_engine_detects_leak_error_and_respawns_thread(self):
+        from app import engine as eng
+        self.assertTrue(eng.is_loop_leak(RuntimeError("It looks like you are using Playwright Sync API inside the asyncio loop. Please use the Async API instead.")))
+        self.assertFalse(eng.is_loop_leak(RuntimeError("timeout")))
+        e = eng.Engine()
+        started = []
+        e._run = lambda: started.append(threading.current_thread().name)
+        old = e._thread
+        e._respawn()
+        e._thread.join(2)
+        self.assertIsNot(e._thread, old)
+        self.assertEqual(started, ["engine"])
+
+
 if __name__ == "__main__":
     unittest.main()

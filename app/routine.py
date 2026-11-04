@@ -197,22 +197,18 @@ def _run_session(acc_id, cfg, accounts, dry_run=False):
                 save_state(acc_id, state)
             except Exception:
                 pass
-        if pw_owned:
-            try:
-                pw.stop()
-            except Exception:
-                pass
     finally:
         if ctx is not None:
             try:
                 ctx.close()
             except Exception:
                 pass
-        if pw_owned:
+        if pw is not None:   # أنشأناه محلياً: يجب إيقافه دائماً وإلا يتسرّب ويفشل كل استدعاء لاحق (Sync API inside the asyncio loop)
             try:
                 pw.stop()
             except Exception:
                 pass
+            pw = None
 
 
 def run_warmup(acc_id, cfg, accounts, dry_run=False):
@@ -284,11 +280,12 @@ def _run_warmup(acc_id, cfg, accounts, dry_run=False):
                 ctx.close()
             except Exception:
                 pass
-        if pw_owned:
+        if pw is not None:   # أنشأناه محلياً: يجب إيقافه دائماً وإلا يتسرّب ويفشل كل استدعاء لاحق (Sync API inside the asyncio loop)
             try:
                 pw.stop()
             except Exception:
                 pass
+            pw = None
 
 
 def warmup_due(state, cfg=None):
