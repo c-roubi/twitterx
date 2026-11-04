@@ -18,7 +18,7 @@ from urllib.parse import urlparse
 from . import summary, telegram_bot, telegram_menu, warp
 from .config import (
     COMMENTS_PATH, DEFAULT_CONFIG, LOGS_DIR, PROFILES_DIR, SESSIONS_DIR, STATE_DIR,
-    _atomic_save, _deep_merge, ensure_initial_files, load_accounts, load_config,
+    _atomic_save, _deep_merge, clear_relogin, ensure_initial_files, load_accounts, load_config,
     load_seen, load_state, save_accounts, save_config, save_seen, state_path,
 )
 from .engine import Engine
@@ -152,8 +152,9 @@ def masked_config(cfg):
 # مهمة تسجيل الدخول
 # ---------------------------------------------------------------------------
 class LoginJob:
-    def __init__(self, acc_id):
+    def __init__(self, acc_id, release=None):
         self.acc_id, self.status, self.error = acc_id, "starting", ""
+        self._release = release          # يحرّر قفل الحساب (حتى لا تعمل جلسة المحرك على نفس البروفايل أثناء الدخول)
         self._go = threading.Event()
         self._cancel = False
 
@@ -173,12 +174,17 @@ class LoginJob:
         try:
             from .browser import login_account
             ok = login_account(account, cfg, confirm=self._wait, on_status=lambda s: setattr(self, "status", s))
+            if ok:
+                clear_relogin(self.acc_id)   # قبل إعلان النجاح: لا تبقَ علامة قديمة تظهر للواجهة
             self.status = "done" if ok else ("cancelled" if self._cancel else "failed")
             if self.status == "failed":
                 self.error = "لم يُرصد تسجيل الدخول - تأكد من الوصول للصفحة الرئيسية ثم أعد المحاولة"
         except Exception as e:
             self.status, self.error = "failed", str(e)[:200]
             log.error("فشل تسجيل الدخول {}: {}".format(self.acc_id, e))
+        finally:
+            if self._release:
+                self._release()
 
     def active(self):
         return self.status in ("starting", "waiting_user", "saving")
@@ -479,9 +485,16 @@ class AppService:
                 import playwright  # noqa: F401
             except Exception:
                 raise ApiError("مكتبة playwright غير مثبّتة", 500)
-            job = LoginJob(aid)
+            from . import routine
+            if not routine._acquire(aid):
+                raise ApiError("هذا الحساب في جلسة تعمل الآن (يستخدم نفس المتصفح). أوقف المحرك أو انتظر انتهاء الجلسة ثم أعد المحاولة")
+            job = LoginJob(aid, release=lambda: routine._release(aid))
             acc = dict(accounts[aid], id=aid)
-            threading.Thread(target=job.run, args=(acc, load_config()), name="login", daemon=True).start()
+            try:
+                threading.Thread(target=job.run, args=(acc, load_config()), name="login", daemon=True).start()
+            except Exception:
+                routine._release(aid)
+                raise
             self.login = job
         return job.info()
 

@@ -6,7 +6,7 @@ import time
 from playwright.sync_api import sync_playwright
 
 from . import overlays, proxies, selectors, warp
-from .config import PROFILES_DIR, SESSIONS_DIR
+from .config import PROFILES_DIR, SESSIONS_DIR, clear_relogin
 from .humanizer import fingerprint_for, Human
 from .logger import get_logger
 
@@ -279,6 +279,8 @@ def login_account(account, cfg, confirm=None, on_status=None):
         os.makedirs(SESSIONS_DIR, exist_ok=True)
         context.storage_state(path=state_path)
         log.info("{} | تم حفظ الجلسة".format(acc_id))
+        if clear_relogin(acc_id):
+            log.info("{} | أُزيلت علامة «يحتاج إعادة دخول»".format(acc_id))
         print(f"✓ تم حفظ الجلسة للحساب {acc_id} في {state_path}")
         return True
     finally:

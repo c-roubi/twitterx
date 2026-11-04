@@ -1495,5 +1495,87 @@ class PlaywrightLeakTests(unittest.TestCase):
         self.assertEqual(started, ["engine"])
 
 
+class ReloginTests(unittest.TestCase):
+    """بعد تسجيل دخول ناجح يجب أن تزول علامة «يحتاج إعادة دخول» فوراً ويعود الحساب للعمل."""
+
+    def setUp(self):
+        from app import config
+        self.config = config
+        self.svc = server.AppService()
+        self.acc = self.svc.add_account({"handle": "relog_acc"})["id"]
+        self.addCleanup(self.svc.delete_account, self.acc)
+        os.makedirs(config.SESSIONS_DIR, exist_ok=True)
+        with open(os.path.join(config.SESSIONS_DIR, self.acc + ".json"), "w") as f:
+            f.write("{}")
+        config.save_state(self.acc, {"date": "2000-01-01", "needs_relogin": True, "last_session_crash": 123.0, "done": {}})
+
+    def view(self):
+        return self.svc.account_view(self.acc, self.config.load_accounts()[self.acc])
+
+    def test_clear_relogin_helper(self):
+        self.assertTrue(self.view()["needs_relogin"])
+        self.assertTrue(self.config.clear_relogin(self.acc))
+        self.assertFalse(self.view()["needs_relogin"])
+        self.assertNotIn("last_session_crash", self.config.load_state(self.acc))
+        self.assertFalse(self.config.clear_relogin(self.acc))            # لا شيء للمسح بعد الآن
+
+    def test_successful_login_job_clears_flag_and_releases_lock(self):
+        import time
+        from unittest import mock
+        from app import routine
+        released = []
+        with mock.patch("app.browser.login_account", return_value=True):
+            job = server.LoginJob(self.acc, release=lambda: released.append(1))
+            job.run({"id": self.acc, "handle": "relog_acc"}, self.config.load_config())
+        self.assertEqual(job.status, "done")
+        self.assertFalse(self.view()["needs_relogin"])
+        self.assertEqual(released, [1])
+
+    def test_failed_or_cancelled_login_keeps_flag_but_releases_lock(self):
+        from unittest import mock
+        released = []
+        with mock.patch("app.browser.login_account", return_value=False):
+            job = server.LoginJob(self.acc, release=lambda: released.append(1))
+            job.run({"id": self.acc, "handle": "relog_acc"}, self.config.load_config())
+        self.assertEqual(job.status, "failed")
+        self.assertTrue(self.view()["needs_relogin"])
+        self.assertEqual(released, [1])
+        with mock.patch("app.browser.login_account", side_effect=RuntimeError("boom")):
+            job = server.LoginJob(self.acc, release=lambda: released.append(2))
+            job.run({"id": self.acc}, self.config.load_config())
+        self.assertEqual(released, [1, 2])                                # يُحرَّر القفل حتى عند الاستثناء
+
+    def test_login_refused_while_account_session_is_running(self):
+        from app import routine
+        self.assertTrue(routine._acquire(self.acc))                       # جلسة تعمل على نفس البروفايل
+        try:
+            with self.assertRaises(server.ApiError) as c:
+                self.svc.start_login(self.acc)
+            self.assertIn("جلسة تعمل", str(c.exception))
+        finally:
+            routine._release(self.acc)
+
+    def test_start_login_end_to_end_clears_flag(self):
+        import time
+        from unittest import mock
+        from app import routine
+        with mock.patch("app.browser.login_account", return_value=True):
+            self.svc.start_login(self.acc)
+            for _ in range(40):
+                if self.svc.login.status == "done":
+                    break
+                time.sleep(0.05)
+        self.assertEqual(self.svc.login.status, "done")
+        self.assertFalse(self.view()["needs_relogin"])
+        self.assertTrue(routine._acquire(self.acc))                       # القفل حُرّر بعد الانتهاء
+        routine._release(self.acc)
+
+    def test_instant_tweets_include_account_after_relogin(self):
+        """علامة قديمة كانت تُخرج الحساب من التغريدات الفورية والإحصاءات."""
+        before = self.svc.state()["stats"]["ready"]
+        self.config.clear_relogin(self.acc)
+        self.assertEqual(self.svc.state()["stats"]["ready"], before + 1)
+
+
 if __name__ == "__main__":
     unittest.main()

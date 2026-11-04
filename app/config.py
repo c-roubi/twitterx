@@ -304,5 +304,16 @@ def save_state(acc_id, state):
     _atomic_save(state, state_path(acc_id))
 
 
+def clear_relogin(acc_id):
+    """بعد تسجيل دخول ناجح: أزل علامة «يحتاج إعادة دخول» (وتبريد انهيار الجلسة) حتى يعود الحساب للعمل فوراً."""
+    st = load_state(acc_id)
+    if st.get("needs_relogin") or st.get("last_session_crash"):
+        st["needs_relogin"] = False
+        st.pop("last_session_crash", None)
+        save_state(acc_id, st)
+        return True
+    return False
+
+
 def enabled_accounts(accounts):
     return [aid for aid, a in accounts.items() if a.get("enabled", True)]
