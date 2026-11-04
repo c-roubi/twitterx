@@ -6,6 +6,8 @@
 والربط يتم برمز لمرة واحدة يُنشأ من الواجهة (/pair CODE) وينتهي بعد 10 دقائق.
 """
 import copy
+import hashlib
+import html as _html
 import json
 import os
 import re
@@ -18,6 +20,7 @@ import urllib.parse
 import urllib.request
 
 from . import net as _net
+from .config import DATA_DIR, _atomic_save
 from .logger import get_logger
 
 log = get_logger("telegram")
@@ -47,6 +50,43 @@ def strip_links(text):
 
 
 ssl_context = _net.ssl_context  # للتوافق مع الاستخدامات السابقة
+
+
+OFFSET_PATH = os.path.join(DATA_DIR, "tg_offset.json")
+MAX_MSG = 4000   # حد تيليجرام 4096
+
+
+def _tok_fp(token):
+    return hashlib.sha1((token or "").encode("utf-8")).hexdigest()[:10]
+
+
+def _load_offset(token):
+    try:
+        with open(OFFSET_PATH, encoding="utf-8") as f:
+            v = (json.load(f) or {}).get(_tok_fp(token))
+        return int(v) if v else None
+    except (OSError, ValueError, TypeError):
+        return None
+
+
+def _save_offset(token, offset):
+    """نحفظ آخر تحديث عولج: بعد إعادة تشغيل التطبيق لا تُعاد معالجة أوامر قديمة (مثل تبديل إعداد مرتين)."""
+    try:
+        try:
+            with open(OFFSET_PATH, encoding="utf-8") as f:
+                data = json.load(f) or {}
+        except (OSError, ValueError):
+            data = {}
+        data[_tok_fp(token)] = int(offset)
+        os.makedirs(os.path.dirname(OFFSET_PATH), exist_ok=True)
+        _atomic_save(data, OFFSET_PATH)
+    except OSError:
+        pass
+
+
+def _plain(text):
+    """نسخة نصية بلا وسوم HTML (للإرسال البديل إن رفض تيليجرام التنسيق)."""
+    return _html.unescape(re.sub(r"<[^>]+>", "", text or ""))
 
 
 def valid_token(token):
@@ -123,24 +163,40 @@ class TelegramBot:
     def send(self, chat_id, text, markup=None):
         if self._send_override:
             return self._send_override(chat_id, text, markup)
+        text = (text or "")[:MAX_MSG]
         params = {"chat_id": chat_id, "text": text, "parse_mode": "HTML", "disable_web_page_preview": "true"}
         kb = _kb(markup)
         if kb:
             params["reply_markup"] = kb
-        try:
-            return self._api("sendMessage", params, timeout=15).get("message_id")
-        except Exception as e:
-            log.warning("تعذّر إرسال رد تيليجرام: {}".format(e))
+        return self._deliver("sendMessage", params, lambda r: r.get("message_id"))
+
+    def _deliver(self, method, params, pick=lambda r: r):
+        """يرسل/يعدّل مع معالجة الأعطال الشائعة: تنسيق HTML مرفوض ← نص عادي، وازدحام 429 ← انتظار قصير ثم إعادة."""
+        for attempt in range(3):
+            try:
+                return pick(self._api(method, params, timeout=15))
+            except Exception as e:
+                msg = str(e)
+                if "not modified" in msg:
+                    return None
+                if "parse entities" in msg and params.get("parse_mode"):
+                    params = dict(params, text=_plain(params["text"])[:MAX_MSG])
+                    params.pop("parse_mode", None)
+                    continue
+                m = re.search(r"retry after (\d+)", msg)
+                if m and int(m.group(1)) <= 10 and attempt < 2:
+                    time.sleep(int(m.group(1)) + 0.5)
+                    continue
+                log.warning("تعذّر {} في تيليجرام: {}".format("الإرسال" if method == "sendMessage" else "التعديل", msg))
+                return None
+        return None
 
     def edit(self, chat_id, message_id, text, markup=None):
         params = {"chat_id": chat_id, "message_id": message_id, "text": text, "parse_mode": "HTML", "disable_web_page_preview": "true"}
+        params["text"] = (text or "")[:MAX_MSG]
         kb = _kb(markup)
         params["reply_markup"] = kb if kb else json.dumps({"inline_keyboard": []})
-        try:
-            self._api("editMessageText", params, timeout=15)
-        except Exception as e:
-            if "not modified" not in str(e):
-                log.warning("تعذّر تعديل رسالة تيليجرام: {}".format(e))
+        self._deliver("editMessageText", params)
 
     def answer(self, cb_id, text=""):
         try:
@@ -223,8 +279,8 @@ class TelegramBot:
                 self.ui.cancel(chat_id)
                 return [Reply("تم الإلغاء."), self._view(self.ui.home())]
             if self.ui.has_pending(chat_id):
-                if text.startswith("/"):
-                    self.ui.cancel(chat_id)  # أمر جديد يلغي الإدخال المعلّق
+                if text.startswith("/") or extract_tweet_ids(text):
+                    self.ui.cancel(chat_id)  # أمر أو رابط تغريدة جديد يلغي الإدخال المعلّق (لا يُحفظ الرابط ككلمة مفتاحية)
                 else:
                     v = self.ui.on_text(chat_id, text)
                     if v:
@@ -353,6 +409,11 @@ class TelegramBot:
         if wanted != cid:
             self._chan_event(cid, title, "تُجوهل: هذه قناة أخرى (المعتمدة {})".format(wanted))
             return "ignored"
+        age_min = (time.time() - float(post.get("date") or time.time())) / 60.0
+        limit = max(5.0, float(ch.get("max_age_min", 30) or 30))
+        if age_min > limit:   # وصل متأخراً (التطبيق كان مغلقاً): لا ننفّذ تفاعلاً مع منشور قديم
+            self._chan_event(cid, title, "تُجوهل: المنشور قديم (قبل {} دقيقة) - وصل متأخراً".format(int(age_min)))
+            return "stale"
         text = post.get("text") or post.get("caption") or ""
         ents = (post.get("entities") or []) + (post.get("caption_entities") or [])
         urls = " ".join(e.get("url", "") for e in ents if e.get("type") == "text_link")
@@ -456,6 +517,28 @@ class TelegramBot:
     def running(self):
         return bool(self._thread and self._thread.is_alive() and not self._stop.is_set())
 
+    def _process_update(self, upd):
+        """معالجة تحديث واحد. أي استثناء هنا لا يوقف الحلقة: نُبلغ صاحب الرسالة ونكمل."""
+        post = upd.get("channel_post")
+        if post:
+            self.handle_channel_post(post)
+            return
+        cq = upd.get("callback_query")
+        if cq and cq.get("message"):
+            self.handle_callback(cq["message"]["chat"]["id"], cq["message"]["message_id"], cq["id"], cq.get("data", ""))
+            return
+        msg = upd.get("message") or {}
+        if msg.get("chat", {}).get("type") == "private" and (msg.get("forward_origin") or msg.get("forward_from_chat") or msg.get("forward_date")):
+            r = self.handle_forward(msg["chat"]["id"], msg)
+            if r:
+                self.send(msg["chat"]["id"], str(r), r.markup)
+            return
+        if msg.get("chat", {}).get("type") != "private" or "text" not in msg:
+            return
+        who = (msg.get("from") or {}).get("username", "")
+        for r in self.handle_message(msg["chat"]["id"], msg["text"], who):
+            self.send(msg["chat"]["id"], str(r), r.markup)
+
     def _loop(self):
         offset = None
         token_used = None
@@ -471,7 +554,11 @@ class TelegramBot:
                 if token != token_used:
                     me = self._api("getMe", timeout=15)
                     self.username = me.get("username", "")
-                    token_used, offset = token, None
+                    try:  # بوت كان عليه webhook (مشروع آخر): getUpdates يفشل بـ409 حتى يُحذف
+                        self._api("deleteWebhook", {"drop_pending_updates": "false"}, timeout=15)
+                    except Exception as e:
+                        log.debug("deleteWebhook: {}".format(e))
+                    token_used, offset = token, _load_offset(token)
                     log.info("بوت تيليجرام يعمل: @{}".format(self.username))
                     try:
                         self._api("setMyCommands", {"commands": json.dumps([{"command": c, "description": d} for c, d in COMMANDS], ensure_ascii=False)}, timeout=15)
@@ -483,28 +570,14 @@ class TelegramBot:
                     params["offset"] = offset
                 for upd in self._api("getUpdates", params, timeout=25):
                     offset = upd["update_id"] + 1
-                    post = upd.get("channel_post")
-                    if post:
-                        try:
-                            self.handle_channel_post(post)
-                        except Exception:
-                            log.exception("خطأ في معالجة منشور القناة")
-                        continue
-                    cq = upd.get("callback_query")
-                    if cq and cq.get("message"):
-                        self.handle_callback(cq["message"]["chat"]["id"], cq["message"]["message_id"], cq["id"], cq.get("data", ""))
-                        continue
-                    msg = upd.get("message") or {}
-                    if msg.get("chat", {}).get("type") == "private" and (msg.get("forward_origin") or msg.get("forward_from_chat") or msg.get("forward_date")):
-                        r = self.handle_forward(msg["chat"]["id"], msg)
-                        if r:
-                            self.send(msg["chat"]["id"], str(r), r.markup)
-                        continue
-                    if msg.get("chat", {}).get("type") != "private" or "text" not in msg:
-                        continue
-                    who = (msg.get("from") or {}).get("username", "")
-                    for r in self.handle_message(msg["chat"]["id"], msg["text"], who):
-                        self.send(msg["chat"]["id"], str(r), r.markup)
+                    try:
+                        self._process_update(upd)
+                    except Exception as e:
+                        log.exception("خطأ في معالجة تحديث تيليجرام")
+                        cid = ((upd.get("message") or {}).get("chat") or {}).get("id")
+                        if cid is not None and self._is_admin(cid):
+                            self.send(cid, "⚠️ حدث خطأ داخلي أثناء تنفيذ طلبك: {}".format(str(e)[:150].replace("<", "&lt;")))
+                    _save_offset(token, offset)
                 self.send_notices()
                 if self.daily_hook:
                     try:
@@ -514,6 +587,11 @@ class TelegramBot:
             except Exception as e:
                 self.state, self.error = "error", str(e)[:160]
                 log.warning("خطأ بوت تيليجرام: {}".format(e))
+                if "Conflict" in str(e) and "webhook" in str(e).lower():
+                    try:
+                        self._api("deleteWebhook", {"drop_pending_updates": "false"}, timeout=15)
+                    except Exception:
+                        pass
                 token_used = None if "Unauthorized" in str(e) else token_used
                 self._stop.wait(backoff)
                 backoff = min(backoff * 2, 60)

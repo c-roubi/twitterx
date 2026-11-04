@@ -676,7 +676,7 @@ PAGES.telegram = {
   },
   update() {
     const st = S.state.telegram, chip = $("#tg-chip"); if (!chip) return;
-    chip.innerHTML = !st.enabled ? '<span class="chip">معطّل</span>' : st.state === "running" ? `<span class="chip ok">متصل · @${esc(st.username)}</span>` : st.state === "error" ? `<span class="chip err" title="${esc(st.error)}">خطأ في الاتصال</span>` : '<span class="chip warn">جارٍ الاتصال…</span>';
+    chip.innerHTML = !st.enabled ? '<span class="chip">معطّل</span>' : st.state === "running" ? `<span class="chip ok">متصل · @${esc(st.username)}</span>` : st.state === "error" ? `<span class="chip err" title="${esc(st.error)}">خطأ: ${esc((st.error || "في الاتصال").slice(0, 60))}</span>` : '<span class="chip warn">جارٍ الاتصال…</span>';
     $("#tg-admins").innerHTML = st.admins.length ? `<div class="lbl">الأدمن المربوطون</div>` + st.admins.map(id => `<div class="row"><span class="chip ok">${ic("check", "sm")}<span class="num">${id}</span></span><button class="btn subtle icon" data-act="tg-unlink" data-id="${id}" title="إلغاء الربط" aria-label="إلغاء الربط">${ic("x", "sm")}</button></div>`).join("") : '<div class="hint">لا يوجد أدمن مربوط بعد.</div>';
     $("#s2").classList.toggle("done", st.admins.length > 0);
     $("#s1").classList.toggle("done", st.configured);
