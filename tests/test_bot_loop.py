@@ -42,7 +42,7 @@ class BotLoopTests(unittest.TestCase):
         self.addCleanup(self.svc.delete_account, self.acc)
         self.svc.bot.engine_running = lambda: True
         self.svc.bot.start()
-        self.addCleanup(self.svc.bot.stop)
+        self.addCleanup(lambda: self.svc.bot.stop(join_timeout=3))
 
     def msg(self, text, chat=5, **extra):
         self.fake.push(message=dict({"chat": {"id": chat, "type": "private"}, "text": text, "from": {"username": "u"}}, **extra))
@@ -113,7 +113,7 @@ class BotLoopTests(unittest.TestCase):
         self.svc.bot.stop()
         self.fake.webhook_active = True
         bot2 = server.AppService().bot
-        self.addCleanup(bot2.stop)
+        self.addCleanup(lambda: bot2.stop(join_timeout=3))
         bot2.start()
         self.msg("/status")
         self.assertTrue(self.fake.wait_for(lambda: self.fake.sent("sendMessage"), 8))
@@ -162,7 +162,7 @@ class BotLoopTests(unittest.TestCase):
         time.sleep(0.4)
         n = len(self.fake.sent("sendMessage"))
         bot2 = server.AppService().bot
-        self.addCleanup(bot2.stop)
+        self.addCleanup(lambda: bot2.stop(join_timeout=3))
         bot2.start()
         time.sleep(2.2)
         self.assertEqual(len(self.fake.sent("sendMessage")), n)
@@ -174,7 +174,7 @@ class BotLoopTests(unittest.TestCase):
         cfg = config.load_config(); cfg["telegram"]["enabled"] = False; config.save_config(cfg)
         n = len(self.fake.sent("getUpdates"))
         bot2 = server.AppService().bot
-        self.addCleanup(bot2.stop)
+        self.addCleanup(lambda: bot2.stop(join_timeout=3))
         bot2.start()
         time.sleep(1.5)
         self.assertEqual(len(self.fake.sent("getUpdates")), n)

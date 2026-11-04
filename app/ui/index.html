@@ -118,7 +118,7 @@ svg.i.fill{fill:currentColor;stroke:none}
 .hero{display:flex;align-items:center;gap:20px;padding:22px 24px;background:linear-gradient(120deg,#fff 40%,#eef5fc)}
 .hero .big{font-size:20px;font-weight:600;display:flex;align-items:center;gap:10px}
 .hero .grow{flex:1}
-.tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+.tiles{display:grid;grid-template-columns:repeat(5,1fr);gap:12px}
 .tile{padding:16px 18px}
 .tile .v{font-size:32px;line-height:40px;font-weight:600;letter-spacing:-.5px}
 .tile .l{color:var(--text-2);font-size:13px;display:flex;align-items:center;gap:8px}
@@ -518,7 +518,7 @@ PAGES.home = {
       ${run || stopping ? `<button class="btn lg" data-act="engine-stop" ${stopping ? "disabled" : ""}>${ic("stop", "sm")}إيقاف</button>`
         : `<button class="btn lg" data-act="engine-dry" title="يعمل بدون فتح متصفح أو تنفيذ أي تفاعل">${ic("flask", "sm")}محاكاة</button><button class="btn accent lg" data-act="engine-start">${ic("play", "sm")}تشغيل</button>`}`;
     const s = st.stats;
-    $("#tiles").innerHTML = [["users", "الحسابات المفعّلة", `${s.enabled}`, `من ${s.accounts}`], ["shield", "حسابات جاهزة", s.ready, "مسجّلة الدخول"], ["list", "عمليات معلّقة", s.pending, "بانتظار التنفيذ"], ["tweet", "تغريدات", s.tweets, "في السجل"]]
+    $("#tiles").innerHTML = [["users", "الحسابات المفعّلة", `${s.enabled}`, `من ${s.accounts}`], ["shield", "حسابات جاهزة", s.ready, "مسجّلة الدخول"], ["list", "عمليات معلّقة", s.pending, "بانتظار التنفيذ"], ["tweet", "تغريدات", s.tweets, "في السجل"], ["users", "مخزن المتابعة", s.pool ?? 0, "مرشّح جاهز"]]
       .map(([i, l, v, sub]) => `<div class="card tile"><div class="l">${ic(i, "sm")}${l}</div><div class="v num">${v}</div><div class="faint small">${sub}</div></div>`).join("");
     const w = [];
     if (!s.accounts) w.push(["info", "أضف أول حساب", "ابدأ بإضافة حساب تويتر ثم سجّل دخوله مرة واحدة.", '<a class="btn" href="#/accounts">الحسابات</a>']);

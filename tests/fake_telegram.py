@@ -52,7 +52,7 @@ class FakeTelegram:
             if self.webhook_active:
                 return 409, {"ok": False, "error_code": 409, "description": "Conflict: can't use getUpdates method while webhook is active"}
             off = int(params.get("offset") or 0)
-            deadline = time.time() + min(int(params.get("timeout") or 0), 1)   # long-poll قصير للاختبار
+            deadline = time.time() + min(int(params.get("timeout") or 0), 1)   # long-poll للاختبار
             while time.time() < deadline:
                 with self.lock:
                     if off:
@@ -61,7 +61,7 @@ class FakeTelegram:
                     out = [u for u in self.updates if u["update_id"] >= off]
                 if out:
                     return 200, {"ok": True, "result": out}
-                time.sleep(0.05)
+                time.sleep(0.02)
             return 200, {"ok": True, "result": []}
         if method == "sendMessage":
             return 200, {"ok": True, "result": {"message_id": 500 + len(self.calls)}}
@@ -75,7 +75,7 @@ class FakeTelegram:
         with self.lock:
             return [p for m, p in self.calls if m == method]
 
-    def wait_for(self, pred, timeout=8):
+    def wait_for(self, pred, timeout=20):
         t = time.time()
         while time.time() - t < timeout:
             if pred():

@@ -451,8 +451,9 @@ class TelegramBot:
     def _status_text(self):
         accounts = self.get_accounts()
         en = [a for a, v in accounts.items() if v.get("enabled", True)]
-        return "المحرك: {}\nالحسابات المفعّلة: {} / {}\nالتغريدات المستلمة عبر البوت: {}".format(
-            "يعمل ✅" if self.engine_running() else "متوقف ⏸", len(en), len(accounts), self.handled)
+        from . import harvest
+        return "المحرك: {}\nالحسابات المفعّلة: {} / {}\nالتغريدات المستلمة عبر البوت: {}\nمخزن المرشّحين للمتابعة: {}".format(
+            "يعمل ✅" if self.engine_running() else "متوقف ⏸", len(en), len(accounts), self.handled, harvest.pool_size())
 
     # ---------- الأزرار ----------
     def handle_callback(self, chat_id, message_id, cb_id, data):
@@ -510,9 +511,11 @@ class TelegramBot:
         self._thread = threading.Thread(target=self._loop, name="telegram-bot", daemon=True)
         self._thread.start()
 
-    def stop(self):
+    def stop(self, join_timeout=0):
         self._stop.set()
         self.state = "stopped"
+        if join_timeout and self._thread and self._thread.is_alive() and self._thread is not threading.current_thread():
+            self._thread.join(join_timeout)
 
     def running(self):
         return bool(self._thread and self._thread.is_alive() and not self._stop.is_set())

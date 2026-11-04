@@ -15,7 +15,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 
-from . import summary, telegram_bot, telegram_menu, warp
+from . import harvest, summary, telegram_bot, telegram_menu, warp
 from .config import (
     COMMENTS_PATH, DEFAULT_CONFIG, LOGS_DIR, PROFILES_DIR, SESSIONS_DIR, STATE_DIR,
     _atomic_save, _deep_merge, clear_relogin, ensure_initial_files, load_accounts, load_config,
@@ -389,6 +389,7 @@ class AppService:
                 "ready": sum(1 for v in views if v["enabled"] and v["has_session"] and not v["needs_relogin"]),
                 "pending": pending,
                 "tweets": len(tweets),
+                "pool": harvest.pool_size(),
             },
             "telegram": {
                 "enabled": tg["enabled"], "configured": telegram_bot.valid_token(tg["bot_token"]),

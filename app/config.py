@@ -74,6 +74,14 @@ DEFAULT_CONFIG = {
         "max_followers": 150000,
         "skip_verified": True,
         "visit_only_chance": 0.25,
+        "harvest": {
+            "enabled": True,
+            "min_reposts": 20,
+            "targets_per_session": [1, 2],
+            "per_target": 15,
+            "refill_below": 8,
+            "from_followers": True
+        },
         "queries": ["bitcoin", "crypto", "altcoins", "ethereum", "solana", "$BTC", "crypto trading", "#crypto", "diamond hands", "altseason"]
     },
     "warmup": {

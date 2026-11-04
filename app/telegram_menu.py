@@ -221,7 +221,8 @@ class BotUI:
         lines += ["👥 الحسابات: {} من {} مفعّلة".format(s["enabled"], s["accounts"]),
                   "🟢 جاهزة للعمل: {}".format(s["ready"]),
                   "📌 عمليات معلّقة: {}".format(s["pending"]),
-                  "🗂 تغريدات في السجل: {}".format(s["tweets"]), ""]
+                  "🗂 تغريدات في السجل: {}".format(s["tweets"]),
+                  "🌱 مخزن المرشّحين للمتابعة: {}".format(s.get("pool", 0)), ""]
         lines.append("📡 المصادر: " + ("المدير @{}".format(esc(st["manager_handle"])) if st["manager_handle"] else "المدير غير محدد") +
                      " · تيليجرام " + ("✅" if tg["state"] == "running" else "⏸"))
         return View("\n".join(lines), self._nav([("🔄 تحديث", "st"), HOME_BTN]))

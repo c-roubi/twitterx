@@ -13,7 +13,7 @@ from .browser import is_login_wall
 from .config import save_state
 from .humanizer import Human, randint
 from .logger import get_logger
-from . import resilience
+from . import harvest, resilience
 
 log = get_logger("grow")
 
@@ -115,6 +115,15 @@ def _follow_one(page, human, handle, cfg, state, acc_id):
         reason = "verified" if profile.get("verified") else (
             "no-bio" if not (profile.get("bio") or "").strip() else "followers-range")
         log.info(f"{acc_id} | تخطي @{handle}: غير مؤهل ({reason})")
+        harvest.mark_bad(handle, reason)   # لا يزوره حساب آخر شهراً
+        # حساب مؤثّر كبير؟ استفد منه: احصد بعض متابعيه بدل تخطّيه فقط
+        hv = f.get("harvest", {})
+        influencer = profile.get("verified") or (profile.get("followers", 0) or 0) > int(f.get("max_followers", 150000))
+        if hv.get("enabled", True) and hv.get("from_followers", True) and influencer and harvest.pool_size() < int(hv.get("refill_below", 8)) * 3:
+            try:
+                harvest.harvest_followers(page, human, handle, cfg)
+            except Exception:
+                pass
         return None, f"not-eligible:{reason}"
     human.mouse_wander(page)
     res, msg = follow_user(page, human, handle)
@@ -125,31 +134,52 @@ def _follow_one(page, human, handle, cfg, state, acc_id):
     return None, f"follow-failed:{msg}"
 
 
-def run_follow_pass(page, acc_id, cfg, state, human, max_follows):
-    """متابعات بطيئة وعشوائية: بحث أشخاص → فحص → متابعة، ضمن ميزانية اليوم."""
-    f = cfg.get("follow", {})
-    budget = follow_budget(state, cfg)
-    if budget <= 0 or max_follows <= 0:
-        return 0, "no-budget"
+def _search_candidates(page, acc_id, cfg, human, seen_users):
+    """الطريقة القديمة (احتياطية): بحث أشخاص f=user — يُستعمل فقط عند فراغ المخزن."""
     query = pick_query(cfg)
-    log.info(f"{acc_id} | بحث كريبتو للمتابعة: \"{query}\" (متبقي اليوم: {budget})")
+    log.info(f"{acc_id} | (احتياطي) بحث أشخاص: \"{query}\"")
     ok, gstatus = resilience.goto_with_retry(
         page, f"https://x.com/search?q={quote(query)}&f=user", cfg
     )
     if not ok:
-        log.warning(f"{acc_id} | تعذّر فتح بحث المتابعات: {gstatus}")
-        return 0, f"goto-error:{gstatus}"
+        return [], f"goto-error:{gstatus}"
     page.wait_for_timeout(3500)
     for _ in range(20):
         if page.locator(USER_CELL).first.count() > 0:
             break
         if is_login_wall(page):
-            return 0, "login-wall"
+            return [], "login-wall"
         page.wait_for_timeout(1000)
     human.pause(2.0, 5.0)
+    cands = find_candidates(page, human, seen_users=seen_users, limit=40)
+    random.shuffle(cands)
+    return cands, "ok"
+
+
+def run_follow_pass(page, acc_id, cfg, state, human, max_follows):
+    """متابعات بطيئة: من مخزن المرشّحين (المتفاعلين) أولاً، ثم حصاد للتعبئة، ثم بحث احتياطي."""
+    f = cfg.get("follow", {})
+    budget = follow_budget(state, cfg)
+    if budget <= 0 or max_follows <= 0:
+        return 0, "no-budget"
     seen_users = set(state.get("seen_users", []) or [])
-    candidates = find_candidates(page, human, seen_users=seen_users, limit=40)
-    random.shuffle(candidates)
+    exclude = seen_users | set(state.get("followed_handles", []) or [])
+    hv = f.get("harvest", {})
+    candidates = harvest.take_candidates(exclude=exclude, limit=40) if hv.get("enabled", True) else []
+    # المخزن منخفض؟ احصد الآن لتعبئته (معيدو تغريد تغريدات كريبتو شعبية)
+    if hv.get("enabled", True) and len(candidates) < int(hv.get("refill_below", 8)):
+        try:
+            harvest.run_harvest(page, acc_id, cfg, state, human, budget_s=120)
+        except Exception as e:
+            log.warning(f"{acc_id} | تعذّر الحصاد: {e}")
+        candidates = harvest.take_candidates(exclude=exclude, limit=40)
+    source = "pool"
+    if not candidates:   # لا مرشّحين بعد الحصاد: البحث الاحتياطي
+        candidates, st = _search_candidates(page, acc_id, cfg, human, seen_users)
+        source = "search"
+        if st in ("login-wall",):
+            return 0, st
+    log.info(f"{acc_id} | متابعة من {source}: {len(candidates)} مرشّح (متبقي اليوم: {budget}، المخزن: {harvest.pool_size()})")
     followed = 0
     lo_delay, hi_delay = (int(x) for x in f.get("delay_between_s", [90, 300]))
     for handle in candidates:
@@ -157,6 +187,7 @@ def run_follow_pass(page, acc_id, cfg, state, human, max_follows):
             break
         got, msg = _follow_one(page, human, handle, cfg, state, acc_id)
         seen_users.add(handle)
+        harvest.remove(handle)   # استُهلك من المخزن (تُوبع أو تبيّن أنه غير مؤهّل)
         if got:
             state.setdefault("followed_handles", []).append(handle)
             state["done"]["follows"] += 1
@@ -232,7 +263,14 @@ def crypto_activity(page, acc_id, cfg, state, human, budget_s):
     w = cfg.get("warmup", {})
     start = time.time()
     if w.get("browse_probability", 0.8) > random.random():
-        browse_crypto_search(page, acc_id, cfg, state, human, budget_s * 0.5, start)
+        browse_crypto_search(page, acc_id, cfg, state, human, budget_s * 0.4, start)
+    # حصاد مستمر: يملأ المخزن للجلسات القادمة حتى لو لم نتابع الآن
+    hv = f.get("harvest", {})
+    if hv.get("enabled", True) and harvest.pool_size() < int(hv.get("refill_below", 8)) * 4:
+        try:
+            harvest.run_harvest(page, acc_id, cfg, state, human, budget_s=min(120, budget_s * 0.3))
+        except Exception as e:
+            log.warning(f"{acc_id} | تعذّر الحصاد أثناء النشاط: {e}")
     if f.get("enabled", True) and follow_budget(state, cfg) > 0:
         per_session = f.get("per_session", [1, 3])
         run_follow_pass(page, acc_id, cfg, state, human, randint(*per_session))

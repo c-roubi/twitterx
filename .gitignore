@@ -9,3 +9,4 @@ data/daily_stats.json
 data/summary_sent.json
 data/ai_state.json
 data/tg_offset.json
+data/follow_pool.json
