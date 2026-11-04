@@ -15,7 +15,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 
-from . import harvest, summary, telegram_bot, telegram_menu, warp
+from . import harvest, summary, telegram_bot, telegram_menu, tz, warp
 from .config import (
     COMMENTS_PATH, DEFAULT_CONFIG, LOGS_DIR, PROFILES_DIR, SESSIONS_DIR, STATE_DIR,
     _atomic_save, _deep_merge, clear_relogin, ensure_initial_files, load_accounts, load_config,
@@ -130,7 +130,10 @@ def sanitize_config(incoming, current):
                 raise ApiError("القيمة خارج النطاق ({}–{}): {}".format(lo, hi, ".".join(path)))
     t = _get_path(clean, ("telegram", "daily_summary", "time"))
     if t != {} and not re.match(r"^([01]\d|2[0-3]):[0-5]\d$", str(t)):
-        raise ApiError("وقت الملخص اليومي بصيغة HH:MM (مثل 23:50)")
+        raise ApiError("وقت الملخص اليومي بصيغة HH:MM (مثل 00:30)")
+    zone = _get_path(clean, ("telegram", "daily_summary", "timezone"))
+    if zone != {} and not tz.valid(str(zone)):
+        raise ApiError("المنطقة الزمنية غير معروفة (مثال: Asia/Gaza). على ويندوز ثبّت tzdata: pip install tzdata")
     for path in (("engagement", "action_mix", "like"), ("engagement", "action_mix", "retweet"),
                  ("engagement", "action_mix", "comment"), ("behavior", "rest_day_chance"),
                  ("follow", "visit_only_chance"), ("warmup", "browse_probability"), ("comments", "en_ratio")):
@@ -618,7 +621,7 @@ class AppService:
             raise ApiError("تعذّر تحديد القناة: {}".format(e))
 
     def summary_text(self, day=None):
-        return summary.format_html(summary.get_day(day or summary._today()) or summary.collect())
+        return summary.format_html(summary.collect(day or summary.current_day()))
 
     def send_summary_now(self):
         if not load_config()["telegram"].get("admin_ids"):

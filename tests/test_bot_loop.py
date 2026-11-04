@@ -189,3 +189,43 @@ class BotLoopTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DailyReportLoopTests(unittest.TestCase):
+    """حلقة البوت الحقيقية ترسل التقرير اليومي عند حلول الموعد (بتوقيت غزة)."""
+
+    def test_loop_sends_due_summary_once_with_followed_people(self):
+        import datetime as _d
+        from app import ledger, summary, tz
+        fake = FakeTelegram()
+        self.addCleanup(fake.httpd.shutdown)
+        old_api = telegram_bot.API
+        telegram_bot.API = fake.url
+        self.addCleanup(setattr, telegram_bot, "API", old_api)
+        for p in (ledger.LEDGER_PATH, summary.SENT_PATH, telegram_bot.OFFSET_PATH):
+            if os.path.exists(p):
+                os.remove(p)
+        cfg = config.load_config()
+        cfg["telegram"].update(enabled=True, bot_token=TOKEN, admin_ids=[5])
+        cfg["telegram"]["daily_summary"] = {"enabled": True, "time": "00:30", "timezone": "Asia/Gaza"}
+        config.save_config(cfg)
+        config.save_accounts({"rp1": {"handle": "rep_acc", "enabled": True}})
+        # نشاط «أمس» بتوقيت غزة مسجّل في الدفتر، والآن بعد 00:30 بتوقيت غزة ← التقرير مستحق
+        gaza = tz.tzinfo("Asia/Gaza")
+        now = tz.now("Asia/Gaza")
+        yday = (now - _d.timedelta(days=1)).strftime("%Y-%m-%d")
+        ledger._save({"days": {yday: {"accounts": {"rp1": {"likes": 7, "retweets": 1, "comments": 1, "follows": 2}},
+                                      "followed": [{"acc": "rp1", "handle": "newguy1", "t": 1}, {"acc": "rp1", "handle": "newguy2", "t": 2}]}}, "hw": {}})
+        real_due = summary.due_days
+        summary.due_days = lambda cfg=None, now_=None: real_due(cfg, now=(now.replace(hour=1, minute=0)))   # 01:00 غزة
+        self.addCleanup(setattr, summary, "due_days", real_due)
+        svc = server.AppService()
+        self.addCleanup(lambda: svc.bot.stop(join_timeout=3))
+        svc.bot.start()
+        self.assertTrue(fake.wait_for(lambda: any("ملخص يوم" in p.get("text", "") for p in fake.sent("sendMessage"))))
+        text = [p["text"] for p in fake.sent("sendMessage") if "ملخص يوم" in p["text"]][0]
+        self.assertIn("أشخاص جدد تمت متابعتهم اليوم: 2", text)
+        self.assertIn("@newguy1 @newguy2", text)
+        self.assertIn(yday, text)
+        time.sleep(2.5)                                                  # دورات إضافية: لا تكرار
+        self.assertEqual(sum(1 for p in fake.sent("sendMessage") if "ملخص يوم" in p.get("text", "")), 1)

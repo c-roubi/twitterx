@@ -1350,92 +1350,164 @@ class NetDiagTests(unittest.TestCase):
 
 
 class DailySummaryTests(unittest.TestCase):
+    """ملخص يومي بتوقيت غزة من دفتر النشاط، مع المتابَعين الجدد."""
+
     def setUp(self):
-        from app import config, summary
-        self.config, self.summary = config, summary
-        for p in (summary.STATS_PATH, summary.SENT_PATH):
+        from datetime import datetime
+        from app import config, ledger, summary, tz
+        self.config, self.ledger, self.summary, self.tz, self.dt = config, ledger, summary, tz, datetime
+        for p in (ledger.LEDGER_PATH, summary.SENT_PATH):
             if os.path.exists(p):
                 os.remove(p)
-        summary._last_tick["snap"] = 0
+        ledger._tz_cache["t"] = 0
         config.save_seen({})
-        accs = {"s1": {"handle": "alpha", "enabled": True}, "s2": {"handle": "beta", "enabled": True}, "s3": {"handle": "gamma", "enabled": False}}
-        config.save_accounts(accs)
-        today = summary._today()
-        config.save_state("s1", {"date": today, "done": {"likes": 12, "retweets": 3, "comments": 2, "follows": 4}, "caps": {}})
-        config.save_state("s2", {"date": today, "done": {"likes": 5, "retweets": 1, "comments": 0, "follows": 2}, "needs_relogin": True, "rest_day": False})
-        config.save_state("s3", {"date": "2000-01-01", "done": {"likes": 99, "retweets": 0, "comments": 0, "follows": 0}})
+        config.save_accounts({"s1": {"handle": "alpha", "enabled": True}, "s2": {"handle": "beta", "enabled": True},
+                              "s3": {"handle": "gamma", "enabled": False}})
         cfg = config.load_config()
         cfg["telegram"]["admin_ids"] = [5]
-        cfg["telegram"]["daily_summary"] = {"enabled": True, "time": "23:50"}
+        cfg["telegram"]["daily_summary"] = {"enabled": True, "time": "00:30", "timezone": "Asia/Gaza"}
         config.save_config(cfg)
-        seen = {"1": {"scheduled": True, "detected_at": today + "T10:00:00", "priority": True, "source": "telegram", "completed_at": "x",
-                      "queue": [{"actions": ["like", "retweet"], "done": ["like", "retweet"]}, {"actions": ["like"], "done": [], "failed": ["like"]}]},
-                "2": {"scheduled": True, "detected_at": "2000-01-01T10:00:00", "queue": []}}
-        config.save_seen(seen)
         self.sent = []
         self.bot = type("B", (), {"send_summary": lambda s, html, rows=None: self.sent.append(html)})()
+        self.gaza = tz.tzinfo("Asia/Gaza")
 
-    def test_collect_totals_and_attention(self):
-        d = self.summary.collect()
-        self.assertEqual(d["totals"], {"likes": 17, "retweets": 4, "comments": 2, "follows": 6})   # يوم قديم لا يُحسب (gamma)
-        self.assertEqual([t["id"] for t in d["tweets"]], ["1"])                                       # تغريدات اليوم فقط
-        self.assertEqual((d["tweets"][0]["done"], d["tweets"][0]["total"], d["tweets"][0]["failed"]), (2, 3, 1))
-        self.assertTrue(any("@beta" in a for a in d["attention"]))
+    def st(self, acc, day, likes=0, rts=0, cm=0, fl=0, handles=(), **extra):
+        s = {"date": day, "done": {"likes": likes, "retweets": rts, "comments": cm, "follows": fl},
+             "followed_handles": list(handles), "caps": {}}
+        s.update(extra)
+        self.config.save_state(acc, s)
 
-    def test_cancelled_tweets_not_counted_as_pending_work(self):
-        seen = self.config.load_seen()
-        seen["3"] = {"scheduled": True, "detected_at": self.summary._today() + "T09:00:00", "cancelled": True,
-                     "queue": [{"actions": ["like", "retweet", "comment"], "done": []}] * 4}
-        self.config.save_seen(seen)
-        d = self.summary.collect()
-        html = self.summary.format_html(d)
-        self.assertIn("2 من 3 مطلوبة", html)            # الملغاة (12 عملية) خارج المطلوب
-        self.assertIn("1 ملغاة/محذوفة", html)
-        self.assertNotIn("/15", html)
+    def test_ledger_baseline_then_counts_only_new_activity(self):
+        self.st("s1", "D1", likes=10, handles=["old1"])               # أول رؤية: خط أساس (لا يُحسب)
+        self.assertEqual((self.ledger.day(self.tz.today("Asia/Gaza")) or {}).get("accounts", {}).get("s1", {}).get("likes", 0), 0)
+        self.st("s1", "D1", likes=13, fl=2, handles=["old1", "newA", "newB"])
+        rec = self.ledger.day(self.tz.today("Asia/Gaza"))
+        self.assertEqual((rec["accounts"]["s1"]["likes"], rec["accounts"]["s1"]["follows"]), (3, 2))
+        self.assertEqual([f["handle"] for f in rec["followed"]], ["newA", "newB"])
 
-    def test_format_html_is_telegram_safe_and_complete(self):
+    def test_stale_overwrite_does_not_double_count(self):
+        self.st("s1", "D1", likes=0)
+        self.st("s1", "D1", likes=5)
+        self.st("s1", "D1", likes=3)                                   # كتابة قديمة متأخرة من خيط آخر
+        self.st("s1", "D1", likes=6)
+        self.assertEqual(self.ledger.day(self.tz.today("Asia/Gaza"))["accounts"]["s1"]["likes"], 6)
+
+    def test_new_account_day_resets_counters_but_keeps_followed_baseline(self):
+        self.st("s1", "D1", likes=0, handles=["h1"])
+        self.st("s1", "D1", likes=4, fl=1, handles=["h1", "h2"])
+        self.st("s1", "D2", likes=0, handles=["h1", "h2"])             # خطة يوم جديد للحساب (عدّادات صفر)
+        self.st("s1", "D2", likes=2, fl=1, handles=["h1", "h2", "h3"])
+        rec = self.ledger.day(self.tz.today("Asia/Gaza"))
+        self.assertEqual(rec["accounts"]["s1"]["likes"], 6)           # 4 + 2 رغم تصفير الحساب
+        self.assertEqual([f["handle"] for f in rec["followed"]], ["h2", "h3"])   # h1 قديم لا يُعدّ
+
+    def test_collect_uses_ledger_followed_unique_and_totals(self):
+        day = self.tz.today("Asia/Gaza")
+        self.st("s1", "D1", handles=[]); self.st("s2", "D1", handles=[])
+        self.st("s1", "D1", likes=12, rts=3, cm=2, fl=2, handles=["ann", "bob"])
+        self.st("s2", "D1", likes=5, rts=1, fl=2, handles=["bob", "cat"])    # bob تابعه حسابان
+        d = self.summary.collect(day)
+        self.assertEqual(d["totals"], {"likes": 17, "retweets": 4, "comments": 2, "follows": 4})
+        self.assertEqual(d["followed_unique"], ["ann", "bob", "cat"])        # أشخاص مختلفون (3) لا 4
+        self.assertEqual(len(d["followed"]), 4)
+
+    def test_format_shows_new_followed_people_and_gaza_label(self):
+        day = self.tz.today("Asia/Gaza")
+        self.st("s1", "D1", handles=[]); self.st("s1", "D1", likes=1, fl=2, handles=["ann", "bob"])
+        html = self.summary.format_html(self.summary.collect(day))
+        self.assertIn("أشخاص جدد تمت متابعتهم اليوم: 2", html)
+        self.assertIn("@ann @bob", html)
+        self.assertIn("بتوقيت غزة", html)
+        self.assertNotIn("@gamma", html)
         import re
-        html = self.summary.format_html(self.summary.collect())
-        for want in ("@alpha", "@beta", "17", "⚡", "تحتاج انتباه", "حسب الحساب"):
-            self.assertIn(want, html)
-        self.assertNotIn("@gamma", html)                                      # المعطّل لا يظهر
         self.assertTrue(set(re.findall(r"</?(\w+)", html)) <= {"b", "code", "a", "i"})
+
+    def test_long_followed_list_is_truncated(self):
+        day = self.tz.today("Asia/Gaza")
+        names = ["u%d" % i for i in range(40)]
+        self.st("s1", "D1", handles=[]); self.st("s1", "D1", fl=40, handles=names)
+        html = self.summary.format_html(self.summary.collect(day))
+        self.assertIn("و15 آخرون", html)
         self.assertLess(len(html), 4000)
 
-    def test_not_sent_before_time_sent_once_after(self):
-        from datetime import datetime
-        today = self.summary.datetime.now().strftime("%Y-%m-%d")
-        early, late = datetime.strptime(today + " 12:00", "%Y-%m-%d %H:%M"), datetime.strptime(today + " 23:51", "%Y-%m-%d %H:%M")
-        self.assertEqual(self.summary.tick(self.bot, now=early), [])
-        self.assertEqual(self.summary.tick(self.bot, now=late), [today])
-        self.assertEqual(self.summary.tick(self.bot, now=late), [])            # مرة واحدة فقط
-        self.assertEqual(len(self.sent), 1)
-        self.assertIn("ملخص يوم " + today, self.sent[0])
+    def test_send_moment_after_midnight_covers_previous_day(self):
+        sm = self.summary.send_moment
+        m = sm("2026-11-04", "00:30", self.gaza)
+        self.assertEqual((m.day, m.hour, m.minute), (5, 0, 30))        # ليلة 4→5
+        m2 = sm("2026-11-04", "23:50", self.gaza)
+        self.assertEqual((m2.day, m2.hour), (4, 23))                    # وقت مسائي: اليوم نفسه
+        self.assertEqual(sm("2026-11-04", "01:00", self.gaza).hour, 1)
 
-    def test_catch_up_when_app_was_closed_at_send_time(self):
-        from datetime import datetime
-        today = self.summary.datetime.now().strftime("%Y-%m-%d")
-        store = {"2025-12-30": self.summary.collect("2025-12-30"), "2025-12-31": dict(self.summary.collect("2025-12-31"), date="2025-12-31")}
-        self.config._atomic_save(store, self.summary.STATS_PATH)
-        morning = datetime.strptime(today + " 08:00", "%Y-%m-%d %H:%M")
-        out = self.summary.tick(self.bot, now=morning)
-        self.assertEqual(out, ["2025-12-30", "2025-12-31"])                    # أيام فائتة تُرسل عند التشغيل التالي
-        self.assertEqual(self.summary.tick(self.bot, now=morning), [])
+    def test_not_sent_before_00_30_gaza_sent_once_after(self):
+        self.st("s1", "D1", handles=[]); self.st("s1", "D1", likes=5)
+        today = self.tz.today("Asia/Gaza")
+        d = self.dt.strptime(today, "%Y-%m-%d")
+        # بعد منتصف الليل بدقائق (00:10) لتقرير أمس: قبل 00:30 → لا إرسال لليوم الجاري
+        before = (d + __import__("datetime").timedelta(minutes=10)).replace(tzinfo=self.gaza)
+        self.assertEqual(self.summary.due_days(now=before), [])
+        after = (d + __import__("datetime").timedelta(minutes=40)).replace(tzinfo=self.gaza)
+        prev = (d - __import__("datetime").timedelta(days=1)).strftime("%Y-%m-%d")
+        self.assertEqual(self.summary.due_days(now=after), [prev])      # تقرير أمس عند 00:40
+        self.summary._mark_sent(prev)
+        self.assertEqual(self.summary.due_days(now=after), [])          # مرة واحدة
 
-    def test_disabled_or_no_admin_sends_nothing(self):
-        from datetime import datetime
-        late = datetime.strptime(self.summary.datetime.now().strftime("%Y-%m-%d") + " 23:59", "%Y-%m-%d %H:%M")
-        cfg = self.config.load_config(); cfg["telegram"]["daily_summary"]["enabled"] = False; self.config.save_config(cfg)
-        self.assertEqual(self.summary.tick(self.bot, now=late), [])
-        cfg["telegram"]["daily_summary"]["enabled"] = True; cfg["telegram"]["admin_ids"] = []; self.config.save_config(cfg)
-        self.assertEqual(self.summary.tick(self.bot, now=late), [])
+    def test_tick_sends_report_for_the_ended_day_with_its_data(self):
+        import datetime as _d
+        today = self.tz.today("Asia/Gaza")
+        d0 = self.dt.strptime(today, "%Y-%m-%d")
+        prev = (d0 - _d.timedelta(days=1)).strftime("%Y-%m-%d")
+        # نشاط «أمس» مسجّل في الدفتر
+        self.ledger._save({"days": {prev: {"accounts": {"s1": {"likes": 9, "retweets": 2, "comments": 1, "follows": 2}},
+                                           "followed": [{"acc": "s1", "handle": "zed", "t": 1}, {"acc": "s1", "handle": "yan", "t": 2}]}}, "hw": {}})
+        now = (d0 + _d.timedelta(hours=1)).replace(tzinfo=self.gaza)       # 01:00 غزة
+        self.assertEqual(self.summary.tick(self.bot, now=now), [prev])
+        self.assertIn("ملخص يوم " + prev, self.sent[0])
+        self.assertIn("@zed @yan", self.sent[0])
+        self.assertEqual(self.summary.tick(self.bot, now=now), [])
+
+    def test_first_activation_does_not_flood_with_old_days(self):
+        import datetime as _d
+        d0 = self.dt.strptime(self.tz.today("Asia/Gaza"), "%Y-%m-%d")
+        data = self.ledger._load()
+        for back in (1, 2, 3, 5):
+            data["days"][(d0 - _d.timedelta(days=back)).strftime("%Y-%m-%d")] = {"accounts": {"s1": {"likes": 1, "retweets": 0, "comments": 0, "follows": 0}}, "followed": []}
+        self.ledger._save(data)
+        now = (d0 + _d.timedelta(hours=9)).replace(tzinfo=self.gaza)
+        self.assertFalse(os.path.exists(self.summary.SENT_PATH))
+        out = self.summary.tick(self.bot, now=now)
+        self.assertEqual(out, [(d0 - _d.timedelta(days=1)).strftime("%Y-%m-%d")])      # أمس فقط، لا الأقدم
+
+    def test_day_without_activity_sends_nothing_but_is_marked(self):
+        import datetime as _d
+        d0 = self.dt.strptime(self.tz.today("Asia/Gaza"), "%Y-%m-%d")
+        now = (d0 + _d.timedelta(hours=2)).replace(tzinfo=self.gaza)
+        self.assertEqual(self.summary.tick(self.bot, now=now), [])
         self.assertEqual(self.sent, [])
+        self.assertEqual(self.summary.due_days(now=now), [])            # عُلِّم مُرسَلاً (لا تكرار الفحص)
 
-    def test_snapshot_persists_today(self):
-        d = self.summary.snapshot()
-        with open(self.summary.STATS_PATH, encoding="utf-8") as f:
-            stored = json.load(f)
-        self.assertEqual(stored[d["date"]]["totals"]["likes"], 17)
+    def test_catch_up_sends_at_most_two_days_and_disabled_or_no_admin_silent(self):
+        import datetime as _d
+        d0 = self.dt.strptime(self.tz.today("Asia/Gaza"), "%Y-%m-%d")
+        for back in (1, 2, 3):
+            day = (d0 - _d.timedelta(days=back)).strftime("%Y-%m-%d")
+            data = self.ledger._load(); data["days"][day] = {"accounts": {"s1": {"likes": back, "retweets": 0, "comments": 0, "follows": 0}}, "followed": []}; self.ledger._save(data)
+        self.summary._mark_sent((d0 - _d.timedelta(days=6)).strftime("%Y-%m-%d"))   # التطبيق كان مغلقاً أياماً
+        now = (d0 + _d.timedelta(hours=9)).replace(tzinfo=self.gaza)
+        out = self.summary.tick(self.bot, now=now)
+        self.assertEqual(len(out), 2)                                   # حدّ أقصى يومان (الأحدث)
+        cfg = self.config.load_config(); cfg["telegram"]["daily_summary"]["enabled"] = False; self.config.save_config(cfg)
+        os.remove(self.summary.SENT_PATH)
+        self.assertEqual(self.summary.tick(self.bot, now=now), [])
+
+    def test_current_day_shows_day_that_just_ended_after_midnight(self):
+        from unittest import mock
+        import datetime as _d
+        fake_now = self.dt(2026, 11, 5, 0, 10, tzinfo=self.gaza)
+        with mock.patch.object(self.tz, "now", return_value=fake_now):
+            self.assertEqual(self.summary.current_day(), "2026-11-04")   # 00:10 ← ما زال تقرير أمس
+        fake_day = self.dt(2026, 11, 5, 9, 0, tzinfo=self.gaza)
+        with mock.patch.object(self.tz, "now", return_value=fake_day):
+            self.assertEqual(self.summary.current_day(), "2026-11-05")
 
     def test_bot_command_menu_button_and_api(self):
         svc = server.AppService()
@@ -1451,20 +1523,36 @@ class DailySummaryTests(unittest.TestCase):
         self.assertEqual(v.notice, "أُرسل الملخص ✅")
         self.assertEqual(sent[0][0], 5)
 
-    def test_send_now_requires_admin_and_time_validation(self):
+    def test_send_now_requires_admin_and_time_and_zone_validation(self):
         svc = server.AppService()
         cfg = self.config.load_config(); cfg["telegram"]["admin_ids"] = []; self.config.save_config(cfg)
         with self.assertRaises(server.ApiError):
             svc.send_summary_now()
         with self.assertRaises(server.ApiError):
             svc.set_config({"telegram": {"daily_summary": {"time": "25:99"}}})
-        self.assertEqual(svc.set_config({"telegram": {"daily_summary": {"time": "22:30"}}})["telegram"]["daily_summary"]["time"], "22:30")
+        with self.assertRaises(server.ApiError):
+            svc.set_config({"telegram": {"daily_summary": {"timezone": "Mars/Base"}}})
+        out = svc.set_config({"telegram": {"daily_summary": {"time": "01:00", "timezone": "Asia/Gaza"}}})
+        self.assertEqual((out["telegram"]["daily_summary"]["time"], out["telegram"]["daily_summary"]["timezone"]), ("01:00", "Asia/Gaza"))
 
     def test_menu_time_item_parses(self):
         from app import telegram_menu as m
-        self.assertEqual(m.parse_value("time", "9:50"), "09:50")
+        self.assertEqual(m.parse_value("time", "0:30"), "00:30")
         with self.assertRaises(ValueError):
             m.parse_value("time", "24:00")
+
+    def test_tz_fallback_does_not_crash(self):
+        z = self.tz.tzinfo("Not/AZone")
+        self.assertIsNotNone(self.dt.now(z))
+        self.assertFalse(self.tz.valid("Not/AZone"))
+        self.assertTrue(self.tz.valid("Asia/Gaza"))
+
+    def test_save_state_never_fails_if_ledger_breaks(self):
+        from unittest import mock
+        with mock.patch.object(self.ledger, "record_state", side_effect=RuntimeError("disk")):
+            self.config.save_state("s1", {"date": "D1", "done": {"likes": 1}})   # لا استثناء
+        self.assertEqual(self.config.load_state("s1")["done"]["likes"], 1)
+
 
 
 class PlaywrightLeakTests(unittest.TestCase):

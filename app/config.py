@@ -117,7 +117,7 @@ DEFAULT_CONFIG = {
             "retries": 3,
             "fallback_interval_min": [60, 90]
         },
-        "daily_summary": {"enabled": True, "time": "23:50"},
+        "daily_summary": {"enabled": True, "time": "00:30", "timezone": "Asia/Gaza"},
         "ca_bundle": "",
         "insecure_ssl": False
     },
@@ -310,6 +310,11 @@ def load_state(acc_id):
 
 def save_state(acc_id, state):
     _atomic_save(state, state_path(acc_id))
+    try:  # دفتر النشاط اليومي (للملخص): لا يجوز أن يُفشل حفظ الحالة أبداً
+        from . import ledger
+        ledger.record_state(acc_id, state)
+    except Exception:
+        pass
 
 
 def clear_relogin(acc_id):
