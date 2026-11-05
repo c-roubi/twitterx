@@ -16,6 +16,7 @@ import threading
 import time
 from urllib.parse import quote
 
+from . import verify_cache
 from .config import DATA_DIR, _atomic_save
 from .logger import get_logger
 
@@ -166,11 +167,31 @@ def stats():
 
 
 # ---------------------------------------------------------------- طبقة المتصفح
-def scrape_handles_on_page(page, limit=30):
-    """أسماء الحسابات من خلايا المستخدمين الظاهرة حالياً (نتائج/متابعون/معيدو تغريد)."""
+_VERIFIED_ICON = '[data-testid="icon-verified"], [data-testid="icon-verified-badge"], svg[aria-label="Verified account"]'
+
+
+def _cell_verified(cell, handle):
+    """موثّق؟ بيانات X (GraphQL) أولاً، وإلا شارة اسم الكاتب داخل الخلية (احتياط)."""
+    v = verify_cache.lookup(handle)
+    if v is not None:
+        return v
+    try:
+        name = cell.locator('[data-testid="User-Name"]').first
+        scope = name if name.count() > 0 else cell
+        return scope.locator(_VERIFIED_ICON).count() > 0
+    except Exception:
+        return False
+
+
+def scrape_handles_on_page(page, limit=30, skip_verified=False, cell_selector=None):
+    """أسماء الحسابات من الخلايا الظاهرة حالياً (نتائج/متابعون/معيدو تغريد، أو كتّاب الاقتباسات).
+
+    skip_verified: تخطّي الموثّقين وقت الجمع كي لا يمتلئ المخزن بحسابات ستُرفض لاحقاً.
+    cell_selector: محدد الخلايا (الافتراضي خلايا المستخدمين؛ للاقتباسات خلايا التغريدات).
+    """
     out = []
     try:
-        cells = page.locator(_USER_CELL).all()
+        cells = page.locator(cell_selector or _USER_CELL).all()
     except Exception:
         return out
     for cell in cells:
@@ -180,11 +201,16 @@ def scrape_handles_on_page(page, limit=30):
             for link in cell.locator('a[href]').all():
                 h = handle_from_href(link.get_attribute("href") or "")
                 if h and h not in out:
-                    out.append(h)
+                    if not (skip_verified and _cell_verified(cell, h)):
+                        out.append(h)
                     break
         except Exception:
             continue
     return out
+
+
+def _skip_verified(cfg):
+    return bool((cfg.get("follow", {}) or {}).get("skip_verified", True))
 
 
 def retweet_count_of(article):
@@ -230,9 +256,39 @@ def harvest_reposters(page, human, author, tweet_id, cfg, own_handle=None):
     for _ in range(3):   # تمرير لجلب المزيد
         page.mouse.wheel(0, 1200)
         human.pause(1.0, 2.5)
-    handles = scrape_handles_on_page(page, limit=per)
+    handles = scrape_handles_on_page(page, limit=per, skip_verified=_skip_verified(cfg))
     n = add_candidates(handles, source="reposts", tweet_id=tweet_id, own_handle=own_handle)
     log.info("حصاد معيدي التغريد {}: +{} مرشّح (المخزن {})".format(tweet_id, n, pool_size()))
+    return n
+
+
+def harvest_quoters(page, human, author, tweet_id, cfg, own_handle=None):
+    """يفتح صفحة الاقتباسات ويسحب كتّاب تغريدات الاقتباس إلى المخزن. يرجع عدد المضاف."""
+    hv = (cfg.get("follow", {}).get("harvest") or {})
+    per = int(hv.get("per_target", 15))
+    try:
+        from . import resilience
+        ok, st = resilience.goto_with_retry(page, "https://x.com/{}/status/{}/quotes".format(author, tweet_id), cfg)
+    except Exception:
+        return 0
+    if not ok:
+        return 0
+    page.wait_for_timeout(2000)
+    end = time.time() + 8
+    while time.time() < end:
+        try:
+            if page.locator(_TWEET_ARTICLE).first.count() > 0:
+                break
+        except Exception:
+            pass
+        page.wait_for_timeout(500)
+    for _ in range(3):
+        page.mouse.wheel(0, 1200)
+        human.pause(1.0, 2.5)
+    handles = scrape_handles_on_page(page, limit=per, skip_verified=_skip_verified(cfg),
+                                     cell_selector=_TWEET_ARTICLE)
+    n = add_candidates(handles, source="quotes", own_handle=own_handle)
+    log.info("حصاد كتّاب الاقتباس {}: +{} مرشّح (المخزن {})".format(tweet_id, n, pool_size()))
     return n
 
 
@@ -250,7 +306,7 @@ def harvest_followers(page, human, handle, cfg, own_handle=None):
     for _ in range(3):
         page.mouse.wheel(0, 1200)
         human.pause(1.0, 2.5)
-    handles = scrape_handles_on_page(page, limit=per)
+    handles = scrape_handles_on_page(page, limit=per, skip_verified=_skip_verified(cfg))
     n = add_candidates(handles, source="followers:" + handle, own_handle=own_handle)
     log.info("حصاد متابعي @{}: +{} مرشّح (المخزن {})".format(handle, n, pool_size()))
     return n
@@ -304,6 +360,8 @@ def run_harvest(page, acc_id, cfg, state, human, budget_s, own_handle=None):
                 continue
         if picked:
             added += harvest_reposters(page, human, picked[0], picked[1], cfg, own_handle=own_handle)
+            if hv.get("include_quoters", True):
+                added += harvest_quoters(page, human, picked[0], picked[1], cfg, own_handle=own_handle)
             targets += 1
             human.pause(2.0, 5.0)
             # ارجع للبحث للبحث عن هدف آخر

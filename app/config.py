@@ -80,7 +80,8 @@ DEFAULT_CONFIG = {
             "targets_per_session": [1, 2],
             "per_target": 15,
             "refill_below": 8,
-            "from_followers": True
+            "from_followers": True,
+            "include_quoters": True
         },
         "queries": ["bitcoin", "crypto", "altcoins", "ethereum", "solana", "$BTC", "crypto trading", "#crypto", "diamond hands", "altseason"]
     },

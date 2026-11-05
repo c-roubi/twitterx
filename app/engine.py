@@ -173,26 +173,39 @@ class Engine:
         if gap > 0 and self._stop.wait(gap):
             return []
         acc = cfg["monitor"].get("use_account") if cfg["monitor"].get("method") == "account" else None
-        held = False
+        held = None   # الحساب الذي حجزناه فعلاً للفحص
         if acc and acc in accounts:
             try:
                 from . import routine
-                for _ in range(30):  # حساب المراقبة قد يكون في جلسة: ننتظر حتى 90 ثانية ثم نستخدم الزائر
-                    if routine._acquire(acc):
-                        held = True
+                from .config import load_state
+                # حساب المراقبة المفضّل أولاً (15 ثانية)، ثم أي حساب مفعّل فاضٍ، قبل اللجوء للزائر:
+                # جلسة الزائر (بدون حساب) تعرض تغريدات قديمة فتعود "ok" بلا جديد رغم أن المدير نشر.
+                others = [a for a, v in accounts.items()
+                          if a != acc and v.get("enabled", True) and not load_state(a).get("needs_relogin")]
+                for i in range(30):   # حتى 90 ثانية
+                    for cand in ([acc] if i < 5 else [acc] + others):
+                        if routine._acquire(cand):
+                            held = cand
+                            break
+                    if held or self._stop.wait(3):
                         break
-                    if self._stop.wait(3):
-                        return []
+                if self._stop.is_set() and not held:
+                    return []
             except Exception:
                 pass
-            if not held:
+            if held and held != acc:
+                cfg = copy.deepcopy(cfg)
+                cfg["monitor"]["use_account"] = held
+                log.info("حساب المراقبة {} مشغول - فحص المدير بالحساب {}".format(acc, held))
+            elif not held:
                 cfg = copy.deepcopy(cfg)
                 cfg["monitor"]["method"] = "guest"
+                log.warning("كل الحسابات مشغولة - فحص المدير كزائر (قد لا يُظهر آخر التغريدات)")
         try:
             tweets, status = monitor.fetch_manager_tweets(cfg, accounts, dry_run=self.dry_run)
         finally:
             if held:
-                routine._release(acc)
+                routine._release(held)
         self._last_fetch = time.time()
         max_age_h = float(ch.get("max_age_min", 30)) / 60.0
         seen, found = load_seen(), []

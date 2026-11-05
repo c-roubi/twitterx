@@ -5,7 +5,7 @@ import time
 
 from playwright.sync_api import sync_playwright
 
-from . import overlays, proxies, selectors, warp
+from . import overlays, proxies, selectors, verify_cache, warp
 from .config import PROFILES_DIR, SESSIONS_DIR, clear_relogin
 from .humanizer import fingerprint_for, Human
 from .logger import get_logger
@@ -117,6 +117,7 @@ def launch_guest(cfg, pw):
         context = browser.new_context(**ctx_kwargs)
         _apply_fingerprint(context, fp, use_chrome)
         overlays.install(context)
+        verify_cache.attach(context)  # قراءة التوثيق من بيانات X
         return context
 
     last_err = None
@@ -180,6 +181,7 @@ def launch_account(account, cfg, pw=None, owned_pw=True):
         context = pw.chromium.launch_persistent_context(**ctx_kwargs)
         _apply_fingerprint(context, fp, use_chrome)
         overlays.install(context)
+        verify_cache.attach(context)  # قراءة التوثيق من بيانات X
         page = context.pages[0] if context.pages else context.new_page()
         return pw, context, page, pw_owned
 
