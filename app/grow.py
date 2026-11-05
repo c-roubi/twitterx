@@ -57,6 +57,18 @@ def _cell_is_verified(cell):
         return False
 
 
+STRICT_USER_CELL = '[data-testid="UserCell"]'
+_TWEET_IN_CELL = '[data-testid="tweet"], [data-testid="tweetText"], article'
+
+
+def _cell_is_tweet(cell):
+    """خلية تحتوي تغريدة (مثل اقتباس) وليست خلية مستخدم."""
+    try:
+        return cell.locator(_TWEET_IN_CELL).count() > 0
+    except Exception:
+        return False
+
+
 def _handle_in_cell(cell, seen, handles):
     """استخراج أول اسم حساب صالح وجديد من خلية مستخدم."""
     try:
@@ -70,13 +82,15 @@ def _handle_in_cell(cell, seen, handles):
 
 
 def find_candidates(page, human, seen_users=(), limit=30,
-                    skip_verified=False, max_scrolls=0):
+                    skip_verified=False, max_scrolls=0, strict_users=False):
     """جمع مرشحين من نتائج بحث الأشخاص (f=user) — أسماء فريدة لم نرها من قبل.
 
     skip_verified: تخطّي الحسابات الموثّقة مبكّراً (على مستوى الخلية) حتى لا تُهدر
                    ميزانية اليوم بزيارة بروفايلات موثّقة ثم تخطّيها لاحقاً. نتائج بحث
                    X تُظهر الموثّقين أولاً، لذا هذا الفلتر ضروري لإيجاد حسابات طبيعية.
     max_scrolls: عدد مرات التمرير لتحميل مزيد من النتائج أثناء الجمع (0 = بلا تمرير).
+    strict_users: اعتماد خلايا المستخدمين الحقيقية (UserCell) فقط — لقوائم الريتويترز حتى
+                  لا تُسحب تغريدات الاقتباس. وتُتخطّى دائماً أي خلية تحتوي تغريدة.
     """
     seen = set(seen_users or ())
     handles = []
@@ -84,9 +98,11 @@ def find_candidates(page, human, seen_users=(), limit=30,
     rounds = max(1, int(max_scrolls) + 1)
     for r in range(rounds):
         try:
-            for cell in page.locator(USER_CELL).all():
+            for cell in page.locator(STRICT_USER_CELL if strict_users else USER_CELL).all():
                 if len(handles) >= limit:
                     break
+                if _cell_is_tweet(cell):
+                    continue
                 if skip_verified and _cell_is_verified(cell):
                     skipped_verified += 1
                     continue
@@ -346,7 +362,7 @@ def run_retweeter_follow_pass(page, acc_id, cfg, state, human, max_follows):
             continue
         page.wait_for_timeout(2500)
         for _ in range(12):
-            if page.locator(USER_CELL).first.count() > 0:
+            if page.locator(STRICT_USER_CELL).first.count() > 0:
                 break
             if is_login_wall(page):
                 return followed, "login-wall"
@@ -355,6 +371,7 @@ def run_retweeter_follow_pass(page, acc_id, cfg, state, human, max_follows):
         candidates = find_candidates(
             page, human, seen_users=seen_users, limit=25,
             skip_verified=skip_verified, max_scrolls=max_scrolls,
+            strict_users=True,
         )
         random.shuffle(candidates)
         log.info(f"{acc_id} | ريتويترز التغريدة {tid}: {len(candidates)} مرشح غير موثّق")

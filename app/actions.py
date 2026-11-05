@@ -510,8 +510,15 @@ def read_profile(page, handle):
         except Exception:
             pass
     try:
-        if selectors.has(page, VERIFIED_ICON_CANDIDATES):
-            info["verified"] = True
+        # نفحص شارة التوثيق داخل اسم صاحب البروفايل فقط (وليس الصفحة كلها: الشريط الجانبي
+        # وتغريدات التايم لاين فيها شارات/نصوص Verified لا تخص هذا الحساب)
+        header = page.locator('[data-testid="UserName"]').first
+        if header.count() > 0:
+            info["verified"] = any(
+                header.locator(sel).count() > 0 for sel in VERIFIED_ICON_CANDIDATES
+            )
+        else:
+            info["verified"] = False
     except Exception:
         pass
     return info

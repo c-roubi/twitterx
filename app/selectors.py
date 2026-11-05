@@ -195,9 +195,6 @@ VERIFIED_ICON_CANDIDATES = [
     '[data-testid="icon-verified"]',
     '[data-testid="icon-verified-badge"]',
     'svg[aria-label="Verified account"]',
-    'svg[aria-label*="Verified"]',
-    '[aria-label*="Verified"]',
-    'svg[data-testid="verificationBadge"]',
 ]
 VERIFIED_ICON = ", ".join(VERIFIED_ICON_CANDIDATES)
 
