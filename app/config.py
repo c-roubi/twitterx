@@ -71,6 +71,7 @@ DEFAULT_CONFIG = {
         "skip_verified": True,
         "candidate_scrolls": 6,
         "from_retweeters": True,
+        "include_quoters": True,
         "min_retweets": 2,
         "retweeter_tweets_per_pass": 3,
         "visit_only_chance": 0.25,

@@ -52,21 +52,17 @@ def _handle_from_href(href):
 def _cell_is_verified(cell):
     """هل خلية المستخدم في نتائج البحث تخص حساباً موثّقاً؟ (شارة التوثيق داخل الخلية)."""
     try:
+        # في خلايا التغريدات (اقتباس) نفحص شارة اسم الكاتب فقط، لا التغريدة المقتبَسة المضمّنة
+        name = cell.locator('[data-testid="User-Name"]').first
+        if name.count() > 0:
+            return name.locator(VERIFIED_ICON).count() > 0
         return cell.locator(VERIFIED_ICON).first.count() > 0
     except Exception:
         return False
 
 
 STRICT_USER_CELL = '[data-testid="UserCell"]'
-_TWEET_IN_CELL = '[data-testid="tweet"], [data-testid="tweetText"], article'
-
-
-def _cell_is_tweet(cell):
-    """خلية تحتوي تغريدة (مثل اقتباس) وليست خلية مستخدم."""
-    try:
-        return cell.locator(_TWEET_IN_CELL).count() > 0
-    except Exception:
-        return False
+QUOTE_CELL = TWEET_ARTICLE  # صفحة الاقتباسات: كل خلية تغريدة، وكاتبها هو المرشّح
 
 
 def _handle_in_cell(cell, seen, handles):
@@ -82,15 +78,15 @@ def _handle_in_cell(cell, seen, handles):
 
 
 def find_candidates(page, human, seen_users=(), limit=30,
-                    skip_verified=False, max_scrolls=0, strict_users=False):
+                    skip_verified=False, max_scrolls=0, cell_selector=None):
     """جمع مرشحين من نتائج بحث الأشخاص (f=user) — أسماء فريدة لم نرها من قبل.
 
     skip_verified: تخطّي الحسابات الموثّقة مبكّراً (على مستوى الخلية) حتى لا تُهدر
                    ميزانية اليوم بزيارة بروفايلات موثّقة ثم تخطّيها لاحقاً. نتائج بحث
                    X تُظهر الموثّقين أولاً، لذا هذا الفلتر ضروري لإيجاد حسابات طبيعية.
     max_scrolls: عدد مرات التمرير لتحميل مزيد من النتائج أثناء الجمع (0 = بلا تمرير).
-    strict_users: اعتماد خلايا المستخدمين الحقيقية (UserCell) فقط — لقوائم الريتويترز حتى
-                  لا تُسحب تغريدات الاقتباس. وتُتخطّى دائماً أي خلية تحتوي تغريدة.
+    cell_selector: محدد الخلايا (الافتراضي USER_CELL). لقائمة الريتويترز STRICT_USER_CELL،
+                   ولقائمة الاقتباسات QUOTE_CELL (المرشّح = كاتب تغريدة الاقتباس).
     """
     seen = set(seen_users or ())
     handles = []
@@ -98,11 +94,9 @@ def find_candidates(page, human, seen_users=(), limit=30,
     rounds = max(1, int(max_scrolls) + 1)
     for r in range(rounds):
         try:
-            for cell in page.locator(STRICT_USER_CELL if strict_users else USER_CELL).all():
+            for cell in page.locator(cell_selector or USER_CELL).all():
                 if len(handles) >= limit:
                     break
-                if _cell_is_tweet(cell):
-                    continue
                 if skip_verified and _cell_is_verified(cell):
                     skipped_verified += 1
                     continue
@@ -355,41 +349,46 @@ def run_retweeter_follow_pass(page, acc_id, cfg, state, human, max_follows):
     for handle, tid in engaged[:tweets_per_pass]:
         if followed >= max_follows or follow_budget(state, cfg) <= 0:
             break
-        rt_url = f"https://x.com/{handle or 'i'}/status/{tid}/retweets"
-        ok, gstatus = resilience.goto_with_retry(page, rt_url, cfg)
-        if not ok:
-            log.info(f"{acc_id} | تخطّي ريتويترز {tid}: {gstatus}")
-            continue
-        page.wait_for_timeout(2500)
-        for _ in range(12):
-            if page.locator(STRICT_USER_CELL).first.count() > 0:
-                break
-            if is_login_wall(page):
-                return followed, "login-wall"
-            page.wait_for_timeout(1000)
-        human.pause(1.5, 4.0)
-        candidates = find_candidates(
-            page, human, seen_users=seen_users, limit=25,
-            skip_verified=skip_verified, max_scrolls=max_scrolls,
-            strict_users=True,
-        )
-        random.shuffle(candidates)
-        log.info(f"{acc_id} | ريتويترز التغريدة {tid}: {len(candidates)} مرشح غير موثّق")
-        for cand in candidates:
+        sources = [("ريتويترز", f"https://x.com/{handle or 'i'}/status/{tid}/retweets", STRICT_USER_CELL)]
+        if f.get("include_quoters", True):
+            sources.append(("اقتباسات", f"https://x.com/{handle or 'i'}/status/{tid}/quotes", QUOTE_CELL))
+        for label, src_url, cell_sel in sources:
             if followed >= max_follows or follow_budget(state, cfg) <= 0:
                 break
-            got, msg = _follow_one(page, human, cand, cfg, state, acc_id)
-            seen_users.add(cand)
-            if got:
-                state.setdefault("followed_handles", []).append(cand)
-                state["done"]["follows"] += 1
-                followed += 1
-            seen_list = list(seen_users)
-            if len(seen_list) > 3000:
-                seen_list = seen_list[-3000:]
-            state["seen_users"] = sorted(seen_list)
-            save_state(acc_id, state)
-            human.pause(max(20, int(lo_delay * 0.6)), hi_delay)
+            ok, gstatus = resilience.goto_with_retry(page, src_url, cfg)
+            if not ok:
+                log.info(f"{acc_id} | تخطّي {label} {tid}: {gstatus}")
+                continue
+            page.wait_for_timeout(2500)
+            for _ in range(12):
+                if page.locator(cell_sel).first.count() > 0:
+                    break
+                if is_login_wall(page):
+                    return followed, "login-wall"
+                page.wait_for_timeout(1000)
+            human.pause(1.5, 4.0)
+            candidates = find_candidates(
+                page, human, seen_users=seen_users, limit=25,
+                skip_verified=skip_verified, max_scrolls=max_scrolls,
+                cell_selector=cell_sel,
+            )
+            random.shuffle(candidates)
+            log.info(f"{acc_id} | {label} التغريدة {tid}: {len(candidates)} مرشح غير موثّق")
+            for cand in candidates:
+                if followed >= max_follows or follow_budget(state, cfg) <= 0:
+                    break
+                got, msg = _follow_one(page, human, cand, cfg, state, acc_id)
+                seen_users.add(cand)
+                if got:
+                    state.setdefault("followed_handles", []).append(cand)
+                    state["done"]["follows"] += 1
+                    followed += 1
+                seen_list = list(seen_users)
+                if len(seen_list) > 3000:
+                    seen_list = seen_list[-3000:]
+                state["seen_users"] = sorted(seen_list)
+                save_state(acc_id, state)
+                human.pause(max(20, int(lo_delay * 0.6)), hi_delay)
 
     # تقييد حجم قائمة التغريدات المعالَجة في الحالة
     rt_list = list(rt_seen)
