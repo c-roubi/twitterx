@@ -14,6 +14,17 @@ log = get_logger("monitor")
 TWEET_URL = "https://x.com/twitter/status/{tid}"
 
 
+def pick_monitor_account(cfg, accounts):
+    """حساب مسجّل دخول لمراقبة المدير: use_account إن وُجد وإلا أول حساب مفعّل."""
+    want = (cfg.get("monitor", {}) or {}).get("use_account")
+    if want and want in accounts and accounts[want].get("enabled", True):
+        return want
+    for aid, a in accounts.items():
+        if a.get("enabled", True):
+            return aid
+    return None
+
+
 def fetch_manager_tweets(cfg, accounts, dry_run=False):
     """جلب آخر تغريدات المدير. الطريقة: guest (بدون حساب) أو account (بأحد الحسابات)."""
     handle = cfg["manager_handle"].lstrip("@")
@@ -22,10 +33,11 @@ def fetch_manager_tweets(cfg, accounts, dry_run=False):
         return [], "no-manager"
 
     method = cfg["monitor"].get("method", "guest")
-    if method == "account" and cfg["monitor"].get("use_account"):
-        acc_id = cfg["monitor"]["use_account"]
-        if acc_id not in accounts:
-            log.warning(f"حساب المراقبة {acc_id} غير موجود - التحول إلى guest")
+    acc_id = None
+    if method == "account":
+        acc_id = pick_monitor_account(cfg, accounts)
+        if acc_id is None:
+            log.warning("لا حساب متاح لمراقبة المدير - التحول إلى guest")
             method = "guest"
 
     if dry_run:
@@ -50,6 +62,14 @@ def fetch_manager_tweets(cfg, accounts, dry_run=False):
 
 
 def _fetch_guest(cfg):
+    # جلسة الضيف (بدون حساب) غير موثوقة: X يعرض لها تغريدات قديمة/مشهورة أو جدار تسجيل دخول،
+    # فتعود "ok" بلا جديد رغم أن المدير نشر. لذلك نستخدم حساباً مسجّلاً إن وُجد (الافتراضي).
+    if (cfg.get("monitor", {}) or {}).get("guest_fallback_to_account", True):
+        accounts = load_accounts()
+        acc_id = pick_monitor_account(cfg, accounts)
+        if acc_id:
+            log.info(f"مراقبة المدير بحساب مسجّل ({acc_id}) بدل جلسة الضيف")
+            return _fetch_with_account(cfg, accounts, acc_id)
     # يُشغَّل داخل خيط مستقل بحلقة asyncio نظيفة (تفادي خطأ Sync API inside asyncio loop)
     return pw_runner.run_isolated(_fetch_guest_impl, cfg)
 
@@ -271,3 +291,48 @@ def give_up_action(tid, acc_id, action):
                 task["failed"].append(action)
     save_seen(seen)
     log.info(f"{acc_id} | تخطّي نهائي للعملية {action} على التغريدة {tid}")
+
+
+def cancel_stale(*args, **kwargs):
+    """إلغاء مهام التغريدات القديمة غير المنفّذة (لا معنى للتفاعل مع تغريدة مضى عليها وقت طويل).
+
+    المعاملات (كلها اختيارية، ومرنة الترتيب): cfg (dict) و max_age_hours (رقم، الافتراضي
+    engagement.stale_after_hours أو 12). ترجع عدد التغريدات التي أُلغيت مهامها.
+    """
+    cfg = kwargs.get("cfg")
+    max_age_h = kwargs.get("max_age_hours", kwargs.get("max_age_h"))
+    for a in args:
+        if isinstance(a, dict) and cfg is None:
+            cfg = a
+        elif isinstance(a, (int, float)) and not isinstance(a, bool) and max_age_h is None:
+            max_age_h = a
+    if max_age_h is None:
+        max_age_h = float(((cfg or {}).get("engagement", {}) or {}).get("stale_after_hours", 12))
+    cutoff = time.time() - float(max_age_h) * 3600
+
+    seen = load_seen()
+    cancelled = 0
+    for tid, entry in seen.items():
+        if not entry.get("scheduled") or entry.get("stale") or entry.get("deleted"):
+            continue
+        try:
+            detected = datetime.fromisoformat(entry.get("detected_at", "")).timestamp()
+        except Exception:
+            continue
+        if detected > cutoff:
+            continue
+        changed = False
+        for task in entry.get("queue", []):
+            failed = task.setdefault("failed", [])
+            for act in task.get("actions", []):
+                if act not in task.get("done", []) and act not in failed:
+                    failed.append(act)
+                    changed = True
+        if changed:
+            entry["stale"] = True
+            entry["stale_at"] = datetime.now().isoformat(timespec="seconds")
+            cancelled += 1
+    if cancelled:
+        save_seen(seen)
+        log.info(f"أُلغيت مهام {cancelled} تغريدة قديمة (أقدم من {max_age_h} ساعة)")
+    return cancelled
