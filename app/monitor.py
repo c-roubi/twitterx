@@ -115,7 +115,7 @@ def _fetch_with_account_impl(cfg, accounts, acc_id):
             pass
 
 
-def schedule_for_tweet(tid, text="", cfg=None, accounts=None):
+def schedule_for_tweet(tid, text="", cfg=None, accounts=None, priority=False):
     """اختيار مجموعة حسابية عشوائية وتوزيع مهام عليها بجدول متدرج.
 
     text: نص التغريدة (يُحفظ لاستخدامه في التوليد السياقي للتعليقات).
@@ -140,6 +140,8 @@ def schedule_for_tweet(tid, text="", cfg=None, accounts=None):
     mix = cfg["engagement"]["action_mix"]
     max_comments = cfg["engagement"].get("max_comments_per_tweet", 8)
     spread = random.uniform(*cfg["engagement"]["spread_hours"]) * 3600
+    if priority:
+        spread = random.uniform(300, 900)  # عاجل: كل التفاعلات خلال 5-15 دقيقة
 
     # نسبة تعليق شبه ثابتة ~ نسبة المزيج (60%) مع تذبذب خفيف 55-65%
     comment_rate = mix.get("comment", 0.6)
@@ -159,7 +161,10 @@ def schedule_for_tweet(tid, text="", cfg=None, accounts=None):
             actions.append("comment")
         if not actions:
             actions = ["like"]
-        due = now + random.uniform(120, spread)  # أول عملية بعد دقيقتين على الأقل
+        if priority:
+            due = now + random.uniform(15, spread)
+        else:
+            due = now + random.uniform(120, spread)  # أول عملية بعد دقيقتين على الأقل
         queue.append({"account": aid, "actions": actions, "due": due, "done": []})
 
     seen[tid] = {
@@ -168,6 +173,7 @@ def schedule_for_tweet(tid, text="", cfg=None, accounts=None):
         "text": (text or "")[:2000],
         "detected_at": datetime.now().isoformat(timespec="seconds"),
         "scheduled": True,
+        "priority": bool(priority),
         "queue": queue,
     }
     save_seen(seen)

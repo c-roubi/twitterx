@@ -105,8 +105,12 @@ def _account_en_ratio(acc):
         return None
 
 
-def run_session(acc_id, cfg, accounts, dry_run=False):
-    """جلسة واحدة كاملة لحساب: تصفح + تفاعلات عشوائية + نشاط كريبتو + مهام المدير المستحقة."""
+def run_session(acc_id, cfg, accounts, dry_run=False, fast=False):
+    """جلسة واحدة كاملة لحساب: تصفح + تفاعلات عشوائية + نشاط كريبتو + مهام المدير المستحقة.
+
+    fast=True (مهام عاجلة): يفتح الحساب وينفّذ المهام العاجلة المستحقة فقط، بدون تصفح/كريبتو
+    وبدون احتساب جلسة من خطة اليوم.
+    """
     acc = dict(accounts[acc_id])
     acc["id"] = acc_id
     state = ensure_daily_plan(acc_id, cfg)
@@ -119,10 +123,10 @@ def run_session(acc_id, cfg, accounts, dry_run=False):
 
     # تشغيل الجزء الذي يستخدم Playwright داخل خيط مستقل بحلقة asyncio نظيفة،
     # حتى لا تتسرب حلقة عالقة من جلسة سابقة فتُسبب "Sync API inside the asyncio loop".
-    pw_runner.run_isolated(_run_session_browser, acc_id, acc, cfg, state, human)
+    pw_runner.run_isolated(_run_session_browser, acc_id, acc, cfg, state, human, fast)
 
 
-def _run_session_browser(acc_id, acc, cfg, state, human):
+def _run_session_browser(acc_id, acc, cfg, state, human, fast=False):
     pw, ctx, page, pw_owned = None, None, None, False
     try:
         from playwright.sync_api import sync_playwright
@@ -141,6 +145,14 @@ def _run_session_browser(acc_id, acc, cfg, state, human):
             state["needs_relogin"] = True
             save_state(acc_id, state)
             log.warning(f"{acc_id} | الجلسة منتهية - تحتاج إعادة تسجيل دخول: python main.py login {acc_id}")
+            return
+
+        if fast:
+            # مهام عاجلة فقط: بدون تصفح ولا كريبتو ولا احتساب جلسة
+            _run_due_manager_tasks(page, acc_id, cfg, state, human, acc=acc,
+                                   ignore_rest=True, priority_only=True)
+            save_state(acc_id, state)
+            log.info(f"{acc_id} | انتهت المهام العاجلة")
             return
 
         minutes = cfg["behavior"].get("session_minutes", [15, 35])
@@ -491,13 +503,16 @@ def _handle_action_failure(cfg, tid, acc_id, action, msg):
         log.warning(f"{acc_id} | {action} على {tid} فشل: {msg}")
 
 
-def _run_due_manager_tasks(page, acc_id, cfg, state, human, acc=None):
+def _run_due_manager_tasks(page, acc_id, cfg, state, human, acc=None,
+                           ignore_rest=False, priority_only=False):
     """تنفيذ كل مهام المدير المستحقة (مع معالجة الحذف وفشل العملية بالتخطي)."""
-    if state.get("rest_day"):
+    if state.get("rest_day") and not ignore_rest:
         return
     en_ratio = _account_en_ratio(acc)
     seen = load_seen()
     tasks = monitor.due_tasks_for(acc_id, seen)
+    if priority_only:
+        tasks = [t for t in tasks if seen.get(t["tweet_id"], {}).get("priority")]
     if not tasks:
         return
     for task in tasks:
@@ -621,4 +636,34 @@ def check_due_sessions(cfg, accounts, dry_run=False):
         elif dry_run:
             run_session(acc_id, cfg, accounts, dry_run=True)
             results["sessions"] += 1
+    return results
+
+
+def check_priority_tasks(cfg, accounts, dry_run=False, *args, **kwargs):
+    """تنفيذ المهام العاجلة (التغريدات المسجّلة priority=True) فور استحقاقها.
+
+    تتجاوز جدول الجلسات اليومي ويوم الراحة، وتنفّذ مهام التغريدة فقط (بدون تصفح/كريبتو).
+    تحترم مهلة الأمان بعد الانهيار. ترجع {"sessions": عدد الحسابات المنفّذة, "tasks": عدد المهام}.
+    """
+    results = {"sessions": 0, "tasks": 0}
+    seen = load_seen()
+    if not any(e.get("priority") for e in seen.values()):
+        return results
+    for acc_id in enabled_accounts(accounts):
+        state = ensure_daily_plan(acc_id, cfg)
+        if state.get("needs_relogin"):
+            continue
+        crash_at = float(state.get("last_session_crash") or 0)
+        if crash_at and time.time() - crash_at < _CRASH_COOLDOWN_S:
+            continue
+        due = [t for t in monitor.due_tasks_for(acc_id, seen)
+               if seen.get(t["tweet_id"], {}).get("priority")]
+        if not due:
+            continue
+        results["tasks"] += len(due)
+        if dry_run:
+            log.info(f"{acc_id} | [DRY-RUN] مهام عاجلة مستحقة: {len(due)}")
+            continue
+        run_session(acc_id, cfg, accounts, dry_run=False, fast=True)
+        results["sessions"] += 1
     return results
