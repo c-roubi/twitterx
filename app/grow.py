@@ -9,7 +9,7 @@ from .actions import (
     TWEET_ARTICLE, LIKE_BTN, UNLIKE_BTN, USER_CELL,
     follow_user, open_profile, read_profile,
 )
-from .selectors import VERIFIED_ICON
+from .selectors import VERIFIED_ICON, RETWEET_BTN, STATUS_LINK
 from .browser import is_login_wall
 from .config import save_state
 from .humanizer import Human, randint
@@ -225,6 +225,165 @@ def run_follow_pass(page, acc_id, cfg, state, human, max_follows):
     return followed, "ok"
 
 
+# ---------------------------------------------------------------------------
+# مصدر متابعة إضافي: الناس الذين أعادوا نشر (ريتويت) تغريدات كريبتو متفاعلة
+# ---------------------------------------------------------------------------
+def _leading_count(text):
+    """استخراج أول رقم (مع لاحقة K/M/B) من نص مثل «123 reposts» أو «2.4K»."""
+    m = re.search(r"(\d[\d,\.]*)\s*([KMB])?", text or "", re.I)
+    if not m:
+        return 0
+    try:
+        num = float(m.group(1).replace(",", ""))
+    except ValueError:
+        return 0
+    mult = {"K": 1_000, "M": 1_000_000, "B": 1_000_000_000}.get((m.group(2) or "").upper(), 1)
+    return int(num * mult)
+
+
+def _retweet_count_of(article):
+    """عدد إعادات النشر لتغريدة من زر إعادة النشر (aria-label)."""
+    try:
+        btn = article.locator(RETWEET_BTN).first
+        if btn.count() == 0:
+            return 0
+        return _leading_count(btn.get_attribute("aria-label") or "")
+    except Exception:
+        return 0
+
+
+def _status_ref_of(article):
+    """استخراج (المقبض، معرّف التغريدة) من رابط /<handle>/status/<id> داخل المقال."""
+    try:
+        for link in article.locator(STATUS_LINK).all():
+            href = link.get_attribute("href") or ""
+            m = re.search(r"^/?(?:https?://(?:x|twitter)\.com)?/([A-Za-z0-9_]{1,15})/status/(\d+)", href)
+            if m:
+                return m.group(1), m.group(2)
+    except Exception:
+        pass
+    return None, None
+
+
+def _collect_engaged_tweets(page, cfg, seen_ids, limit=6):
+    """جمع تغريدات كريبتو ظاهرة لديها عدد إعادات نشر >= الحد الأدنى (لم تُعالَج سابقاً)."""
+    f = cfg.get("follow", {})
+    min_rt = int(f.get("min_retweets", 2))
+    found = []
+    try:
+        for art in page.locator(TWEET_ARTICLE).all():
+            if len(found) >= limit:
+                break
+            handle, tid = _status_ref_of(art)
+            if not tid or tid in seen_ids:
+                continue
+            if _retweet_count_of(art) < min_rt:
+                continue
+            found.append((handle, tid))
+            seen_ids.add(tid)
+    except Exception:
+        pass
+    return found
+
+
+def run_retweeter_follow_pass(page, acc_id, cfg, state, human, max_follows):
+    """متابعة الأشخاص الذين أعادوا نشر تغريدات كريبتو متفاعلة أثناء التصفح.
+
+    الفكرة: التغريدات التي لها إعادات نشر = محتوى كريبتو متفاعل، ومن أعادوا نشرها
+    حسابات مهتمة فعلاً — مصدر متابعة أدق من البحث العشوائي. نطبّق نفس شروط الأهلية
+    (تخطّي الموثّقين + بايو + مدى المتابعين + عدم التكرار + الميزانية اليومية).
+    """
+    f = cfg.get("follow", {})
+    budget = follow_budget(state, cfg)
+    if budget <= 0 or max_follows <= 0:
+        return 0, "no-budget"
+
+    # نبدأ من نتائج بحث كريبتو مباشر (f=live) — تغريدات كريبتو حديثة بتفاعل
+    ok, gstatus = resilience.goto_with_retry(
+        page, f"https://x.com/search?q={quote(pick_query(cfg))}&f=live", cfg
+    )
+    if not ok:
+        log.warning(f"{acc_id} | تعذّر فتح بحث الريتويترز: {gstatus}")
+        return 0, f"goto-error:{gstatus}"
+    page.wait_for_timeout(3500)
+    for _ in range(15):
+        if page.locator(TWEET_ARTICLE).first.count() > 0:
+            break
+        if is_login_wall(page):
+            return 0, "login-wall"
+        page.wait_for_timeout(1000)
+
+    rt_seen = set(state.get("rt_seen_tweets", []) or [])
+    tweets_per_pass = int(f.get("retweeter_tweets_per_pass", 3))
+    # نمرّر قليلاً لجمع تغريدات متفاعلة
+    engaged = []
+    for _ in range(max(1, tweets_per_pass)):
+        engaged += _collect_engaged_tweets(page, cfg, rt_seen, limit=tweets_per_pass)
+        if len(engaged) >= tweets_per_pass:
+            break
+        try:
+            page.mouse.wheel(0, random.randint(900, 1600))
+            human.pause(1.5, 3.5)
+        except Exception:
+            break
+    if not engaged:
+        log.info(f"{acc_id} | لا تغريدات كريبتو بإعادات نشر كافية الآن (ريتويترز)")
+        return 0, "no-engaged-tweets"
+
+    seen_users = set(state.get("seen_users", []) or [])
+    skip_verified = bool(f.get("skip_verified", True))
+    max_scrolls = int(f.get("candidate_scrolls", 6))
+    lo_delay, hi_delay = (int(x) for x in f.get("delay_between_s", [90, 300]))
+    followed = 0
+
+    for handle, tid in engaged[:tweets_per_pass]:
+        if followed >= max_follows or follow_budget(state, cfg) <= 0:
+            break
+        rt_url = f"https://x.com/{handle or 'i'}/status/{tid}/retweets"
+        ok, gstatus = resilience.goto_with_retry(page, rt_url, cfg)
+        if not ok:
+            log.info(f"{acc_id} | تخطّي ريتويترز {tid}: {gstatus}")
+            continue
+        page.wait_for_timeout(2500)
+        for _ in range(12):
+            if page.locator(USER_CELL).first.count() > 0:
+                break
+            if is_login_wall(page):
+                return followed, "login-wall"
+            page.wait_for_timeout(1000)
+        human.pause(1.5, 4.0)
+        candidates = find_candidates(
+            page, human, seen_users=seen_users, limit=25,
+            skip_verified=skip_verified, max_scrolls=max_scrolls,
+        )
+        random.shuffle(candidates)
+        log.info(f"{acc_id} | ريتويترز التغريدة {tid}: {len(candidates)} مرشح غير موثّق")
+        for cand in candidates:
+            if followed >= max_follows or follow_budget(state, cfg) <= 0:
+                break
+            got, msg = _follow_one(page, human, cand, cfg, state, acc_id)
+            seen_users.add(cand)
+            if got:
+                state.setdefault("followed_handles", []).append(cand)
+                state["done"]["follows"] += 1
+                followed += 1
+            seen_list = list(seen_users)
+            if len(seen_list) > 3000:
+                seen_list = seen_list[-3000:]
+            state["seen_users"] = sorted(seen_list)
+            save_state(acc_id, state)
+            human.pause(max(20, int(lo_delay * 0.6)), hi_delay)
+
+    # تقييد حجم قائمة التغريدات المعالَجة في الحالة
+    rt_list = list(rt_seen)
+    if len(rt_list) > 500:
+        rt_list = rt_list[-500:]
+    state["rt_seen_tweets"] = rt_list
+    save_state(acc_id, state)
+    log.info(f"{acc_id} | جولة الريتويترز: +{followed} (إجمالي اليوم {state['done']['follows']})")
+    return followed, "ok"
+
+
 def browse_crypto_search(page, acc_id, cfg, state, human, budget_s, start):
     """تصفح أحدث تغريدات كريبتو (f=live) مع لايك خفيف ضمن حدود اليوم."""
     ok, gstatus = resilience.goto_with_retry(
@@ -286,4 +445,14 @@ def crypto_activity(page, acc_id, cfg, state, human, budget_s):
         browse_crypto_search(page, acc_id, cfg, state, human, budget_s * 0.5, start)
     if f.get("enabled", True) and follow_budget(state, cfg) > 0:
         per_session = f.get("per_session", [1, 3])
-        run_follow_pass(page, acc_id, cfg, state, human, randint(*per_session))
+        target = randint(*per_session)
+        # توزيع مناصفة تقريباً: نصف من الريتويترز ونصف من بحث الأشخاص
+        rt_target = (target + random.randint(0, 1)) // 2
+        done = 0
+        if f.get("from_retweeters", True) and rt_target > 0 and follow_budget(state, cfg) > 0:
+            got, _ = run_retweeter_follow_pass(page, acc_id, cfg, state, human, rt_target)
+            done += got
+        # الباقي من البحث (يشمل ما لم تُكمله جولة الريتويترز)
+        remaining = max(0, target - done)
+        if remaining > 0 and follow_budget(state, cfg) > 0:
+            run_follow_pass(page, acc_id, cfg, state, human, remaining)
