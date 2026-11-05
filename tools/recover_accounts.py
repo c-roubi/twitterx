@@ -16,8 +16,17 @@ import re
 import shutil
 import sys
 
-BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA = os.path.join(BASE, "data")
+def _find_data():
+    """مجلد data: بجانب السكربت، أو بمجلده الأب، أو بمجلد التشغيل الحالي."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    for base in (here, os.path.dirname(here), os.getcwd()):
+        d = os.path.join(base, "data")
+        if os.path.isdir(d):
+            return d
+    return os.path.join(os.getcwd(), "data")
+
+
+DATA = _find_data()
 ACC_RE = re.compile(r"^acc_\d+$")
 LOG_RE = re.compile(r"(?:بدء جلسة|إحماء)\s+(acc_\d+)\s+\(([^)]*)\)")
 
@@ -54,6 +63,7 @@ def main():
             accounts = json.load(f)
     except Exception:
         accounts = {}
+    print(f"مجلد البيانات: {DATA}")
     logs = handles_from_logs()
     ids = ids_on_disk() | set(logs)
     print(f"معرّفات الحسابات الموجودة على القرص/السجلات: {sorted(ids)}")
