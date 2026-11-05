@@ -10,6 +10,7 @@ from .actions import (
     follow_user, open_profile, read_profile,
 )
 from .selectors import VERIFIED_ICON, RETWEET_BTN, STATUS_LINK
+from . import verify_cache
 from .browser import is_login_wall
 from .config import save_state
 from .humanizer import Human, randint
@@ -97,12 +98,17 @@ def find_candidates(page, human, seen_users=(), limit=30,
             for cell in page.locator(cell_selector or USER_CELL).all():
                 if len(handles) >= limit:
                     break
-                if skip_verified and _cell_is_verified(cell):
-                    skipped_verified += 1
-                    continue
                 handle = _handle_in_cell(cell, seen, handles)
-                if handle:
-                    handles.append(handle)
+                if not handle:
+                    continue
+                if skip_verified:
+                    v = verify_cache.lookup(handle)  # بيانات X أولاً
+                    if v is None:
+                        v = _cell_is_verified(cell)  # احتياط: الـ DOM
+                    if v:
+                        skipped_verified += 1
+                        continue
+                handles.append(handle)
         except Exception:
             pass
         if len(handles) >= limit or r >= rounds - 1:

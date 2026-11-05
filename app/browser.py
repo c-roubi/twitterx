@@ -5,7 +5,7 @@ import time
 
 from playwright.sync_api import sync_playwright
 
-from . import proxies, selectors
+from . import proxies, selectors, verify_cache
 from .config import PROFILES_DIR, SESSIONS_DIR
 from .humanizer import fingerprint_for, Human
 from .logger import get_logger
@@ -115,6 +115,7 @@ def launch_guest(cfg, pw):
         if use_proxy:
             ctx_kwargs["proxy"] = proxies.proxy_args(use_proxy)
         context = browser.new_context(**ctx_kwargs)
+        verify_cache.attach(context)
         _apply_fingerprint(context, fp, use_chrome)
         return context
 
@@ -176,6 +177,7 @@ def launch_account(account, cfg, pw=None, owned_pw=True):
         if use_proxy:
             ctx_kwargs["proxy"] = proxies.proxy_args(use_proxy)
         context = pw.chromium.launch_persistent_context(**ctx_kwargs)
+        verify_cache.attach(context)
         _apply_fingerprint(context, fp, use_chrome)
         page = context.pages[0] if context.pages else context.new_page()
         return pw, context, page, pw_owned

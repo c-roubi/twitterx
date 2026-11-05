@@ -521,6 +521,13 @@ def read_profile(page, handle):
             info["verified"] = False
     except Exception:
         pass
+    # بيانات X نفسها (is_blue_verified/verified) هي المرجع إن توفرت، وتتغلب على الـ DOM
+    from . import verify_cache
+    api_v = verify_cache.lookup(handle)
+    if api_v is not None:
+        if api_v != info["verified"]:
+            log.info(f"@{handle}: التوثيق حسب بيانات X={api_v} (الـ DOM قال {info['verified']}) - اعتماد بيانات X")
+        info["verified"] = api_v
     return info
 
 
