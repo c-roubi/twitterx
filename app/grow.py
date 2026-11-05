@@ -9,6 +9,7 @@ from .actions import (
     TWEET_ARTICLE, LIKE_BTN, UNLIKE_BTN, USER_CELL,
     follow_user, open_profile, read_profile,
 )
+from .selectors import VERIFIED_ICON
 from .browser import is_login_wall
 from .config import save_state
 from .humanizer import Human, randint
@@ -48,24 +49,65 @@ def _handle_from_href(href):
     return m.group(1) if m else None
 
 
-def find_candidates(page, human, seen_users=(), limit=30):
-    """جمع مرشحين من نتائج بحث الأشخاص (f=user) — أسماء فريدة لم نرها من قبل."""
-    seen = set(seen_users or ())
-    handles = []
+def _cell_is_verified(cell):
+    """هل خلية المستخدم في نتائج البحث تخص حساباً موثّقاً؟ (شارة التوثيق داخل الخلية)."""
     try:
-        for cell in page.locator(USER_CELL).all():
-            if len(handles) >= limit:
-                break
-            try:
-                for link in cell.locator("a[href]").all():
-                    handle = _handle_from_href(link.get_attribute("href") or "")
-                    if handle and handle not in seen and handle not in handles:
-                        handles.append(handle)
-                        break
-            except Exception:
-                continue
+        return cell.locator(VERIFIED_ICON).first.count() > 0
+    except Exception:
+        return False
+
+
+def _handle_in_cell(cell, seen, handles):
+    """استخراج أول اسم حساب صالح وجديد من خلية مستخدم."""
+    try:
+        for link in cell.locator("a[href]").all():
+            handle = _handle_from_href(link.get_attribute("href") or "")
+            if handle and handle not in seen and handle not in handles:
+                return handle
     except Exception:
         pass
+    return None
+
+
+def find_candidates(page, human, seen_users=(), limit=30,
+                    skip_verified=False, max_scrolls=0):
+    """جمع مرشحين من نتائج بحث الأشخاص (f=user) — أسماء فريدة لم نرها من قبل.
+
+    skip_verified: تخطّي الحسابات الموثّقة مبكّراً (على مستوى الخلية) حتى لا تُهدر
+                   ميزانية اليوم بزيارة بروفايلات موثّقة ثم تخطّيها لاحقاً. نتائج بحث
+                   X تُظهر الموثّقين أولاً، لذا هذا الفلتر ضروري لإيجاد حسابات طبيعية.
+    max_scrolls: عدد مرات التمرير لتحميل مزيد من النتائج أثناء الجمع (0 = بلا تمرير).
+    """
+    seen = set(seen_users or ())
+    handles = []
+    skipped_verified = 0
+    rounds = max(1, int(max_scrolls) + 1)
+    for r in range(rounds):
+        try:
+            for cell in page.locator(USER_CELL).all():
+                if len(handles) >= limit:
+                    break
+                if skip_verified and _cell_is_verified(cell):
+                    skipped_verified += 1
+                    continue
+                handle = _handle_in_cell(cell, seen, handles)
+                if handle:
+                    handles.append(handle)
+        except Exception:
+            pass
+        if len(handles) >= limit or r >= rounds - 1:
+            break
+        # تمرير لتحميل مزيد من نتائج الأشخاص (للوصول لغير الموثّقين الأعمق في القائمة)
+        try:
+            page.mouse.wheel(0, random.randint(900, 1600))
+            if human is not None:
+                human.pause(1.5, 3.5)
+            else:
+                page.wait_for_timeout(1500)
+        except Exception:
+            break
+    if skip_verified and skipped_verified:
+        log.info(f"تخطّي {skipped_verified} حساب موثّق أثناء جمع المرشحين | غير موثّق: {len(handles)}")
     return handles
 
 
@@ -148,7 +190,16 @@ def run_follow_pass(page, acc_id, cfg, state, human, max_follows):
         page.wait_for_timeout(1000)
     human.pause(2.0, 5.0)
     seen_users = set(state.get("seen_users", []) or [])
-    candidates = find_candidates(page, human, seen_users=seen_users, limit=40)
+    # تخطّي الموثّقين عند الجمع (حسب الإعداد) + تمرير لجلب حسابات طبيعية كافية
+    skip_verified = bool(f.get("skip_verified", True))
+    max_scrolls = int(f.get("candidate_scrolls", 6))
+    candidates = find_candidates(
+        page, human, seen_users=seen_users, limit=40,
+        skip_verified=skip_verified, max_scrolls=max_scrolls,
+    )
+    if not candidates:
+        log.warning(f"{acc_id} | لم يُعثر على حسابات غير موثّقة في \"{query}\" - جرّب كلمات بحث أضيق")
+        return 0, "no-candidates"
     random.shuffle(candidates)
     followed = 0
     lo_delay, hi_delay = (int(x) for x in f.get("delay_between_s", [90, 300]))

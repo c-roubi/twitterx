@@ -4,7 +4,7 @@ import random
 import time
 from datetime import datetime
 
-from . import browser, monitor, resilience
+from . import browser, monitor, pw_runner, resilience
 from . import selectors
 from .actions import (
     TWEET_ARTICLE, LIKE_BTN, UNLIKE_BTN, RETWEET_BTN, UNRETWEET_BTN,
@@ -117,6 +117,12 @@ def run_session(acc_id, cfg, accounts, dry_run=False):
         _dry_run_session(acc_id, cfg, state)
         return
 
+    # تشغيل الجزء الذي يستخدم Playwright داخل خيط مستقل بحلقة asyncio نظيفة،
+    # حتى لا تتسرب حلقة عالقة من جلسة سابقة فتُسبب "Sync API inside the asyncio loop".
+    pw_runner.run_isolated(_run_session_browser, acc_id, acc, cfg, state, human)
+
+
+def _run_session_browser(acc_id, acc, cfg, state, human):
     pw, ctx, page, pw_owned = None, None, None, False
     try:
         from playwright.sync_api import sync_playwright
@@ -200,6 +206,11 @@ def run_warmup(acc_id, cfg, accounts, dry_run=False):
         _dry_run_session(acc_id, cfg, state)
         return {"acc_id": acc_id, "status": "dry-run"}
 
+    # تشغيل جزء Playwright داخل خيط مستقل بحلقة asyncio نظيفة (نفس علاج الجلسة).
+    return pw_runner.run_isolated(_run_warmup_browser, acc_id, acc, cfg, state, human)
+
+
+def _run_warmup_browser(acc_id, acc, cfg, state, human):
     pw, ctx, page, pw_owned = None, None, None, False
     try:
         from playwright.sync_api import sync_playwright

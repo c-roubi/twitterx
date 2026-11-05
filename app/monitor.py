@@ -4,7 +4,7 @@ import random
 import time
 from datetime import datetime
 
-from . import browser, humanizer, resilience
+from . import browser, humanizer, pw_runner, resilience
 from .actions import scrape_profile_tweets
 from .config import load_accounts, load_seen, save_seen
 from .logger import get_logger
@@ -50,6 +50,11 @@ def fetch_manager_tweets(cfg, accounts, dry_run=False):
 
 
 def _fetch_guest(cfg):
+    # يُشغَّل داخل خيط مستقل بحلقة asyncio نظيفة (تفادي خطأ Sync API inside asyncio loop)
+    return pw_runner.run_isolated(_fetch_guest_impl, cfg)
+
+
+def _fetch_guest_impl(cfg):
     from playwright.sync_api import sync_playwright
 
     pw = sync_playwright().start()
@@ -78,6 +83,11 @@ def _fetch_guest(cfg):
 
 
 def _fetch_with_account(cfg, accounts, acc_id):
+    # يُشغَّل داخل خيط مستقل بحلقة asyncio نظيفة (تفادي خطأ Sync API inside asyncio loop)
+    return pw_runner.run_isolated(_fetch_with_account_impl, cfg, accounts, acc_id)
+
+
+def _fetch_with_account_impl(cfg, accounts, acc_id):
     from playwright.sync_api import sync_playwright
 
     acc = dict(accounts[acc_id])

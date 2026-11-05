@@ -69,6 +69,7 @@ DEFAULT_CONFIG = {
         "min_followers": 50,
         "max_followers": 150000,
         "skip_verified": True,
+        "candidate_scrolls": 6,
         "visit_only_chance": 0.25,
         "queries": ["bitcoin", "crypto", "altcoins", "ethereum", "solana", "$BTC", "crypto trading", "#crypto", "diamond hands", "altseason"]
     },
