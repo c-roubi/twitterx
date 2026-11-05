@@ -5,7 +5,7 @@ import time
 
 from playwright.sync_api import sync_playwright
 
-from . import proxies, selectors, verify_cache
+from . import proxies, pw_runner, selectors, verify_cache
 from .config import PROFILES_DIR, SESSIONS_DIR
 from .humanizer import fingerprint_for, Human
 from .logger import get_logger
@@ -231,8 +231,42 @@ def is_login_wall(page):
     return False
 
 
-def login_account(account, cfg):
-    """تسجيل دخول يدوي أول مرة: يفتح المتصفح ويستلم من المستخدم، ثم يحفظ الجلسة."""
+def _wait_confirm(confirm, prompt):
+    """انتظار تأكيد المستخدم بعد تسجيل الدخول اليدوي. ترجع True للمتابعة.
+
+    confirm يحدد مصدر التأكيد (ليعمل من الطرفية ومن الواجهة الرسومية):
+      - None            : input() من الطرفية (السلوك الأصلي)
+      - دالة (callable) : تُستدعى وتحجب حتى يؤكد المستخدم من الواجهة؛ إرجاع False = إلغاء
+      - Event/مشابه     : له wait() فننتظره
+      - True / False    : True = متابعة فورية بلا انتظار، False = إلغاء
+    """
+    if confirm is None:
+        return input(prompt) is not None
+    if isinstance(confirm, bool):
+        return confirm
+    if callable(confirm):
+        try:
+            res = confirm()
+        except TypeError:
+            res = confirm(prompt)
+        return res is None or bool(res)
+    waiter = getattr(confirm, "wait", None)
+    if callable(waiter):
+        waiter()
+        return True
+    return True
+
+
+def login_account(account, cfg, confirm=None, **kwargs):
+    """تسجيل دخول يدوي أول مرة: يفتح المتصفح ويستلم من المستخدم، ثم يحفظ الجلسة.
+
+    confirm: مصدر التأكيد بعد الدخول (انظر _wait_confirm) — تستخدمه الواجهة بدل input().
+    يعمل داخل خيط مستقل بحلقة asyncio نظيفة حتى لو استُدعي من سيرفر الواجهة.
+    """
+    return pw_runner.run_isolated(_login_account_impl, account, cfg, confirm)
+
+
+def _login_account_impl(account, cfg, confirm=None):
     acc_id = account.get("id", "unknown")
     pw = sync_playwright().start()
     try:
@@ -240,26 +274,32 @@ def login_account(account, cfg):
         login_cfg["browser"] = dict(cfg.get("browser", {}))
         login_cfg["browser"]["headless"] = False
         _, context, page, _ = launch_account(account, login_cfg, pw=pw, owned_pw=False)
-        
-        # ✅ التعديل تم هنا لتسريع التحميل وتجنب الـ Timeout
+
         page.goto("https://x.com/login", timeout=60000, wait_until="domcontentloaded")
-        
+
         print("=" * 60)
         print("  سجّل الدخول يدوياً الآن في النافذة المفتوحة (اسم مستخدم + كلمة مرور / رمز تحقق).")
-        print("  بعد اكتمال الدخول والوصول للصفحة الرئيسية، ارجع للطرفية واضغط Enter.")
+        print("  بعد اكتمال الدخول والوصول للصفحة الرئيسية، أكّد (Enter في الطرفية أو زر التأكيد في الواجهة).")
         print("=" * 60)
-        input("  اضغط Enter بعد تسجيل الدخول... ")
+        if not _wait_confirm(confirm, "  اضغط Enter بعد تسجيل الدخول... "):
+            print("تم الإلغاء.")
+            return False
         for _ in range(30):
             if is_logged_in(page):
                 break
             time.sleep(2)
         if not is_logged_in(page):
             print("! لم يتم رصد حالة الدخول. هل أنت متأكد أنك سجّلت الدخول؟")
-            ans = input("  اكتب yes للمتابعة وحفظ الجلسة رغم ذلك: ").strip().lower()
-            if ans != "yes":
-                print("تم الإلغاء.")
-                return False
+            if confirm is None:
+                ans = input("  اكتب yes للمتابعة وحفظ الجلسة رغم ذلك: ").strip().lower()
+                if ans != "yes":
+                    print("تم الإلغاء.")
+                    return False
+            else:
+                # من الواجهة: المستخدم أكّد بنفسه، فنحفظ مع تحذير (الجلسة الفعلية في بروفايل المتصفح)
+                print("! تحذير: لم يُرصد الدخول تلقائياً، لكن تأكيدك معتمد - تُحفظ الجلسة.")
         state_path = os.path.join(SESSIONS_DIR, f"{acc_id}.json")
+        os.makedirs(SESSIONS_DIR, exist_ok=True)
         context.storage_state(path=state_path)
         print(f"✓ تم حفظ الجلسة للحساب {acc_id} في {state_path}")
         return True
