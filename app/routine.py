@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """الروتين اليومي الذكي: نشاط عشوائي طبيعي + تنفيذ تفاعلات المدير."""
 import random
+import threading
 import time
 from datetime import datetime
 
@@ -9,14 +10,14 @@ from . import selectors
 from .actions import (
     TWEET_ARTICLE, LIKE_BTN, UNLIKE_BTN, RETWEET_BTN, UNRETWEET_BTN,
     comment_on_tweet, like_tweet, retweet_tweet, dismiss_compose_dialog,
-    open_tweet, open_tweet_with_retry,
+    already_replied, open_tweet, open_tweet_with_retry,
     scroll_home,
 )
 from .selectors import RETWEET_CONFIRM_CANDIDATES, TWEET_TEXT
 from .comments import build_comment_for
 from .config import (
     enabled_accounts, load_accounts, load_config,
-    load_seen, load_state, save_state,
+    load_seen, load_state, locked_seen, save_state,
 )
 from .grow import crypto_activity
 from .humanizer import (
@@ -105,7 +106,36 @@ def _account_en_ratio(acc):
         return None
 
 
+# قفل لكل حساب: لا يُفتح بروفايل المتصفح نفسه في جلستين متزامنتين (جلسة عادية + مهمة عاجلة)
+_busy = set()
+_busy_lock = threading.Lock()
+_retry_after = {}
+
+
+def _acquire(acc_id):
+    with _busy_lock:
+        if acc_id in _busy:
+            return False
+        _busy.add(acc_id)
+        return True
+
+
+def _release(acc_id):
+    with _busy_lock:
+        _busy.discard(acc_id)
+
+
 def run_session(acc_id, cfg, accounts, dry_run=False):
+    if not _acquire(acc_id):
+        log.info(f"{acc_id} | مشغول بجلسة أخرى - تخطي")
+        return
+    try:
+        return _run_session(acc_id, cfg, accounts, dry_run)
+    finally:
+        _release(acc_id)
+
+
+def _run_session(acc_id, cfg, accounts, dry_run=False):
     """جلسة واحدة كاملة لحساب: تصفح + تفاعلات عشوائية + نشاط كريبتو + مهام المدير المستحقة."""
     acc = dict(accounts[acc_id])
     acc["id"] = acc_id
@@ -120,7 +150,9 @@ def run_session(acc_id, cfg, accounts, dry_run=False):
     pw, ctx, page, pw_owned = None, None, None, False
     try:
         from playwright.sync_api import sync_playwright
+        from ._pw_cleanup import cleanup_asyncio_loop
 
+        cleanup_asyncio_loop()
         pw = sync_playwright().start()
         _, ctx, page, pw_owned = browser.launch_account(acc, cfg, pw=pw, owned_pw=False)
         human.page = page
@@ -143,12 +175,13 @@ def run_session(acc_id, cfg, accounts, dry_run=False):
 
         # 1) تصفح عشوائي وتفاعلات طبيعية
         _browse_and_interact(page, acc_id, cfg, state, human, session_secs, session_start, acc=acc)
-        save_state(acc_id, state)  # حفظ تقدم الجلسة بعد التصفح (حماية من الانهيار)
+        save_state(acc_id, state)
 
         # 2) نشاط الكريبتو اليومي: تصفح بحث + متابعات بطيئة للمهتمين
         remaining = max(0, int(session_secs - (time.time() - session_start)))
-        crypto_activity(page, acc_id, cfg, state, human, max(120, min(remaining, 900)))
-        save_state(acc_id, state)  # حفظ تقدم الكريبتو (لايك/متابعات)
+        if not monitor.priority_pending(acc_id):
+            crypto_activity(page, acc_id, cfg, state, human, max(120, min(remaining, 900)))
+        save_state(acc_id, state)
 
         # 3) تنفيذ مهام المدير المستحقة لهذا الحساب
         _run_due_manager_tasks(page, acc_id, cfg, state, human, acc=acc)
@@ -166,25 +199,31 @@ def run_session(acc_id, cfg, accounts, dry_run=False):
                 save_state(acc_id, state)
             except Exception:
                 pass
-        if pw_owned:
-            try:
-                pw.stop()
-            except Exception:
-                pass
     finally:
         if ctx is not None:
             try:
                 ctx.close()
             except Exception:
                 pass
-        if pw_owned:
+        if pw is not None:
             try:
                 pw.stop()
             except Exception:
                 pass
+            pw = None
 
 
 def run_warmup(acc_id, cfg, accounts, dry_run=False):
+    if not _acquire(acc_id):
+        log.info(f"{acc_id} | مشغول بجلسة أخرى - تأجيل الإحماء")
+        return {"account": acc_id, "skipped": "busy"}
+    try:
+        return _run_warmup(acc_id, cfg, accounts, dry_run)
+    finally:
+        _release(acc_id)
+
+
+def _run_warmup(acc_id, cfg, accounts, dry_run=False):
     """جلسة إحماء خفيفة: فتح الحساب والتفاعل مع كريبتو حتى لو لم ينزل المدير شيئاً.
 
     لا تحسب ضمن جلسات الخطة اليومية (لا تزيد sessions_run) حتى لا تؤثر على جدول الجلسات.
@@ -203,7 +242,9 @@ def run_warmup(acc_id, cfg, accounts, dry_run=False):
     pw, ctx, page, pw_owned = None, None, None, False
     try:
         from playwright.sync_api import sync_playwright
+        from ._pw_cleanup import cleanup_asyncio_loop
 
+        cleanup_asyncio_loop()
         pw = sync_playwright().start()
         _, ctx, page, pw_owned = browser.launch_account(acc, cfg, pw=pw, owned_pw=False)
         human.page = page
@@ -223,7 +264,6 @@ def run_warmup(acc_id, cfg, accounts, dry_run=False):
         minutes = cfg.get("warmup", {}).get("session_minutes", [8, 15])
         budget_s = randint(minutes[0], minutes[1]) * 60
 
-        # تصفح خفيف للرئيسية ثم نشاط كريبتو (بحث + متابعات بطيئة)
         scroll_home(page, human, steps=randint(1, 2))
         human.mouse_wander(page)
         crypto_activity(page, acc_id, cfg, state, human, budget_s)
@@ -243,11 +283,12 @@ def run_warmup(acc_id, cfg, accounts, dry_run=False):
                 ctx.close()
             except Exception:
                 pass
-        if pw_owned:
+        if pw is not None:
             try:
                 pw.stop()
             except Exception:
                 pass
+            pw = None
 
 
 def warmup_due(state, cfg=None):
@@ -364,6 +405,9 @@ def _browse_and_interact(page, acc_id, cfg, state, human, session_secs, session_
     scrolls = 0
     dismiss_compose_dialog(page, human)  # تنظيف أي محرر/حوار من جولة سابقة
     while time.time() - session_start < session_secs:
+        if monitor.priority_pending(acc_id):  # مهمة عاجلة بانتظار هذا الحساب: أنهِ التصفح فوراً
+            log.info(f"{acc_id} | مهمة عاجلة مستحقة - إنهاء التصفح مبكراً")
+            break
         save_state(acc_id, state)  # حفظ التقدم عند كل دور
         # الخروج المبكر إذا اكتملت حصة التفاعلات
         if (not _can_do(state, "likes") and not _can_do(state, "retweets")
@@ -434,7 +478,10 @@ def _open_and_comment(page, url, acc_id, state, human, cfg=None, en_ratio=None):
         return False
     tweet_text = _extract_open_tweet_text(page)
     used = {c for t, e in load_seen().items() for c in e.get("comments_used", [])}
-    text = build_comment_for(tweet_text, used_texts=used, cfg=cfg, en_ratio=en_ratio)
+    text = build_comment_for(tweet_text, used_texts=used, cfg=cfg, en_ratio=en_ratio, acc_id=acc_id)
+    if not text:
+        log.warning(f"{acc_id} | لا يوجد تعليق غير مكرر متاح - تخطّي التعليق")
+        return False
     res, msg = comment_on_tweet(page, text, human)
     if res:
         _mark_done(state, "comments")
@@ -480,15 +527,23 @@ def _handle_action_failure(cfg, tid, acc_id, action, msg):
         log.warning(f"{acc_id} | {action} على {tid} فشل: {msg}")
 
 
-def _run_due_manager_tasks(page, acc_id, cfg, state, human, acc=None):
-    """تنفيذ كل مهام المدير المستحقة (مع معالجة الحذف وفشل العملية بالتخطي)."""
-    if state.get("rest_day"):
+def _run_due_manager_tasks(page, acc_id, cfg, state, human, acc=None, priority=False):
+    """تنفيذ كل مهام المدير المستحقة (مع معالجة الحذف وفشل العملية بالتخطي).
+
+    priority=True (مهام عاجلة): لا يُراعى يوم الراحة ولا الحدود اليومية، وتأخيرات قصيرة بين العمليات.
+    """
+    if state.get("rest_day") and not priority:
         return
     en_ratio = _account_en_ratio(acc)
     seen = load_seen()
-    tasks = monitor.due_tasks_for(acc_id, seen)
+    tasks = monitor.due_tasks_for(acc_id, seen, priority=priority)
     if not tasks:
         return
+    fast = cfg.get("telegram", {}).get("action_delay_s", [2, 6])
+    if priority:  # عاجل: لا نؤخّر التعليق بسبب فاصل الذكاء الاصطناعي بين الطلبات
+        import copy as _copy
+        cfg = _copy.deepcopy(cfg)
+        cfg.setdefault("comments", {}).setdefault("ai", {})["min_interval_s"] = 0
     for task in tasks:
         ok, status = open_tweet_with_retry(page, task["url"], cfg)
         if not ok:
@@ -497,25 +552,49 @@ def _run_due_manager_tasks(page, acc_id, cfg, state, human, acc=None):
                 log.warning(f"{acc_id} | تغريدة المدير {task['tweet_id']} محذوفة - أُزيلت من الجدول")
             elif status == "login-wall":
                 log.warning(f"{acc_id} | جدار تسجيل دخول عند فتح {task['tweet_id']} - تخطي")
+                if priority:
+                    state["needs_relogin"] = True
+                    save_state(acc_id, state)
             else:
                 monitor.record_tweet_open_attempt(task["tweet_id"])
                 log.warning(f"{acc_id} | تعذر فتح تغريدة المدير {task['tweet_id']}: {status}")
+            if priority and status != "deleted":  # عدّ المحاولات حتى لا تُعاد للأبد
+                for action in task["remaining"]:
+                    _handle_action_failure(cfg, task["tweet_id"], acc_id, action, str(status))
             continue
         # قراءة قصيرة قبل التفاعل
-        human.pause(3.0, 8.0)
-        page.mouse.wheel(0, random.randint(100, 400))
-        human.pause(1.5, 4.0)
+        if priority:
+            human.pause(1.0, 3.0)
+        else:
+            human.pause(3.0, 8.0)
+            page.mouse.wheel(0, random.randint(100, 400))
+            human.pause(1.5, 4.0)
         for action in task["remaining"]:
             key = _cap_key(action)
-            if not _can_do(state, key):
+            if not priority and not _can_do(state, key):
                 continue
             if action == "like":
                 res, msg = like_tweet(page, human)
             elif action == "retweet":
                 res, msg = retweet_tweet(page, human)
             elif action == "comment":
+                if already_replied(page, (acc or {}).get("handle", "")):
+                    # سبق لهذا الحساب أن ردّ على التغريدة: نعدّ العملية منجزة دون تعليق مكرر
+                    monitor.mark_done(task["tweet_id"], acc_id, action)
+                    log.info(f"{acc_id} | سبق أن علّق على {task['tweet_id']} - تخطّي")
+                    continue
                 used = _comments_used_for(task["tweet_id"])
-                text = build_comment_for(task.get("text") or "", used_texts=used, cfg=cfg, en_ratio=en_ratio)
+                tweet_text = task.get("text") or ""
+                if not tweet_text:  # روابط تيليجرام/اليدوي: نقرأ النص من الصفحة ونحفظه للحسابات التالية
+                    tweet_text = _extract_open_tweet_text(page)
+                    if tweet_text:
+                        task["text"] = tweet_text
+                        monitor.set_tweet_text(task["tweet_id"], tweet_text)
+                text = build_comment_for(tweet_text, used_texts=used, cfg=cfg, en_ratio=en_ratio, acc_id=acc_id)
+                if not text:  # كل التعليقات المتاحة مكررة: الأفضل ألا نعلّق بدل أن نُصنَّف سبام
+                    log.warning(f"{acc_id} | لا يوجد تعليق غير مكرر لـ {task['tweet_id']} - تخطّي التعليق")
+                    monitor.give_up_action(task["tweet_id"], acc_id, "comment")
+                    continue
                 res, msg = comment_on_tweet(page, text, human)
                 if res:
                     _record_comment(task["url"], text, task["tweet_id"])
@@ -528,8 +607,67 @@ def _run_due_manager_tasks(page, acc_id, cfg, state, human, acc=None):
                 log.info(f"{acc_id} | ✓ {action} على تغريدة المدير {task['tweet_id']}")
             else:
                 _handle_action_failure(cfg, task["tweet_id"], acc_id, action, msg)
-            human.pause(randint(*cfg["behavior"]["min_action_delay_s"]),
-                        randint(*cfg["behavior"]["max_action_delay_s"]))
+            if priority:
+                human.pause(float(fast[0]), float(fast[1]))
+            else:
+                human.pause(randint(*cfg["behavior"]["min_action_delay_s"]),
+                            randint(*cfg["behavior"]["max_action_delay_s"]))
+
+
+def run_priority_session(acc_id, cfg, accounts, dry_run=False):
+    """جلسة عاجلة قصيرة: تفتح الحساب وتنفّذ مهامه العاجلة فقط (بلا تصفح ولا نشاط يومي).
+
+    ترجع True إذا اكتملت الجلسة، False إن كان الحساب مشغولاً أو فشلت.
+    """
+    if not _acquire(acc_id):
+        return False
+    pw = ctx = None
+    try:
+        acc = dict(accounts[acc_id])
+        acc["id"] = acc_id
+        state = ensure_daily_plan(acc_id, cfg)
+        human = Human()
+        log.info(f"⚡ {acc_id} ({acc.get('handle','')}) | تنفيذ مهام عاجلة")
+        if dry_run:
+            return True
+        from playwright.sync_api import sync_playwright
+        from ._pw_cleanup import cleanup_asyncio_loop
+        cleanup_asyncio_loop()
+        pw = sync_playwright().start()
+        _, ctx, page, _ = browser.launch_account(acc, cfg, pw=pw, owned_pw=False)
+        human.page = page
+        _run_due_manager_tasks(page, acc_id, cfg, state, human, acc=acc, priority=True)
+        save_state(acc_id, state)
+        return True
+    except Exception as e:
+        log.error(f"{acc_id} | خطأ في الجلسة العاجلة: {e}")
+        return False
+    finally:
+        for closer in ((lambda: ctx.close()) if ctx is not None else None,
+                       (lambda: pw.stop()) if pw is not None else None):
+            if closer:
+                try:
+                    closer()
+                except Exception:
+                    pass
+        _release(acc_id)
+
+
+def check_priority_tasks(cfg, accounts, dry_run=False, should_stop=lambda: False):
+    """ينفّذ المهام العاجلة المستحقة حساباً بعد حساب (بالتتابع). يرجع عدد الجلسات المنفّذة."""
+    ran = 0
+    for acc_id in enabled_accounts(accounts):
+        if should_stop():
+            break
+        if time.time() < _retry_after.get(acc_id, 0):
+            continue
+        if not monitor.due_tasks_for(acc_id, priority=True):
+            continue
+        if run_priority_session(acc_id, cfg, accounts, dry_run=dry_run):
+            ran += 1
+        if monitor.due_tasks_for(acc_id, priority=True):  # بقي شيء (فشل مؤقت): انتظر قبل إعادة المحاولة
+            _retry_after[acc_id] = time.time() + 30
+    return ran
 
 
 def _comments_used_for(tid):
@@ -537,6 +675,7 @@ def _comments_used_for(tid):
     return seen.get(tid, {}).get("comments_used", [])
 
 
+@locked_seen
 def _record_comment(url, text, tid=None):
     seen = load_seen()
     key = None

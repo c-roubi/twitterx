@@ -4,7 +4,7 @@ import random
 import re
 import time
 
-from . import resilience, selectors
+from . import overlays, resilience, selectors
 from .humanizer import Human
 from .logger import get_logger
 from .selectors import (
@@ -90,6 +90,7 @@ def open_tweet(page, url):
     except Exception as e:
         return False, _err_status(e)
     page.wait_for_timeout(2500)
+    overlays.clear(page)  # نوافذ X المنبثقة (Unlock more، Premium...)
     # انتظار تحميل المقال
     for _ in range(20):
         if selectors.has(page, TWEET_ARTICLE_CANDIDATES):
@@ -127,8 +128,25 @@ def open_tweet_with_retry(page, url, cfg):
     return False, last
 
 
+def already_replied(page, handle):
+    """هل يظهر في سلسلة التغريدة المفتوحة رد من هذا الحساب؟ (أفضل جهد: الردود المحمّلة فقط؛ الخطأ = لا).
+
+    يمنع تعليقاً مزدوجاً إذا أُعيدت جدولة التغريدة أو علّق الحساب بنفسه سابقاً.
+    """
+    if not handle:
+        return False
+    try:
+        return bool(page.evaluate(
+            """(h) => [...document.querySelectorAll('article [data-testid="User-Name"] a[href^="/"]')]
+                 .some(a => (a.getAttribute('href') || '').toLowerCase() === '/' + h.toLowerCase())""",
+            handle.lstrip("@")))
+    except Exception:
+        return False
+
+
 def like_tweet(page, human):
     """لايك للتغريدة المفتوحة حالياً."""
+    overlays.clear(page)
     dismiss_compose_dialog(page, human)  # خروج آمن من أي مسودة اقتباس سابقة
     for attempt in range(MAX_ATTEMPTS):
         try:
@@ -152,6 +170,7 @@ def like_tweet(page, human):
 
 def retweet_tweet(page, human):
     """ريتويت/إعادة نشر للتغريدة المفتوحة حالياً."""
+    overlays.clear(page)
     for attempt in range(MAX_ATTEMPTS):
         try:
             # لو كنا عالقين في محرر اقتباس/مسودة من جولة سابقة: اخرج أولاً
@@ -290,6 +309,7 @@ def comment_on_tweet(page, text, human):
     وزر النشر يُنتظر حتى يُفعَّل حتى 4 ثوانٍ، وعند فشل النقر نستخدم اختصار
     Ctrl+Enter الرسمي في X. التحقق من النجاح = محرر فارغ/مختفٍ.
     """
+    overlays.clear(page)
     dismiss_compose_dialog(page, human)  # خروج آمن من أي مسودة/حوار سابق
     for attempt in range(MAX_ATTEMPTS):
         try:

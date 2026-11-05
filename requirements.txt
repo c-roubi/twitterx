@@ -1,2 +1,5 @@
 playwright>=1.44.0
 pysocks>=1.7.1
+pywebview>=5.0; sys_platform == "win32"
+truststore>=0.9.1; python_version >= "3.10"
+tzdata>=2024.1; sys_platform == "win32"

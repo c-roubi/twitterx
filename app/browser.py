@@ -5,8 +5,8 @@ import time
 
 from playwright.sync_api import sync_playwright
 
-from . import proxies, selectors
-from .config import PROFILES_DIR, SESSIONS_DIR
+from . import overlays, proxies, selectors, warp
+from .config import PROFILES_DIR, SESSIONS_DIR, clear_relogin
 from .humanizer import fingerprint_for, Human
 from .logger import get_logger
 
@@ -100,7 +100,7 @@ def launch_guest(cfg, pw):
             "headless": headless,
             "slow_mo": cfg["browser"].get("slow_mo", 0),
             "ignore_default_args": ["--enable-automation"],
-            "args": ["--disable-blink-features=AutomationControlled"],
+            "args": ["--disable-blink-features=AutomationControlled", "--test-type"],  # --test-type يخفي شريط تحذير الأعلام غير المدعومة
         }
         if use_chrome:
             launch_kwargs["channel"] = "chrome"
@@ -116,6 +116,7 @@ def launch_guest(cfg, pw):
             ctx_kwargs["proxy"] = proxies.proxy_args(use_proxy)
         context = browser.new_context(**ctx_kwargs)
         _apply_fingerprint(context, fp, use_chrome)
+        overlays.install(context)
         return context
 
     last_err = None
@@ -156,6 +157,7 @@ def launch_account(account, cfg, pw=None, owned_pw=True):
     if pw is None:
         pw = sync_playwright().start()
     headless_cfg = cfg["browser"].get("headless", False)
+    warp.before_account(cfg)  # تدوير IP كل N حساب (إن كان WARP مفعّلاً)
     account_proxy = proxies.resolve_for(acc_id, cfg)
 
     def _launch(headless, use_proxy, use_chrome):
@@ -167,7 +169,7 @@ def launch_account(account, cfg, pw=None, owned_pw=True):
             "locale": fp.get("locale", "ar"),
             "timezone_id": fp.get("timezone_id", "Asia/Riyadh"),
             "ignore_default_args": ["--enable-automation"],
-            "args": ["--disable-blink-features=AutomationControlled"],
+            "args": ["--disable-blink-features=AutomationControlled", "--test-type"],  # --test-type يخفي شريط تحذير الأعلام غير المدعومة
         }
         if use_chrome:
             ctx_kwargs["channel"] = "chrome"
@@ -177,6 +179,7 @@ def launch_account(account, cfg, pw=None, owned_pw=True):
             ctx_kwargs["proxy"] = proxies.proxy_args(use_proxy)
         context = pw.chromium.launch_persistent_context(**ctx_kwargs)
         _apply_fingerprint(context, fp, use_chrome)
+        overlays.install(context)
         page = context.pages[0] if context.pages else context.new_page()
         return pw, context, page, pw_owned
 
@@ -229,8 +232,14 @@ def is_login_wall(page):
     return False
 
 
-def login_account(account, cfg):
-    """تسجيل دخول يدوي أول مرة: يفتح المتصفح ويستلم من المستخدم، ثم يحفظ الجلسة."""
+def login_account(account, cfg, confirm=None, on_status=None):
+    """تسجيل دخول يدوي أول مرة: يفتح المتصفح ويستلم من المستخدم، ثم يحفظ الجلسة.
+
+    confirm: دالة تنتظر تأكيد المستخدم (للواجهة الرسومية)؛ بدونها يُستخدم input() في الطرفية.
+    on_status: دالة اختيارية تستقبل مراحل العملية.
+    """
+    gui = confirm is not None
+    say = on_status or (lambda s: None)
     acc_id = account.get("id", "unknown")
     pw = sync_playwright().start()
     try:
@@ -242,23 +251,36 @@ def login_account(account, cfg):
         # ✅ التعديل تم هنا لتسريع التحميل وتجنب الـ Timeout
         page.goto("https://x.com/login", timeout=60000, wait_until="domcontentloaded")
         
-        print("=" * 60)
-        print("  سجّل الدخول يدوياً الآن في النافذة المفتوحة (اسم مستخدم + كلمة مرور / رمز تحقق).")
-        print("  بعد اكتمال الدخول والوصول للصفحة الرئيسية، ارجع للطرفية واضغط Enter.")
-        print("=" * 60)
-        input("  اضغط Enter بعد تسجيل الدخول... ")
+        say("waiting_user")
+        if gui:
+            if not confirm():
+                return False
+        else:
+            print("=" * 60)
+            print("  سجّل الدخول يدوياً الآن في النافذة المفتوحة (اسم مستخدم + كلمة مرور / رمز تحقق).")
+            print("  بعد اكتمال الدخول والوصول للصفحة الرئيسية، ارجع للطرفية واضغط Enter.")
+            print("=" * 60)
+            input("  اضغط Enter بعد تسجيل الدخول... ")
+        say("saving")
         for _ in range(30):
             if is_logged_in(page):
                 break
             time.sleep(2)
         if not is_logged_in(page):
+            if gui:
+                log.warning("{} | لم يتم رصد حالة الدخول - لم تُحفظ الجلسة".format(acc_id))
+                return False
             print("! لم يتم رصد حالة الدخول. هل أنت متأكد أنك سجّلت الدخول؟")
             ans = input("  اكتب yes للمتابعة وحفظ الجلسة رغم ذلك: ").strip().lower()
             if ans != "yes":
                 print("تم الإلغاء.")
                 return False
         state_path = os.path.join(SESSIONS_DIR, f"{acc_id}.json")
+        os.makedirs(SESSIONS_DIR, exist_ok=True)
         context.storage_state(path=state_path)
+        log.info("{} | تم حفظ الجلسة".format(acc_id))
+        if clear_relogin(acc_id):
+            log.info("{} | أُزيلت علامة «يحتاج إعادة دخول»".format(acc_id))
         print(f"✓ تم حفظ الجلسة للحساب {acc_id} في {state_path}")
         return True
     finally:

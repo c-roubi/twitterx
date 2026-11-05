@@ -179,12 +179,30 @@ def pick_proxy(acc_id, cfg):
     return parsed[idx]
 
 
+def _warp_proxy(cfg):
+    """وضع WARP: كل الحسابات تمرّ عبر بروكسي WARP المحلي (يتجاهل قائمة البروكسيات).
+
+    يعيد (مفعّل؟، بروكسي سليم أو None). عند تعذّر WARP نرجع للاتصال المباشر.
+    """
+    from . import warp
+    if not warp.enabled(cfg):
+        return False, None
+    proxy = parse_proxy(warp.proxy_url(cfg))
+    if test_proxy(proxy, (cfg.get("proxies") or {}).get("test_timeout", 10)):
+        return True, proxy
+    log.warning("WARP غير متاح على المنفذ المحلي - رجوع للاتصال المباشر")
+    return True, None
+
+
 def resolve_for(acc_id, cfg):
     """البروكسي الفعلي للحساب: ثابت + اختبار مسبق + رجوع تلقائي للمباشر عند الفشل.
 
     FIX-PROXY-V1: البروكسي الذي يفشل في الاختبار لا يُعاد أبداً مهما كانت قيمة
     fallback_to_direct — كان يُعاد ويعلّق إطلاق المتصفح لدقائق قبل التراجع.
     """
+    on, wp = _warp_proxy(cfg)
+    if on:
+        return wp
     pcfg = cfg.get("proxies", {})
     proxy = pick_proxy(acc_id, cfg)
     if proxy is None:
@@ -201,6 +219,9 @@ def resolve_guest(cfg):
 
     FIX-PROXY-V1: لا تُعاد أبداً بروكسي ميت - الاتصال المباشر أفضل من التعليق.
     """
+    on, wp = _warp_proxy(cfg)
+    if on:
+        return wp
     parsed = _list_proxies(cfg)
     if not parsed:
         return None

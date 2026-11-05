@@ -1,11 +1,13 @@
 # -*- coding: utf-8 -*-
 """إدارة ملفات الإعدادات والحسابات (مع حماية البيانات بالكتابة الذرية)."""
+import functools
 import json
 import os
 import sys
+import threading
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA_DIR = os.path.join(BASE_DIR, "data")
+DATA_DIR = os.environ.get("SMARTENGAGE_DATA") or os.path.join(BASE_DIR, "data")
 CONFIG_PATH = os.path.join(DATA_DIR, "config.json")
 ACCOUNTS_PATH = os.path.join(DATA_DIR, "accounts.json")
 COMMENTS_PATH = os.path.join(DATA_DIR, "comments.txt")
@@ -21,6 +23,7 @@ DEFAULT_CONFIG = {
     "monitor": {
         "method": "guest",
         "interval_min": [6, 14],
+        "max_tweet_age_hours": 12,
         "use_account": None
     },
     "resilience": {
@@ -39,12 +42,13 @@ DEFAULT_CONFIG = {
     },
     "comments": {
         "contextual": True,
+        "match_language": True,
         "en_ratio": 0.9,
         "ai": {
             "enabled": False,
             "provider": "gemini",
             "api_key": "",
-            "model": "gemini-1.5-flash",
+            "model": "",
             "min_interval_s": 30
         }
     },
@@ -70,6 +74,14 @@ DEFAULT_CONFIG = {
         "max_followers": 150000,
         "skip_verified": True,
         "visit_only_chance": 0.25,
+        "harvest": {
+            "enabled": True,
+            "min_reposts": 20,
+            "targets_per_session": [1, 2],
+            "per_target": 15,
+            "refill_below": 8,
+            "from_followers": True
+        },
         "queries": ["bitcoin", "crypto", "altcoins", "ethereum", "solana", "$BTC", "crypto trading", "#crypto", "diamond hands", "altseason"]
     },
     "warmup": {
@@ -85,6 +97,44 @@ DEFAULT_CONFIG = {
         "fallback_to_direct": True,
         "test_timeout": 10,
         "rotate": False
+    },
+    "telegram": {
+        "enabled": False,
+        "bot_token": "",
+        "admin_ids": [],
+        "notify": True,
+        "spread_hours": [0.1, 1.0],
+        "instant": True,
+        "action_mix": {"like": 1.0, "retweet": 1.0, "comment": 1.0},
+        "action_delay_s": [2, 6],
+        "channel": {
+            "enabled": False,
+            "chat_id": 0,
+            "instant": True,
+            "max_age_min": 30,
+            "first_check_s": 30,
+            "retry_every_s": 60,
+            "retries": 3,
+            "fallback_interval_min": [60, 90]
+        },
+        "daily_summary": {"enabled": True, "time": "00:30", "timezone": "Asia/Gaza"},
+        "ca_bundle": "",
+        "insecure_ssl": False
+    },
+    "ui": {
+        "autostart_engine": False
+    },
+    "warp": {
+        "enabled": False,
+        "accounts_per_ip": 5,
+        "isolate_proxy_mode": True,
+        "proxy_port": 40000,
+        "disconnect_wait_s": 2.5,
+        "connect_wait_s": 4.5,
+        "verify_retries": 3,
+        "auto_install": True,
+        "ensure_new_ip": True,
+        "max_ip_attempts": 3
     },
     "browser": {
         "headless": False,
@@ -222,6 +272,18 @@ def load_comments():
         return DEFAULT_COMMENTS.strip().splitlines()
 
 
+# قفل لكل عمليات قراءة-تعديل-كتابة على seen.json (محرك + عامل عاجل + بوت + واجهة تعمل بالتوازي)
+SEEN_LOCK = threading.RLock()
+
+
+def locked_seen(fn):
+    @functools.wraps(fn)
+    def wrapper(*a, **k):
+        with SEEN_LOCK:
+            return fn(*a, **k)
+    return wrapper
+
+
 def load_seen():
     try:
         with open(SEEN_PATH, encoding="utf-8") as f:
@@ -248,6 +310,22 @@ def load_state(acc_id):
 
 def save_state(acc_id, state):
     _atomic_save(state, state_path(acc_id))
+    try:  # دفتر النشاط اليومي (للملخص): لا يجوز أن يُفشل حفظ الحالة أبداً
+        from . import ledger
+        ledger.record_state(acc_id, state)
+    except Exception:
+        pass
+
+
+def clear_relogin(acc_id):
+    """بعد تسجيل دخول ناجح: أزل علامة «يحتاج إعادة دخول» (وتبريد انهيار الجلسة) حتى يعود الحساب للعمل فوراً."""
+    st = load_state(acc_id)
+    if st.get("needs_relogin") or st.get("last_session_crash"):
+        st["needs_relogin"] = False
+        st.pop("last_session_crash", None)
+        save_state(acc_id, st)
+        return True
+    return False
 
 
 def enabled_accounts(accounts):

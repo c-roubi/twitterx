@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+data/warp_rotate.lock
+data/logs/
+data/warp_state.json
+data/comment_history.json
+data/notified.json
+data/daily_stats.json
+data/summary_sent.json
+data/ai_state.json
+data/tg_offset.json
+data/follow_pool.json
+data/daily_ledger.json

@@ -1,0 +1,874 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="token" content="__TOKEN__">
+<title>SmartEngage</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230f6cbd'/%3E%3Cpath d='M17.5 6 8 18h6.5L13.5 26 24 13.5h-6.5z' fill='%23fff'/%3E%3C/svg%3E">
+<style>
+:root{
+  --bg:#f3f3f3; --surface:#ffffff; --surface-2:#f9f9f9; --hover:#f0f0f0; --pressed:#e8e8e8;
+  --stroke:#e5e5e5; --stroke-strong:#d1d1d1; --stroke-ctl:#8a8a8a;
+  --text:#1a1a1a; --text-2:#5d5d5d; --text-3:#8a8a8a;
+  --accent:#0f6cbd; --accent-hover:#115ea3; --accent-press:#0c3b5e; --accent-soft:#e6f0fa; --on-accent:#fff;
+  --ok:#107c10; --ok-bg:#dff6dd; --warn:#8a5a00; --warn-bg:#fff4ce; --err:#c42b1c; --err-bg:#fde7e9; --info-bg:#e6f0fa;
+  --r-ctl:4px; --r-card:8px; --r-dlg:8px;
+  --shadow-card:0 1px 2px rgba(0,0,0,.04);
+  --shadow-dlg:0 8px 32px rgba(0,0,0,.18),0 0 1px rgba(0,0,0,.2);
+  --font:"Segoe UI Variable Text","Segoe UI Variable","Segoe UI","Noto Sans Arabic","Noto Sans","Tahoma",system-ui,sans-serif;
+  color-scheme:light;
+}
+*{box-sizing:border-box;margin:0}
+html,body{height:100%}
+body{background:var(--bg);color:var(--text);font:400 14px/1.45 var(--font);-webkit-font-smoothing:antialiased;overflow:hidden}
+button,input,select,textarea{font:inherit;color:inherit}
+a{color:var(--accent);text-decoration:none}
+svg.i{width:20px;height:20px;flex:none;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+svg.i.sm{width:16px;height:16px}
+svg.i.fill{fill:currentColor;stroke:none}
+.num,.ltr{direction:ltr;unicode-bidi:isolate}
+.num{font-variant-numeric:tabular-nums}
+:focus-visible{outline:2px solid var(--accent);outline-offset:1px;border-radius:var(--r-ctl)}
+
+/* ---------- الهيكل ---------- */
+.app{display:grid;grid-template-columns:272px 1fr;height:100vh}
+.nav{background:var(--bg);padding:16px 12px 12px;display:flex;flex-direction:column;gap:2px;border-inline-end:1px solid var(--stroke);overflow:auto}
+.brand{display:flex;align-items:center;gap:12px;padding:6px 10px 18px}
+.logo{width:32px;height:32px;border-radius:8px;background:linear-gradient(135deg,#1a86d9,#0f6cbd);color:#fff;display:grid;place-items:center;box-shadow:0 1px 3px rgba(15,108,189,.4)}
+.brand b{font-size:16px;font-weight:600;letter-spacing:.1px}
+.brand small{display:block;color:var(--text-3);font-size:12px;margin-top:-2px}
+.nav a.item{position:relative;display:flex;align-items:center;gap:12px;height:40px;padding:0 12px;border-radius:var(--r-ctl);color:var(--text);transition:background .12s}
+.nav a.item:hover{background:var(--hover)}
+.nav a.item:active{background:var(--pressed)}
+.nav a.item[aria-current=page]{background:rgba(0,0,0,.055);font-weight:600}
+.nav a.item[aria-current=page]::before{content:"";position:absolute;inset-inline-start:0;top:50%;transform:translateY(-50%);width:3px;height:16px;border-radius:2px;background:var(--accent)}
+.nav .sp{flex:1}
+.nav .count{margin-inline-start:auto;font-size:12px;color:var(--text-2);background:var(--surface);border:1px solid var(--stroke);border-radius:10px;padding:0 7px;line-height:18px}
+.navstatus{display:flex;align-items:center;gap:10px;background:var(--surface);border:1px solid var(--stroke);border-radius:var(--r-card);padding:10px 12px;margin-top:8px;box-shadow:var(--shadow-card)}
+.navstatus .t{font-size:13px;font-weight:600}.navstatus .s{font-size:12px;color:var(--text-2)}
+.dot{width:10px;height:10px;border-radius:50%;background:var(--text-3);flex:none}
+.dot.run{background:var(--ok);box-shadow:0 0 0 0 rgba(16,124,16,.5);animation:pulse 2s infinite}
+.dot.err{background:var(--err)}.dot.wait{background:#c19c00}
+@keyframes pulse{70%{box-shadow:0 0 0 7px rgba(16,124,16,0)}100%{box-shadow:0 0 0 0 rgba(16,124,16,0)}}
+.main{overflow:auto;padding:0 40px 56px;scroll-behavior:smooth}
+.page{max-width:1080px;margin:0 auto;animation:fade .18s ease-out}
+@keyframes fade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.head{display:flex;align-items:center;gap:16px;padding:32px 0 20px;position:sticky;top:0;z-index:5;background:linear-gradient(var(--bg) 82%,rgba(243,243,243,0))}
+.head h1{font-size:28px;line-height:36px;font-weight:600;letter-spacing:-.2px}
+.head .sub{color:var(--text-2);margin-top:2px}
+.head .grow{flex:1}
+.stack{display:flex;flex-direction:column;gap:12px}
+.row{display:flex;align-items:center;gap:8px}
+.wrap{flex-wrap:wrap}
+
+/* ---------- عناصر ---------- */
+.card{background:var(--surface);border:1px solid var(--stroke);border-radius:var(--r-card);box-shadow:var(--shadow-card)}
+.pad{padding:16px 20px}
+.h2{font-size:14px;font-weight:600;margin:20px 4px 8px}
+.h2:first-child{margin-top:0}
+.muted{color:var(--text-2)}.faint{color:var(--text-3)}.small{font-size:12px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:32px;padding:0 14px;border-radius:var(--r-ctl);border:1px solid var(--stroke-strong);border-bottom-color:#c4c4c4;background:var(--surface);cursor:pointer;white-space:nowrap;transition:background .1s}
+.btn:hover{background:var(--surface-2);background:#f6f6f6}
+.btn:active{background:var(--pressed);color:var(--text-2)}
+.btn[disabled]{opacity:.45;pointer-events:none}
+.btn.accent{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.btn.accent:hover{background:var(--accent-hover);border-color:var(--accent-hover)}
+.btn.accent:active{background:var(--accent-press);border-color:var(--accent-press);color:#e8eef5}
+.btn.subtle{border-color:transparent;background:transparent}
+.btn.subtle:hover{background:var(--hover)}.btn.subtle:active{background:var(--pressed)}
+.btn.danger{color:var(--err)}
+.btn.icon{width:32px;padding:0}
+.btn.lg{height:40px;padding:0 20px;font-weight:600}
+.btn .spin{width:14px;height:14px;border:2px solid currentColor;border-inline-end-color:transparent;border-radius:50%;animation:rot .7s linear infinite}
+@keyframes rot{to{transform:rotate(360deg)}}
+.field{display:flex;flex-direction:column;gap:6px}
+.field>label,.lbl{font-size:13px;font-weight:600}
+.inp,.sel,.txt{height:32px;width:100%;padding:0 10px;background:var(--surface);border:1px solid var(--stroke-strong);border-bottom-color:var(--stroke-ctl);border-radius:var(--r-ctl);outline:none;transition:border-color .1s}
+.txt{height:auto;min-height:84px;padding:8px 10px;resize:vertical;line-height:1.6}
+.inp:hover,.sel:hover,.txt:hover{background:#fbfbfb}
+.inp:focus,.sel:focus,.txt:focus{background:#fff;border-bottom:2px solid var(--accent);padding-bottom:0}
+.txt:focus{padding-bottom:8px;border-bottom-width:2px}
+.inp.sm{width:84px;text-align:center}
+.sel{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.5 6 8l3.5-3.5' fill='none' stroke='%235d5d5d' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:left 10px center;padding-inline-end:10px;padding-inline-start:10px;padding-left:30px;min-width:180px}
+.hint{font-size:12px;color:var(--text-2)}
+.err-t{color:var(--err);font-size:12px}
+.sw{position:relative;width:40px;height:20px;flex:none;border-radius:10px;border:1px solid var(--stroke-ctl);background:transparent;cursor:pointer;transition:background .15s,border-color .15s;padding:0}
+.sw::after{content:"";position:absolute;top:50%;inset-inline-start:4px;width:12px;height:12px;border-radius:50%;background:var(--text-2);transform:translateY(-50%);transition:inset-inline-start .15s,width .1s,background .15s}
+.sw:hover::after{width:14px}
+.sw[aria-checked=true]{background:var(--accent);border-color:var(--accent)}
+.sw[aria-checked=true]::after{background:#fff;inset-inline-start:calc(100% - 16px)}
+.sw[aria-checked=true]:hover::after{inset-inline-start:calc(100% - 18px)}
+.chip{display:inline-flex;align-items:center;gap:6px;height:22px;padding:0 9px;border-radius:11px;font-size:12px;font-weight:600;background:var(--hover);color:var(--text-2);white-space:nowrap}
+.chip.ok{background:var(--ok-bg);color:var(--ok)}.chip.warn{background:var(--warn-bg);color:var(--warn)}
+.chip.err{background:var(--err-bg);color:var(--err)}.chip.info{background:var(--info-bg);color:var(--accent)}
+.bar{height:4px;border-radius:2px;background:#e6e6e6;overflow:hidden}
+.bar>i{display:block;height:100%;border-radius:2px;background:var(--accent);transition:width .4s}
+.bar.ok>i{background:var(--ok)}
+.infobar{display:flex;gap:12px;align-items:flex-start;padding:12px 16px;border-radius:var(--r-card);border:1px solid var(--stroke);background:var(--surface)}
+.infobar.warn{background:var(--warn-bg);border-color:#f3dd9a}.infobar.warn svg{color:var(--warn)}
+.infobar.info{background:var(--info-bg);border-color:#c5dcf2}.infobar.info svg{color:var(--accent)}
+.infobar.err{background:var(--err-bg);border-color:#f1b9bf}.infobar.err svg{color:var(--err)}
+.infobar b{display:block;font-weight:600}.infobar .grow{flex:1}
+.empty{text-align:center;padding:44px 20px;color:var(--text-2)}
+.empty svg{width:40px;height:40px;color:var(--text-3);margin-bottom:8px}
+.empty b{display:block;color:var(--text);font-size:15px;margin-bottom:4px}
+
+/* ---------- الرئيسية ---------- */
+.hero{display:flex;align-items:center;gap:20px;padding:22px 24px;background:linear-gradient(120deg,#fff 40%,#eef5fc)}
+.hero .big{font-size:20px;font-weight:600;display:flex;align-items:center;gap:10px}
+.hero .grow{flex:1}
+.tiles{display:grid;grid-template-columns:repeat(5,1fr);gap:12px}
+.tile{padding:16px 18px}
+.tile .v{font-size:32px;line-height:40px;font-weight:600;letter-spacing:-.5px}
+.tile .l{color:var(--text-2);font-size:13px;display:flex;align-items:center;gap:8px}
+.tile .l svg{color:var(--accent)}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.listrow{display:flex;align-items:center;gap:14px;padding:12px 20px;border-top:1px solid var(--stroke)}
+.listrow:first-child{border-top:0}
+.listrow .grow{flex:1;min-width:0}
+.ell{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* ---------- الحسابات ---------- */
+.avatar{width:40px;height:40px;border-radius:50%;display:grid;place-items:center;font-weight:600;color:#fff;font-size:16px;flex:none;text-transform:uppercase}
+.acc{display:grid;grid-template-columns:minmax(200px,1.1fr) 1.6fr auto;align-items:center;gap:18px;padding:14px 20px;border-top:1px solid var(--stroke)}
+.acc:first-child{border-top:0}
+.acc .who{display:flex;align-items:center;gap:12px;min-width:0}
+.acc .meta{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.acc .meta div{font-size:12px;color:var(--text-2)}
+.acc .meta b{display:block;font-size:12px;color:var(--text);margin-bottom:3px;font-weight:600}
+.acc .act{display:flex;align-items:center;gap:4px}
+.acc.off{opacity:.62}
+
+/* ---------- الإعدادات ---------- */
+.pivot{display:flex;gap:4px;overflow:auto;border-bottom:1px solid var(--stroke);margin:0 0 20px}
+.pivot button{background:none;border:0;height:40px;padding:0 14px;cursor:pointer;color:var(--text-2);position:relative;white-space:nowrap;border-radius:var(--r-ctl) var(--r-ctl) 0 0}
+.pivot button:hover{background:var(--hover);color:var(--text)}
+.pivot button[aria-selected=true]{color:var(--text);font-weight:600}
+.pivot button[aria-selected=true]::after{content:"";position:absolute;inset-inline:12px;bottom:0;height:3px;border-radius:2px 2px 0 0;background:var(--accent)}
+.group{overflow:hidden}
+.srow{display:flex;align-items:center;gap:20px;padding:14px 20px;border-top:1px solid var(--stroke);min-height:64px}
+.srow:first-child{border-top:0}
+.srow .txtcol{flex:1;min-width:0}
+.srow .t{font-weight:500}
+.srow .d{font-size:12px;color:var(--text-2);margin-top:2px}
+.srow .c{display:flex;align-items:center;gap:8px;flex:none}
+.srow .c.col{flex-direction:column;align-items:stretch;width:min(360px,45%)}
+.srow.block{flex-direction:column;align-items:stretch;gap:10px}
+.rng{display:flex;align-items:center;gap:8px}.rng span{color:var(--text-2);font-size:12px}
+.unit{color:var(--text-2);font-size:12px;min-width:34px}
+.savebar{position:sticky;bottom:16px;margin-top:24px;display:flex;align-items:center;gap:12px;padding:10px 16px;background:var(--surface);border:1px solid var(--stroke-strong);border-radius:var(--r-card);box-shadow:0 4px 16px rgba(0,0,0,.1);transform:translateY(8px);opacity:0;pointer-events:none;transition:.18s}
+.savebar.show{transform:none;opacity:1;pointer-events:auto}
+.savebar .grow{flex:1}
+
+/* ---------- تيليجرام ---------- */
+.step{display:flex;gap:16px;padding:18px 20px;border-top:1px solid var(--stroke)}
+.step:first-child{border-top:0}
+.step .n{width:28px;height:28px;border-radius:50%;background:var(--accent-soft);color:var(--accent);display:grid;place-items:center;font-weight:600;flex:none}
+.step.done .n{background:var(--ok-bg);color:var(--ok)}
+.step .body{flex:1;min-width:0;display:flex;flex-direction:column;gap:10px}
+.step .title{font-weight:600}
+.code{font-size:30px;letter-spacing:6px;font-weight:600;background:var(--surface-2);border:1px dashed var(--stroke-strong);border-radius:var(--r-card);padding:10px 20px;text-align:center}
+
+/* ---------- السجلات ---------- */
+.seg{display:inline-flex;background:var(--hover);border-radius:var(--r-ctl);padding:2px;gap:2px}
+.seg button{border:0;background:none;height:28px;padding:0 14px;border-radius:3px;cursor:pointer;color:var(--text-2)}
+.seg button[aria-pressed=true]{background:var(--surface);color:var(--text);font-weight:600;box-shadow:0 1px 2px rgba(0,0,0,.12)}
+.logs{max-height:calc(100vh - 220px);overflow:auto}
+.log{display:grid;grid-template-columns:150px 64px 84px 1fr;gap:12px;padding:7px 18px;border-top:1px solid var(--stroke);align-items:baseline;font-size:13px}
+.log:first-child{border-top:0}
+.log .m{white-space:pre-wrap;word-break:break-word}
+.log.WARNING{background:#fffbea}.log.ERROR,.log.CRITICAL{background:#fff5f5}
+.lv{font-size:11px;font-weight:600}
+.lv.INFO{color:var(--accent)}.lv.WARNING{color:var(--warn)}.lv.ERROR,.lv.CRITICAL{color:var(--err)}.lv.DEBUG{color:var(--text-3)}
+
+/* ---------- حوار / إشعارات ---------- */
+.scrim{position:fixed;inset:0;background:rgba(0,0,0,.32);display:grid;place-items:center;z-index:50;animation:fadein .12s;padding:20px}
+@keyframes fadein{from{opacity:0}}
+.dlg{width:min(480px,100%);max-height:90vh;display:flex;flex-direction:column;background:var(--surface);border-radius:var(--r-dlg);box-shadow:var(--shadow-dlg);animation:pop .16s ease-out}
+@keyframes pop{from{opacity:0;transform:scale(.97) translateY(6px)}}
+.dlg h3{font-size:20px;font-weight:600;padding:24px 24px 0}
+.dlg .bd{padding:14px 24px 20px;overflow:auto;display:flex;flex-direction:column;gap:14px}
+.dlg .ft{display:flex;gap:8px;justify-content:flex-start;padding:16px 24px;background:#f9f9f9;border-top:1px solid var(--stroke);border-radius:0 0 var(--r-dlg) var(--r-dlg)}
+.dlg .ft .btn{min-width:104px}
+.toasts{position:fixed;left:20px;bottom:20px;display:flex;flex-direction:column;gap:8px;z-index:80}
+.toast{display:flex;align-items:center;gap:10px;min-width:260px;max-width:420px;padding:12px 16px;background:var(--surface);border:1px solid var(--stroke-strong);border-radius:var(--r-card);box-shadow:var(--shadow-dlg);animation:pop .18s}
+.toast.ok svg{color:var(--ok)}.toast.err svg{color:var(--err)}.toast.info svg{color:var(--accent)}
+.skeleton{height:14px;border-radius:4px;background:linear-gradient(90deg,#eee,#f7f7f7,#eee);background-size:200% 100%;animation:sk 1.2s infinite}
+@keyframes sk{to{background-position:-200% 0}}
+::-webkit-scrollbar{width:12px;height:12px}::-webkit-scrollbar-thumb{background:#c8c8c8;border:3px solid transparent;background-clip:content-box;border-radius:6px}::-webkit-scrollbar-thumb:hover{background:#9a9a9a;background-clip:content-box;border:3px solid transparent}
+
+@media (max-width:1100px){.tiles{grid-template-columns:repeat(2,1fr)}.two{grid-template-columns:1fr}.acc{grid-template-columns:1fr auto}.acc .meta{grid-column:1/-1;order:3}}
+@media (max-width:860px){.app{grid-template-columns:64px 1fr}.nav .lab,.brand div,.navstatus div,.nav .count{display:none}.nav a.item{justify-content:center;padding:0}.brand{justify-content:center;padding-inline:0}.main{padding:0 16px 48px}.log{grid-template-columns:1fr}.srow{flex-wrap:wrap}.srow .c.col{width:100%}}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<div class="app">
+  <nav class="nav" aria-label="التنقل الرئيسي" id="nav"></nav>
+  <main class="main" id="main" tabindex="-1"></main>
+</div>
+<div class="toasts" id="toasts" aria-live="polite"></div>
+<div id="dlg-root"></div>
+
+<script>
+"use strict";
+/* ============ أدوات ============ */
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const TOKEN = $('meta[name=token]').content;
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+const ICONS = {
+  home:"M3 11.5 12 4l9 7.5M5.5 10v9.5h5v-5.5h3v5.5h5V10",
+  users:"M16 19v-1.5a3.5 3.5 0 0 0-3.5-3.5h-5A3.5 3.5 0 0 0 4 17.5V19M10 11a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4M20 19v-1.2a3.2 3.2 0 0 0-2.4-3.1M15.5 4.8a3.2 3.2 0 0 1 0 6.2",
+  tweet:"M5.5 4h13A1.5 1.5 0 0 1 20 5.5v9a1.5 1.5 0 0 1-1.5 1.5H11l-4.5 4V16h-1A1.5 1.5 0 0 1 4 14.5v-9A1.5 1.5 0 0 1 5.5 4z",
+  send:"M21 3 10.5 13.5M21 3l-6.5 18-4-7.5L3 9.5z",
+  sliders:"M4 7h9M17 7h3M4 17h3M11 17h9M15 5v4M9 15v4",
+  list:"M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01",
+  play:"M8 5.5v13l11-6.5z", stop:"M7 7h10v10H7z", plus:"M12 5v14M5 12h14",
+  trash:"M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12M10 11v5M14 11v5",
+  edit:"M4 20h4L19 9l-4-4L4 16zM13.5 6.5l4 4", check:"M5 12.5l4.5 4.5L19 7.5",
+  warn:"M12 4 3 19.5h18zM12 10v4.5M12 17.2h.01",
+  info:"M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18M12 11v5M12 8h.01",
+  refresh:"M20 11a8 8 0 0 0-14.5-4M4 5v3.5h3.5M4 13a8 8 0 0 0 14.5 4M20 19v-3.5h-3.5",
+  shield:"M12 3l7 3v5.5c0 4.2-2.9 7.6-7 9.5-4.1-1.9-7-5.3-7-9.5V6z",
+  key:"M10 17l5-5-5-5M15 12H3M15 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4",
+  copy:"M9 9h10v10H9zM5 15V5h10", bolt:"M13 3 5 13.5h6L10 21l8-10.5h-6z",
+  link:"M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1",
+  x:"M6 6l12 12M18 6 6 18", flask:"M9 4h6M10 4v6l-5 9a1 1 0 0 0 .9 1.5h12.2a1 1 0 0 0 .9-1.5l-5-9V4",
+};
+const ic = (n, cls = "") => `<svg class="i ${cls}" viewBox="0 0 24 24" aria-hidden="true"><path d="${ICONS[n] || ""}"/></svg>`;
+const icFill = n => `<svg class="i fill" viewBox="0 0 24 24" aria-hidden="true"><path d="${ICONS[n]}"/></svg>`;
+
+async function api(method, path, body) {
+  let res;
+  try {
+    res = await fetch(path, {method, headers: {"X-Token": TOKEN, "Content-Type": "application/json"}, body: body === undefined ? undefined : JSON.stringify(body)});
+  } catch (e) { throw new Error("تعذّر الاتصال بالتطبيق"); }
+  let j;
+  try { j = await res.json(); } catch (e) { throw new Error("استجابة غير صالحة من الخادم"); }
+  if (!j.ok) throw new Error(j.error || "حدث خطأ");
+  return j.data;
+}
+function toast(msg, kind = "ok", ms = 3800) {
+  const el = document.createElement("div");
+  el.className = "toast " + kind; el.setAttribute("role", "status");
+  el.innerHTML = ic(kind === "ok" ? "check" : kind === "err" ? "warn" : "info") + `<span>${esc(msg)}</span>`;
+  $("#toasts").appendChild(el);
+  setTimeout(() => { el.style.transition = ".25s"; el.style.opacity = 0; setTimeout(() => el.remove(), 260); }, ms);
+}
+const guard = fn => async (...a) => { try { return await fn(...a); } catch (e) { toast(e.message, "err", 5500); } };
+function busy(btn, on) {
+  if (!btn) return;
+  if (on) { btn._h = btn.innerHTML; btn.disabled = true; btn.innerHTML = '<span class="spin"></span>' + (btn.dataset.busy ? esc(btn.dataset.busy) : ""); }
+  else { btn.disabled = false; if (btn._h != null) btn.innerHTML = btn._h; }
+}
+function ago(iso) {
+  if (!iso) return "—";
+  const t = new Date(iso).getTime(); if (isNaN(t)) return "—";
+  const s = Math.max(0, (Date.now() - t) / 1000);
+  if (s < 60) return "الآن";
+  if (s < 3600) return `قبل ${Math.floor(s / 60)} د`;
+  if (s < 86400) return `قبل ${Math.floor(s / 3600)} س`;
+  return `قبل ${Math.floor(s / 86400)} يوم`;
+}
+const COLORS = ["#0f6cbd", "#107c10", "#8764b8", "#ca5010", "#038387", "#c239b3", "#5c6bc0", "#986f0b"];
+const colorFor = s => COLORS[[...String(s)].reduce((a, c) => a + c.charCodeAt(0), 0) % COLORS.length];
+const getPath = (o, p) => p.split(".").reduce((a, k) => (a == null ? a : a[k]), o);
+function setPath(o, p, v) { const ks = p.split("."); let c = o; ks.slice(0, -1).forEach(k => c = c[k] = c[k] || {}); c[ks.at(-1)] = v; }
+
+/* ============ الحالة ============ */
+const S = {mounted: false, onDlgClose: null, state: null, config: null, accounts: [], tweets: [], page: "home", dirty: false, logLevel: "all", settingsTab: "general", tg: {code: null, test: null}};
+
+/* ============ حوارات ============ */
+function dialog({title, body, actions, onMount, wide}) {
+  closeDialog();
+  const root = $("#dlg-root");
+  root.innerHTML = `<div class="scrim" id="scrim"><div class="dlg" role="dialog" aria-modal="true" aria-label="${esc(title)}" ${wide ? 'style="width:min(620px,100%)"' : ""}>
+    <h3>${esc(title)}</h3><div class="bd">${body}</div><div class="ft">${actions.map((a, i) => `<button class="btn ${a.cls || ""}" data-dlg="${i}">${esc(a.label)}</button>`).join("")}</div></div></div>`;
+  const dlgEl = $(".dlg", root);
+  $$("[data-dlg]", root).forEach(b => b.addEventListener("click", async () => {
+    const a = actions[+b.dataset.dlg];
+    if (!a.run) return closeDialog();
+    busy(b, true);
+    try { const r = await a.run(dlgEl); if (r !== false) closeDialog(); } catch (e) { toast(e.message, "err", 5500); }
+    finally { busy(b, false); }
+  }));
+  $("#scrim").addEventListener("mousedown", e => { if (e.target.id === "scrim" && !actions.some(a => a.persist)) closeDialog(); });
+  (dlgEl.querySelector("input,select,textarea") || dlgEl.querySelector(".btn.accent"))?.focus();
+  onMount && onMount(dlgEl);
+  return dlgEl;
+}
+function closeDialog() { const r = $("#dlg-root"); if (r.firstChild) { r.innerHTML = ""; } const f = S.onDlgClose; S.onDlgClose = null; if (f) f(); }
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape" && $("#dlg-root").firstChild && !S.loginOpen) closeDialog();
+  if (e.key === "Enter" && e.target.matches?.(".dlg input:not([type=checkbox])")) { e.preventDefault(); $(".dlg .btn.accent")?.click(); }
+});
+const confirmBox = (title, text, okLabel = "تأكيد") => new Promise(res => {
+  dialog({title, body: `<p>${esc(text)}</p>`, actions: [
+    {label: okLabel, cls: "accent", run: () => { res(true); }},
+    {label: "إلغاء"},
+  ]});
+  S.onDlgClose = () => res(false);
+});
+
+/* ============ مكوّنات الإعدادات ============ */
+const sw = (checked, attrs = "") => `<button type="button" role="switch" class="sw" aria-checked="${!!checked}" ${attrs}></button>`;
+document.addEventListener("click", e => {
+  const b = e.target.closest(".sw");
+  if (b) { b.setAttribute("aria-checked", b.getAttribute("aria-checked") !== "true"); b.dispatchEvent(new Event("change", {bubbles: true})); }
+});
+
+/* ---- مخطط الإعدادات ---- */
+const SCHEMA = [
+  {id: "general", title: "عام", groups: [
+    {title: "حساب المدير والمراقبة", fields: [
+      {p: "manager_handle", t: "text", label: "حساب المدير", desc: "اسم المستخدم بدون @ — يُراقَب لجدولة التفاعل مع تغريداته تلقائياً. اتركه فارغاً إن كنت ستعتمد على تيليجرام فقط.", ph: "username", ltr: true},
+      {p: "monitor.method", t: "select", label: "طريقة المراقبة", opts: [["guest", "زائر (بدون حساب)"], ["account", "عبر أحد الحسابات"]]},
+      {p: "monitor.use_account", t: "account", label: "حساب المراقبة", desc: "يُستخدم عند اختيار «عبر أحد الحسابات» (أكثر ثباتاً عند حجب الزائر)."},
+      {p: "monitor.interval_min", t: "range", label: "الفاصل بين فحوصات المدير", desc: "يُختار رقم عشوائي بين الحدّين في كل مرة.", unit: "دقيقة"},
+      {p: "monitor.max_tweet_age_hours", t: "int", label: "تجاهل تغريدات المدير الأقدم من", desc: "لا يتفاعل التطبيق مع التغريدات القديمة (مثلاً عند أول تشغيل). 0 = بلا حد.", unit: "ساعة", min: 0},
+    ]},
+    {title: "التطبيق", fields: [
+      {p: "ui.autostart_engine", t: "bool", label: "تشغيل المحرك تلقائياً عند فتح التطبيق"},
+    ]},
+  ]},
+  {id: "engagement", title: "التفاعل", groups: [
+    {title: "توزيع التفاعل على التغريدة", fields: [
+      {p: "engagement.accounts_per_tweet", t: "range", label: "عدد الحسابات لكل تغريدة", desc: "يُختار عدد عشوائي من الحسابات المفعّلة ضمن هذا المجال.", unit: "حساب"},
+      {p: "engagement.spread_hours", t: "range", label: "مدة توزيع العمليات", desc: "تُنفَّذ العمليات متدرجةً خلال هذه المدة حتى لا يبدو الأمر آلياً.", unit: "ساعة", step: "0.1"},
+      {p: "engagement.max_comments_per_tweet", t: "int", label: "أقصى عدد تعليقات للتغريدة", min: 0},
+    ]},
+    {title: "احتمال كل نوع تفاعل", fields: [
+      {p: "engagement.action_mix.like", t: "pct", label: "إعجاب"},
+      {p: "engagement.action_mix.retweet", t: "pct", label: "إعادة تغريد"},
+      {p: "engagement.action_mix.comment", t: "pct", label: "تعليق", desc: "نسبة الحسابات التي ستعلّق (محدودة بالأقصى أعلاه)."},
+    ]},
+  ]},
+  {id: "behavior", title: "السلوك اليومي", groups: [
+    {title: "الجدول", fields: [
+      {p: "behavior.active_hours", t: "timerange", label: "ساعات النشاط", desc: "لا تعمل الحسابات خارج هذا النطاق."},
+      {p: "behavior.sessions_per_day", t: "range", label: "عدد الجلسات يومياً", unit: "جلسة"},
+      {p: "behavior.session_minutes", t: "range", label: "مدة الجلسة", unit: "دقيقة"},
+      {p: "behavior.rest_day_chance", t: "pct", label: "احتمال يوم راحة", desc: "يوم يتوقف فيه الحساب عن النشاط كلياً، كما يفعل البشر."},
+    ]},
+    {title: "الحدود اليومية لكل حساب", fields: [
+      {p: "behavior.max_likes_per_day", t: "range", label: "الإعجابات", unit: "يومياً"},
+      {p: "behavior.max_retweets_per_day", t: "range", label: "إعادة التغريد", unit: "يومياً"},
+      {p: "behavior.max_comments_per_day", t: "range", label: "التعليقات", unit: "يومياً"},
+    ]},
+    {title: "التأخير البشري بين الإجراءات", fields: [
+      {p: "behavior.min_action_delay_s", t: "range", label: "تأخير قصير", unit: "ثانية"},
+      {p: "behavior.max_action_delay_s", t: "range", label: "تأخير طويل", unit: "ثانية"},
+    ]},
+  ]},
+  {id: "follow", title: "المتابعة", groups: [
+    {title: "النمو التدريجي", fields: [
+      {p: "follow.enabled", t: "bool", label: "تفعيل المتابعة التلقائية"},
+      {p: "follow.daily_target", t: "range", label: "الهدف اليومي", unit: "متابعة"},
+      {p: "follow.per_session", t: "range", label: "في كل جلسة", unit: "متابعة"},
+      {p: "follow.delay_between_s", t: "range", label: "الفاصل بين المتابعات", unit: "ثانية"},
+      {p: "follow.ramp_days", t: "int", label: "مدة التدرج للحساب الجديد", desc: "يبدأ الحساب خفيفاً ويصل للهدف الكامل خلال هذه الأيام.", min: 1, unit: "يوم"},
+      {p: "follow.visit_only_chance", t: "pct", label: "احتمال زيارة الملف دون متابعة"},
+    ]},
+    {title: "فلترة الحسابات المستهدفة", fields: [
+      {p: "follow.require_bio", t: "bool", label: "اشتراط وجود نبذة"},
+      {p: "follow.skip_verified", t: "bool", label: "تخطي الحسابات الموثّقة"},
+      {p: "follow.min_followers", t: "int", label: "أقل عدد متابعين", min: 0},
+      {p: "follow.max_followers", t: "int", label: "أكثر عدد متابعين", min: 0},
+      {p: "follow.queries", t: "lines", label: "كلمات البحث عن المهتمين", desc: "كلمة أو وسم في كل سطر."},
+    ]},
+  ]},
+  {id: "warmup", title: "الإحماء", groups: [
+    {title: "جلسة الإحماء اليومية", fields: [
+      {p: "warmup.enabled", t: "bool", label: "تفعيل الإحماء", desc: "يُبقي الحسابات نشطة حتى في الأيام التي لا ينشر فيها المدير."},
+      {p: "warmup.session_minutes", t: "range", label: "مدة الجلسة", unit: "دقيقة"},
+      {p: "warmup.browse_probability", t: "pct", label: "احتمال التصفح"},
+      {p: "warmup.view_profiles", t: "range", label: "ملفات تُزار في الجلسة", unit: "ملف"},
+      {p: "warmup.max_search_scrolls", t: "int", label: "أقصى تمريرات البحث", min: 0},
+    ]},
+  ]},
+  {id: "comments", title: "التعليقات", groups: [
+    {title: "توليد التعليقات", fields: [
+      {p: "comments.contextual", t: "bool", label: "تعليقات سياقية", desc: "تعليق يناسب محتوى التغريدة بدل القوالب العامة."},
+      {p: "comments.match_language", t: "bool", label: "اللغة تتبع لغة التغريدة", desc: "تغريدة إنجليزية ← تعليق إنجليزي، وتغريدة عربية ← تعليق عربي. النسبة أدناه تُستخدم فقط عندما لا يُعرف نص التغريدة."},
+      {p: "comments.en_ratio", t: "pct", label: "نسبة التعليقات الإنجليزية", desc: "تُستخدم عند عدم معرفة لغة التغريدة (مثل تغريدة صورة بلا نص). 0% عربي — 100% إنجليزي. يمكن تخصيصها لكل حساب."},
+    ]},
+    {title: "الذكاء الاصطناعي", fields: [
+      {p: "comments.ai.enabled", t: "bool", label: "تفعيل التوليد بالذكاء الاصطناعي"},
+      {p: "comments.ai.provider", t: "select", label: "المزوّد", opts: [["gemini", "Google Gemini"], ["openai", "OpenAI"], ["groq", "Groq"]]},
+      {p: "comments.ai.api_key", t: "password", label: "مفتاح API", ph: "••••••••"},
+      {p: "comments.ai.model", t: "text", label: "النموذج", desc: "اتركه فارغاً لاستخدام الافتراضي.", ltr: true},
+      {p: "comments.ai.min_interval_s", t: "int", label: "أقل فاصل بين الطلبات", min: 0, unit: "ثانية"},
+    ]},
+    {title: "اختبار الذكاء الاصطناعي", custom: "aitest"},
+    {title: "قوالب التعليقات", custom: "templates"},
+  ]},
+  {id: "warp", title: "الشبكة (WARP)", groups: [
+    {title: "تدوير عنوان IP", fields: [
+      {p: "warp.enabled", t: "bool", label: "تفعيل تدوير IP عبر Cloudflare WARP", desc: "يمرّ كل ترافيك الحسابات عبر WARP بدل البروكسيات."},
+      {p: "warp.accounts_per_ip", t: "int", label: "عدد الحسابات لكل IP", desc: "يتغيّر العنوان بعد كل هذا العدد من الحسابات.", min: 1, unit: "حساب"},
+      {p: "warp.ensure_new_ip", t: "bool", label: "التأكد من تغيّر العنوان فعلاً", desc: "يقارن العنوان قبل وبعد التدوير ويعيد المحاولة إن لم يتغيّر."},
+      {p: "warp.max_ip_attempts", t: "int", label: "محاولات الحصول على IP جديد", min: 1},
+      {p: "warp.auto_install", t: "bool", label: "تثبيت WARP تلقائياً إن لم يكن موجوداً"},
+    ]},
+    {title: "متقدّم", fields: [
+      {p: "warp.isolate_proxy_mode", t: "bool", label: "وضع البروكسي المحلي المعزول", desc: "لا يؤثر على باقي البرامج والمشاريع على الجهاز."},
+      {p: "warp.proxy_port", t: "int", label: "منفذ بروكسي WARP", min: 1024, ltr: true},
+      {p: "warp.disconnect_wait_s", t: "float", label: "انتظار بعد الفصل", unit: "ثانية", min: 0},
+      {p: "warp.connect_wait_s", t: "float", label: "انتظار بعد الاتصال", unit: "ثانية", min: 0},
+      {p: "warp.verify_retries", t: "int", label: "محاولات التحقق من الاتصال", min: 1},
+    ]},
+    {title: "أدوات", custom: "warptools"},
+  ]},
+  {id: "browser", title: "المتصفح", groups: [
+    {title: "تشغيل المتصفح", fields: [
+      {p: "browser.headless", t: "bool", label: "بدون نافذة (Headless)", desc: "يعمل بصمت في الخلفية. يُفضَّل إيقافه عند أول تشغيل لمراقبة السلوك."},
+      {p: "browser.slow_mo", t: "int", label: "إبطاء الحركات", desc: "ميلي ثانية بين كل حركة — يجعل السلوك أقرب للبشري.", min: 0, unit: "مللي ثانية"},
+      {p: "browser.max_context_minutes", t: "int", label: "أقصى مدة للسياق الواحد", min: 1, unit: "دقيقة"},
+    ]},
+    {title: "مقاومة الأعطال", fields: [
+      {p: "resilience.network_retries", t: "int", label: "إعادة محاولة الشبكة", min: 0},
+      {p: "resilience.retry_base_delay_s", t: "float", label: "تأخير إعادة المحاولة الأساسي", min: 0, unit: "ثانية"},
+      {p: "resilience.action_max_attempts", t: "int", label: "أقصى محاولات للعملية", min: 1},
+      {p: "resilience.page_load_timeout_s", t: "int", label: "مهلة تحميل الصفحة", min: 1000, unit: "مللي ثانية"},
+      {p: "resilience.goto_timeout_s", t: "int", label: "مهلة الانتقال", min: 1000, unit: "مللي ثانية"},
+      {p: "resilience.monitor_fetch_retries", t: "int", label: "إعادة محاولة فحص المدير", min: 0},
+    ]},
+  ]},
+];
+
+function control(f, val) {
+  const a = `data-p="${f.p}" data-t="${f.t}"`;
+  const num = (v, extra = "") => `<input class="inp sm num" type="number" ${extra} value="${esc(v)}">`;
+  switch (f.t) {
+    case "bool": return sw(val, `${a} aria-label="${esc(f.label)}"`);
+    case "int": case "float": return `<input class="inp sm num" ${a} type="number" step="${f.t === "int" ? 1 : "any"}" ${f.min != null ? `min="${f.min}"` : ""} value="${esc(val)}" aria-label="${esc(f.label)}">${f.unit ? `<span class="unit">${esc(f.unit)}</span>` : ""}`;
+    case "pct": return `<input class="inp sm num" ${a} type="number" min="0" max="100" step="1" value="${Math.round((val ?? 0) * 100)}" aria-label="${esc(f.label)}"><span class="unit">%</span>`;
+    case "text": return `<input class="inp ${f.ltr ? "ltr" : ""}" ${a} type="text" value="${esc(val)}" placeholder="${esc(f.ph || "")}" aria-label="${esc(f.label)}" style="width:240px" autocomplete="off" spellcheck="false">`;
+    case "password": return `<input class="inp ltr" ${a} type="password" value="${esc(val)}" placeholder="${esc(f.ph || "")}" aria-label="${esc(f.label)}" style="width:240px" autocomplete="off">`;
+    case "select": return `<select class="sel" ${a} aria-label="${esc(f.label)}">${f.opts.map(([v, l]) => `<option value="${esc(v)}" ${v === val ? "selected" : ""}>${esc(l)}</option>`).join("")}</select>`;
+    case "account": return `<select class="sel" ${a} aria-label="${esc(f.label)}"><option value="">—</option>${S.accounts.map(x => `<option value="${x.id}" ${x.id === val ? "selected" : ""}>@${esc(x.handle)}</option>`).join("")}</select>`;
+    case "range": { const st = f.step || "1"; return `<div class="rng" ${a}><span>من</span><input class="inp sm num r0" type="number" step="${st}" min="0" value="${esc(val?.[0])}" aria-label="${esc(f.label)} - من"><span>إلى</span><input class="inp sm num r1" type="number" step="${st}" min="0" value="${esc(val?.[1])}" aria-label="${esc(f.label)} - إلى">${f.unit ? `<span class="unit">${esc(f.unit)}</span>` : ""}</div>`; }
+    case "timerange": return `<div class="rng" ${a}><span>من</span><input class="inp sm num r0" type="time" value="${esc(val?.[0])}" style="width:136px"><span>إلى</span><input class="inp sm num r1" type="time" value="${esc(val?.[1])}" style="width:136px"></div>`;
+    case "lines": return `<textarea class="txt" ${a} rows="5" spellcheck="false" aria-label="${esc(f.label)}">${esc((val || []).join("\n"))}</textarea>`;
+  }
+  return "";
+}
+function fieldRow(f, cfg) {
+  const val = getPath(cfg, f.p);
+  const col = f.t === "lines" ? " col" : "";
+  return `<div class="srow"><div class="txtcol"><div class="t">${esc(f.label)}</div>${f.desc ? `<div class="d">${esc(f.desc)}</div>` : ""}</div><div class="c${col}">${control(f, val)}</div></div>`;
+}
+function readControl(el) {
+  const t = el.dataset.t, num = x => { const v = parseFloat(x); return isNaN(v) ? null : v; };
+  switch (t) {
+    case "bool": return el.getAttribute("aria-checked") === "true";
+    case "int": case "float": return num(el.value);
+    case "pct": { const v = num(el.value); return v == null ? null : v / 100; }
+    case "account": return el.value || null;
+    case "range": return [num($(".r0", el).value), num($(".r1", el).value)];
+    case "timerange": return [$(".r0", el).value, $(".r1", el).value];
+    case "lines": return el.value.split("\n").map(s => s.trim()).filter(Boolean);
+    default: return el.value;
+  }
+}
+const FLAT = SCHEMA.flatMap(s => s.groups.flatMap(g => g.fields || []));
+
+/* ============ الصفحات ============ */
+const NAV = [
+  ["home", "الرئيسية", "home"], ["accounts", "الحسابات", "users"], ["tweets", "التغريدات", "tweet"],
+  ["telegram", "تيليجرام", "send"], ["settings", "الإعدادات", "sliders"], ["logs", "السجلات", "list"],
+];
+function renderNav() {
+  const st = S.state, run = st?.engine.status;
+  const dot = run === "running" ? "run" : run === "stopping" ? "wait" : "";
+  const txt = run === "running" ? "المحرك يعمل" : run === "stopping" ? "جارٍ الإيقاف…" : "المحرك متوقف";
+  $("#nav").innerHTML = `<div class="brand"><div class="logo">${icFill("bolt")}</div><div><b>SmartEngage</b><small>إدارة التفاعل الذكي</small></div></div>` +
+    NAV.map(([id, label, icon]) => `<a class="item" href="#/${id}" ${S.page === id ? 'aria-current="page"' : ""}>${ic(icon)}<span class="lab">${label}</span>${id === "accounts" && st ? `<span class="count">${st.stats.accounts}</span>` : ""}</a>`).join("") +
+    `<div class="sp"></div><div class="navstatus"><span class="dot ${dot}"></span><div><div class="t">${txt}</div><div class="s">${st ? `${st.stats.ready} حساب جاهز` : "…"}</div></div></div>`;
+}
+
+const PAGES = {};
+const view = html => { $("#main").innerHTML = `<div class="page">${html}</div>`; };
+const head = (title, sub, actions = "") => `<div class="head"><div><h1>${title}</h1>${sub ? `<div class="sub">${sub}</div>` : ""}</div><div class="grow"></div><div class="row">${actions}</div></div>`;
+
+/* ---------- الرئيسية ---------- */
+PAGES.home = {
+  mount() {
+    view(head("الرئيسية", "نظرة عامة على التشغيل") + `<div class="stack">
+      <div class="card hero" id="hero"></div><div id="warns" class="stack"></div>
+      <div class="tiles" id="tiles"></div>
+      <div class="two">
+        <div class="card"><div class="pad"><div class="lbl" style="margin-bottom:10px">تفاعل فوري مع تغريدة</div>
+          <div class="row"><input class="inp ltr" id="q-url" placeholder="https://x.com/user/status/…" style="flex:1" autocomplete="off" spellcheck="false"><button class="btn accent" data-act="quick-tweet">${ic("play", "sm")}تفاعل</button></div>
+          <div class="hint" style="margin-top:8px">تُوزَّع العمليات على الحسابات المفعّلة بجدول متدرّج.</div></div></div>
+        <div class="card"><div class="pad"><div class="lbl" style="margin-bottom:10px">مصادر التغريدات</div><div id="sources" class="stack" style="gap:8px"></div></div></div>
+      </div>
+      <div><div class="h2">آخر التغريدات</div><div class="card" id="recent"></div></div></div>`);
+    this.update();
+  },
+  update() {
+    const st = S.state; if (!st || !$("#hero")) return;
+    const e = st.engine, run = e.status === "running", stopping = e.status === "stopping";
+    $("#hero").innerHTML = `<div class="grow"><div class="big"><span class="dot ${run ? "run" : stopping ? "wait" : ""}"></span>${run ? "المحرك يعمل" : stopping ? "جارٍ الإيقاف بعد إنهاء الجلسة الجارية…" : "المحرك متوقف"}${e.dry_run && run ? '<span class="chip info">محاكاة</span>' : ""}</div>
+      <div class="muted" style="margin-top:4px">${run ? `آخر دورة: ${e.last_cycle ? ago(new Date(e.last_cycle * 1000).toISOString()) : "قيد التنفيذ"}` : "شغّل المحرك ليبدأ تنفيذ المهام المجدولة والجلسات اليومية."}${e.last_error ? `<br><span class="err-t">آخر خطأ: ${esc(e.last_error)}</span>` : ""}</div></div>
+      ${run || stopping ? `<button class="btn lg" data-act="engine-stop" ${stopping ? "disabled" : ""}>${ic("stop", "sm")}إيقاف</button>`
+        : `<button class="btn lg" data-act="engine-dry" title="يعمل بدون فتح متصفح أو تنفيذ أي تفاعل">${ic("flask", "sm")}محاكاة</button><button class="btn accent lg" data-act="engine-start">${ic("play", "sm")}تشغيل</button>`}`;
+    const s = st.stats;
+    $("#tiles").innerHTML = [["users", "الحسابات المفعّلة", `${s.enabled}`, `من ${s.accounts}`], ["shield", "حسابات جاهزة", s.ready, "مسجّلة الدخول"], ["list", "عمليات معلّقة", s.pending, "بانتظار التنفيذ"], ["tweet", "تغريدات", s.tweets, "في السجل"], ["users", "مخزن المتابعة", s.pool ?? 0, "مرشّح جاهز"]]
+      .map(([i, l, v, sub]) => `<div class="card tile"><div class="l">${ic(i, "sm")}${l}</div><div class="v num">${v}</div><div class="faint small">${sub}</div></div>`).join("");
+    const w = [];
+    if (!s.accounts) w.push(["info", "أضف أول حساب", "ابدأ بإضافة حساب تويتر ثم سجّل دخوله مرة واحدة.", '<a class="btn" href="#/accounts">الحسابات</a>']);
+    else if (!s.ready) w.push(["warn", "لا يوجد حساب جاهز", "سجّل دخول حساب واحد على الأقل ليتمكن المحرك من العمل.", '<a class="btn" href="#/accounts">فتح الحسابات</a>']);
+    if (!st.manager_handle && !(st.telegram.enabled && st.telegram.configured)) w.push(["info", "لا يوجد مصدر للتغريدات", "حدّد حساب المدير في الإعدادات، أو اربط بوت تيليجرام لإرسال الروابط، أو أضف رابطاً يدوياً.", '<a class="btn" href="#/telegram">ربط تيليجرام</a>']);
+    if (s.pending > 0 && e.status === "stopped") w.push(["warn", "توجد عمليات معلّقة والمحرك متوقف", "شغّل المحرك ليتم تنفيذها.", ""]);
+    $("#warns").innerHTML = w.map(([k, t, d, a]) => `<div class="infobar ${k}">${ic(k === "warn" ? "warn" : "info")}<div class="grow"><b>${t}</b><span class="muted">${d}</span></div>${a}</div>`).join("");
+    const tg = st.telegram;
+    const src = [["المدير", st.manager_handle ? `@${st.manager_handle}` : "غير محدد", !!st.manager_handle],
+      ["تيليجرام", !tg.enabled ? "معطّل" : tg.state === "running" ? `@${tg.username}` : tg.state === "error" ? "خطأ في الاتصال" : "غير متصل", tg.enabled && tg.state === "running"],
+      ["يدوي", "من هذه الواجهة", true]];
+    $("#sources").innerHTML = src.map(([n, v, ok]) => `<div class="row"><span class="dot ${ok ? "run" : ""}" style="animation:none"></span><b style="min-width:70px">${n}</b><span class="muted ltr">${esc(v)}</span></div>`).join("");
+    $("#recent").innerHTML = st.recent.length ? st.recent.map(tweetRow).join("") : `<div class="empty">${ic("tweet")}<b>لا توجد تغريدات بعد</b>أضف رابط تغريدة أو انتظر تغريدة جديدة من المدير.</div>`;
+  },
+};
+const SRC = {manager: "المدير", telegram: "تيليجرام", manual: "يدوي"};
+function tweetRow(t) {
+  const pct = t.total ? Math.round(t.done / t.total * 100) : 0;
+  const flash = t.priority ? '<span class="chip warn" title="تنفيذ فوري بالتتابع">⚡ فوري</span>' : "";
+  const status = flash + (t.cancelled ? '<span class="chip">ملغاة</span>' : t.deleted ? '<span class="chip err">محذوفة</span>' : t.completed ? '<span class="chip ok">مكتملة</span>' : '<span class="chip info">قيد التنفيذ</span>') + (!t.cancelled && !t.deleted && !t.completed ? `<button class="btn subtle icon" data-act="tweet-cancel" data-id="${esc(t.id)}" title="إلغاء" aria-label="إلغاء التغريدة">${ic("x", "sm")}</button>` : "");
+  return `<div class="listrow"><div class="grow"><div class="ell ltr" style="text-align:start"><a href="${esc(t.url)}" target="_blank" rel="noopener noreferrer">…/status/${esc(t.id)}</a></div>
+    <div class="faint small">${ago(t.detected_at)} · ${SRC[t.source] || esc(t.source)}${t.text ? ` · ${esc(t.text.slice(0, 60))}` : ""}</div></div>
+    <div style="width:160px"><div class="bar ${pct === 100 ? "ok" : ""}"><i style="width:${pct}%"></i></div><div class="faint small" style="margin-top:4px"><span class="num">${t.done}/${t.total}</span> عملية · <span class="num">${t.accounts}</span> حساب${t.failed ? ` · <span class="num">${t.failed}</span> فاشلة` : ""}</div></div>${status}</div>`;
+}
+
+/* ---------- الحسابات ---------- */
+PAGES.accounts = {
+  mount() {
+    view(head("الحسابات", "إدارة حسابات تويتر وجلسات الدخول", `<button class="btn accent" data-act="acc-add">${ic("plus", "sm")}إضافة حساب</button>`) + `<div class="card" id="acc-list"></div>
+      <div class="infobar info" style="margin-top:12px">${ic("info")}<div class="grow"><b>تسجيل الدخول مرة واحدة</b><span class="muted">اضغط «تسجيل الدخول» لفتح نافذة متصفح للحساب، سجّل دخولك يدوياً ثم أكّد من هنا. تُحفظ الجلسة ولا تحتاج لتكرارها.</span></div></div>`);
+    this.update();
+  },
+  update() {
+    const el = $("#acc-list"); if (!el) return;
+    if (!S.accounts.length) { el.innerHTML = `<div class="empty">${ic("users")}<b>لا توجد حسابات</b>اضغط «إضافة حساب» للبدء.</div>`; return; }
+    const lg = S.state?.login;
+    el.innerHTML = S.accounts.map(a => {
+      const d = a.done || {}, c = a.caps || {};
+      const m = (label, k) => `<div><b>${label}</b><span class="num">${d[k] ?? 0} / ${c[k] ?? "—"}</span></div>`;
+      const sess = a.needs_relogin ? '<span class="chip warn">يحتاج إعادة دخول</span>' : a.has_session ? '<span class="chip ok">جلسة محفوظة</span>' : '<span class="chip">غير مسجّل</span>';
+      const loginBusy = lg && ["starting", "waiting_user", "saving"].includes(lg.status) && lg.account === a.id;
+      return `<div class="acc ${a.enabled ? "" : "off"}"><div class="who"><div class="avatar" style="background:${colorFor(a.handle)}">${esc(a.handle[0] || "?")}</div>
+        <div style="min-width:0"><div class="ell ltr" style="text-align:start;font-weight:600">@${esc(a.handle)}</div><div class="row" style="margin-top:3px;gap:6px">${sess}</div></div></div>
+        <div class="meta">${m("إعجاب", "likes")}${m("ريتويت", "retweets")}${m("تعليق", "comments")}${m("متابعة", "follows")}</div>
+        <div class="act"><button class="btn ${a.has_session && !a.needs_relogin ? "subtle" : "accent"}" data-act="acc-login" data-id="${a.id}" ${loginBusy ? "disabled" : ""}>${ic("key", "sm")}${a.has_session ? "إعادة الدخول" : "تسجيل الدخول"}</button>
+          <button class="btn subtle icon" data-act="acc-edit" data-id="${a.id}" title="تعديل" aria-label="تعديل">${ic("edit", "sm")}</button>
+          <button class="btn subtle icon danger" data-act="acc-del" data-id="${a.id}" title="حذف" aria-label="حذف">${ic("trash", "sm")}</button>
+          ${sw(a.enabled, `data-act="acc-toggle" data-id="${a.id}" aria-label="تفعيل الحساب"`)}</div></div>`;
+    }).join("");
+  },
+};
+const TZ = ["Asia/Riyadh", "Asia/Dubai", "Asia/Kuwait", "Asia/Baghdad", "Asia/Amman", "Asia/Beirut", "Africa/Cairo", "Africa/Casablanca", "Europe/Istanbul", "Europe/London", "Europe/Berlin", "America/New_York", "America/Los_Angeles", "Asia/Kolkata", "Asia/Tokyo", "UTC"];
+function accountDialog(acc) {
+  const edit = !!acc, a = acc || {handle: "", display_name: "", timezone: "Asia/Riyadh", notes: "", en_ratio: null, enabled: true};
+  const en = a.en_ratio == null ? "" : Math.round(a.en_ratio * 100);
+  dialog({
+    title: edit ? "تعديل الحساب" : "إضافة حساب",
+    body: `<div class="field"><label for="f-handle">اسم المستخدم</label><input class="inp ltr" id="f-handle" value="${esc(a.handle)}" placeholder="username" maxlength="16" autocomplete="off" spellcheck="false"><span class="hint">بدون @ — حروف إنجليزية وأرقام و _</span></div>
+      <div class="field"><label for="f-name">الاسم الظاهر (اختياري)</label><input class="inp" id="f-name" value="${esc(a.username || a.display_name)}" maxlength="60"></div>
+      <div class="row" style="gap:12px;align-items:flex-start"><div class="field" style="flex:1"><label for="f-tz">المنطقة الزمنية</label><select class="sel" id="f-tz" style="min-width:0">${TZ.map(z => `<option ${z === a.timezone ? "selected" : ""}>${z}</option>`).join("")}${TZ.includes(a.timezone) ? "" : `<option selected>${esc(a.timezone)}</option>`}</select></div>
+      <div class="field" style="width:150px"><label for="f-en">التعليقات الإنجليزية</label><div class="row"><input class="inp num" id="f-en" type="number" min="0" max="100" value="${en}" placeholder="افتراضي"><span class="unit">%</span></div></div></div>
+      <div class="field"><label for="f-notes">ملاحظات</label><input class="inp" id="f-notes" value="${esc(a.notes)}" maxlength="200"></div>`,
+    actions: [{label: edit ? "حفظ" : "إضافة", cls: "accent", run: async d => {
+      const en = $("#f-en", d).value.trim();
+      const body = {handle: $("#f-handle", d).value.trim().replace(/^@/, ""), username: $("#f-name", d).value, timezone: $("#f-tz", d).value, notes: $("#f-notes", d).value, en_ratio: en === "" ? null : Math.min(100, Math.max(0, +en)) / 100};
+      if (edit) await api("PATCH", `/api/accounts/${acc.id}`, body); else await api("POST", "/api/accounts", body);
+      toast(edit ? "تم حفظ التعديلات" : "تمت إضافة الحساب"); await refresh(true);
+    }}, {label: "إلغاء"}],
+  });
+}
+function loginDialog(acc) {
+  S.loginOpen = true;
+  let timer;
+  const stop = () => { clearInterval(timer); S.loginOpen = false; };
+  const box = dialog({
+    title: `تسجيل دخول @${acc.handle}`,
+    body: `<div id="lg-body"><div class="row"><span class="spin" style="width:18px;height:18px;border:2px solid var(--accent);border-inline-end-color:transparent;border-radius:50%;animation:rot .7s linear infinite"></span><span>جارٍ فتح المتصفح…</span></div></div>`,
+    actions: [{label: "تم تسجيل الدخول", cls: "accent", persist: true, run: async () => { await api("POST", "/api/login/confirm"); return false; }}, {label: "إلغاء", persist: true, run: async () => { await api("POST", "/api/login/cancel").catch(() => {}); stop(); }}],
+  });
+  const confirmBtn = $('[data-dlg="0"]', box); confirmBtn.disabled = true;
+  const paint = j => {
+    const b = $("#lg-body"); if (!b) return stop();
+    const steps = {starting: "جارٍ فتح المتصفح…", waiting_user: "", saving: "جارٍ حفظ الجلسة…"};
+    if (j.status === "waiting_user") { b.innerHTML = `<p>فُتحت نافذة المتصفح لهذا الحساب.</p><ol class="muted" style="padding-inline-start:20px;line-height:1.9"><li>سجّل الدخول في تويتر (اسم المستخدم وكلمة المرور ورمز التحقق إن وُجد).</li><li>انتظر حتى تظهر الصفحة الرئيسية.</li><li>ارجع هنا واضغط «تم تسجيل الدخول».</li></ol>`; confirmBtn.disabled = false; }
+    else if (steps[j.status]) { b.innerHTML = `<div class="row"><span style="width:18px;height:18px;border:2px solid var(--accent);border-inline-end-color:transparent;border-radius:50%;animation:rot .7s linear infinite"></span><span>${steps[j.status]}</span></div>`; confirmBtn.disabled = true; }
+    else {
+      stop(); closeDialog(); refresh(true);
+      if (j.status === "done") toast("تم حفظ الجلسة بنجاح"); else if (j.status === "failed") toast(j.error || "فشل تسجيل الدخول", "err", 6500);
+    }
+  };
+  timer = setInterval(guard(async () => { const s = await api("GET", "/api/state"); S.state = s; if (s.login) paint(s.login); }), 1000);
+}
+
+/* ---------- التغريدات ---------- */
+PAGES.tweets = {
+  mount() {
+    view(head("التغريدات", "أضف رابط تغريدة لتتفاعل معها الحسابات، وتابع التقدّم") + `<div class="stack">
+      <div class="card pad stack"><div class="field"><label for="t-url">رابط التغريدة</label><input class="inp ltr" id="t-url" placeholder="https://x.com/user/status/123456789" autocomplete="off" spellcheck="false"></div>
+        <div class="field"><label for="t-text">نص التغريدة (اختياري)</label><textarea class="txt" id="t-text" rows="2" placeholder="يُستخدم لتوليد تعليقات تناسب المحتوى"></textarea></div>
+        <div class="row wrap" style="gap:24px"><label class="row"><span class="lbl" style="font-weight:400">كل الحسابات المفعّلة</span>${sw(false, 'id="t-all"')}</label><label class="row"><span class="lbl" style="font-weight:400" title="مثل تغريدة الأدمن: حساباً بعد حساب فوراً، بلا التقيّد بالحدود اليومية">تنفيذ فوري (يتجاوز الحدود اليومية)</span>${sw(true, 'id="t-fast"')}</label><span style="flex:1"></span>
+        <button class="btn accent" data-act="tweet-add">${ic("play", "sm")}بدء التفاعل</button></div></div>
+      <div class="row" style="margin-top:20px"><div class="h2" style="margin:0;flex:1">السجل</div><button class="btn" data-act="tweet-stale" title="يلغي تغريدات المدير المعلّقة الأقدم من الحد المحدد في الإعدادات">${ic("trash", "sm")}إلغاء المعلّقة القديمة</button></div><div class="card" id="tw-list" style="margin-top:8px"></div></div>`);
+    this.load();
+  },
+  async load() { try { S.tweets = await api("GET", "/api/tweets"); } catch (e) { toast(e.message, "err"); } this.update(); },
+  update() {
+    const el = $("#tw-list"); if (!el) return;
+    el.innerHTML = S.tweets.length ? S.tweets.map(tweetRow).join("") : `<div class="empty">${ic("tweet")}<b>لا توجد تغريدات</b>أضف أول رابط من الأعلى.</div>`;
+  },
+};
+
+/* ---------- تيليجرام ---------- */
+PAGES.telegram = {
+  mount() {
+    const tg = S.config.telegram, st = S.state.telegram, ch = tg.channel;
+    view(head("تيليجرام", "أرسل رابط تغريدة للبوت فتتفاعل معها الحسابات تلقائياً", `<span id="tg-chip"></span>`) + `<div class="card">
+      <div class="step ${st.configured ? "done" : ""}" id="s1"><div class="n">1</div><div class="body"><div class="title">إنشاء البوت وإضافة التوكن</div>
+        <div class="muted">افتح <b>@BotFather</b> في تيليجرام، أرسل <span class="ltr">/newbot</span> واتبع الخطوات، ثم الصق التوكن هنا.</div>
+        <div class="row"><input class="inp ltr" id="tg-token" type="password" value="${esc(tg.bot_token)}" placeholder="123456789:AA…" style="max-width:420px" autocomplete="off"><button class="btn" data-act="tg-test">اختبار الاتصال</button></div><div id="tg-test" class="hint"></div>
+        <details class="hint" style="margin-top:4px"><summary style="cursor:pointer;color:var(--accent)">خطأ في الشهادة (SSL)؟ خيارات متقدمة</summary>
+          <div class="stack" style="gap:10px;margin-top:10px">
+            <div class="field"><label for="tg-ca">ملف شهادات مخصّص (.pem) — اختياري</label><input class="inp ltr" id="tg-ca" value="${esc(tg.ca_bundle)}" placeholder="C:\\certs\\ca.pem" autocomplete="off"><span class="hint">للشبكات التي تعترض HTTPS (بروكسي الشركة أو برنامج الحماية): ضع هنا شهادة الجذر الخاصة بها.</span></div>
+            <div class="row"><span style="flex:1"><b>تعطيل التحقق من الشهادة</b><br><span class="err-t">غير آمن: قد يسمح لوسيط بقراءة توكن البوت. استخدمه كحل أخير فقط.</span></span>${sw(tg.insecure_ssl, 'id="tg-insecure"')}</div></div></details></div></div>
+      <div class="step ${tg.admin_ids.length ? "done" : ""}" id="s2"><div class="n">2</div><div class="body"><div class="title">ربط حسابك كأدمن</div>
+        <div class="muted">للأمان، لا ينفّذ البوت إلا أوامر الأدمن المربوطين. أنشئ رمزاً ثم أرسله للبوت.</div>
+        <div class="row"><button class="btn" data-act="tg-pair">${ic("key", "sm")}إنشاء رمز ربط</button></div><div id="tg-pair"></div>
+        <div id="tg-admins"></div></div></div>
+      <div class="step" id="s3"><div class="n">3</div><div class="body"><div class="title">التفعيل والخيارات</div>
+        <div class="srow" style="padding:0;min-height:0;border:0"><div class="txtcol"><div class="t">تفعيل البوت</div><div class="d">يستمع للرسائل ما دام التطبيق مفتوحاً.</div></div><div class="c">${sw(tg.enabled, 'id="tg-en"')}</div></div>
+        <div class="srow" style="padding:0;min-height:0;border:0"><div class="txtcol"><div class="t">تنفيذ فوري كتغريدة أدمن ⚡</div><div class="d">تتفاعل الحسابات حساباً بعد حساب فوراً، بلا انتظار جلساتها ومن غير التقيّد بالحدود اليومية ولا يوم الراحة.</div></div><div class="c">${sw(tg.instant, 'id="tg-instant"')}</div></div>
+        <div class="srow" style="padding:0;min-height:0;border:0"><div class="txtcol"><div class="t">إشعار عند اكتمال التفاعل</div><div class="d">يرسل البوت رسالة لمن أرسل الرابط عند انتهاء كل العمليات.</div></div><div class="c">${sw(tg.notify, 'id="tg-notify"')}</div></div>
+        <div class="srow" style="padding:0;min-height:0;border:0"><div class="txtcol"><div class="t">ملخص يومي في آخر اليوم 📈</div><div class="d">رسالة للأدمن بتوقيت غزة (الافتراضي 00:30 أي بعد منتصف الليل لليوم المنتهي): الإعجابات والريتويت والتعليقات، وكم <b>شخصاً جديداً تمت متابعتهم</b> وأسماؤهم، وحسب الحساب والتغريدات. إن كان التطبيق مغلقاً وقتها يصلك عند التشغيل التالي.</div></div><div class="c">${sw(tg.daily_summary.enabled, 'id="tg-sum-en"')}<input class="inp sm num" id="tg-sum-time" type="time" value="${esc(tg.daily_summary.time)}" style="width:120px"><input class="inp ltr" id="tg-sum-tz" value="${esc(tg.daily_summary.timezone)}" placeholder="Asia/Gaza" style="width:130px" title="منطقة التوقيت (IANA)"><button class="btn" data-act="tg-summary">إرسال ملخص اليوم الآن</button></div></div>
+        <div class="srow" style="padding:0;min-height:0;border:0"><div class="txtcol"><div class="t">احتمال كل عملية في الوضع الفوري</div><div class="d">100% يعني أن كل حساب مختار يعجب ويعيد التغريد ويعلّق. اخفضها لتبدو الحسابات أقل تطابقاً.</div></div><div class="c" id="tg-mix"><span class="unit">إعجاب</span><input class="inp sm num" data-k="like" type="number" min="0" max="100" value="${Math.round(tg.action_mix.like * 100)}"><span class="unit">ريتويت</span><input class="inp sm num" data-k="retweet" type="number" min="0" max="100" value="${Math.round(tg.action_mix.retweet * 100)}"><span class="unit">تعليق</span><input class="inp sm num" data-k="comment" type="number" min="0" max="100" value="${Math.round(tg.action_mix.comment * 100)}"><span class="unit">%</span></div></div>
+        <div class="srow" style="padding:0;min-height:0;border:0"><div class="txtcol"><div class="t">التأخير بين عمليات الحساب</div><div class="d">فاصل قصير بين الإعجاب والريتويت والتعليق داخل الحساب الواحد (في الوضع الفوري).</div></div><div class="c"><div class="rng" id="tg-delay"><span>من</span><input class="inp sm num r0" type="number" step="0.5" min="0" value="${tg.action_delay_s[0]}"><span>إلى</span><input class="inp sm num r1" type="number" step="0.5" min="0" value="${tg.action_delay_s[1]}"><span class="unit">ثانية</span></div></div></div>
+        <div class="srow" style="padding:0;min-height:0;border:0"><div class="txtcol"><div class="t">مدة توزيع التفاعل (عند إيقاف الوضع الفوري)</div><div class="d">تُوزَّع عمليات روابط تيليجرام خلال هذا المجال بدل التنفيذ الفوري.</div></div><div class="c"><div class="rng" id="tg-spread"><span>من</span><input class="inp sm num r0" type="number" step="0.1" min="0" value="${tg.spread_hours[0]}"><span>إلى</span><input class="inp sm num r1" type="number" step="0.1" min="0" value="${tg.spread_hours[1]}"><span class="unit">ساعة</span></div></div></div>
+        </div></div>
+      <div class="step" id="s4"><div class="n">4</div><div class="body"><div class="title">قناة الأدمن 📣 (بدل الفحص المتكرر لـX)</div>
+        <div class="muted">أضف البوت <b>أدمن</b> في قناتك. عند نزول أي منشور فيها: إن كان فيه رابط تغريدة يُجدول التفاعل فوراً، وإن لم يكن يُفحص حساب المدير في X مباشرة (مع إعادة محاولة). والفحص الدوري يصبح احتياطياً نادراً.</div>
+        <div class="srow" style="padding:0;min-height:0;border:0"><div class="txtcol"><div class="t">مراقبة القناة</div></div><div class="c">${sw(ch.enabled, 'id="ch-en"')}</div></div>
+        <div class="srow" style="padding:0;min-height:0;border:0"><div class="txtcol"><div class="t">معرّف القناة</div><div class="d">يبدأ عادةً بـ <span class="ltr">-100</span>. أسهل طرق معرفته بلا نشر: اكتب اسم القناة العام أدناه، أو حوّل أي منشور قديم من القناة إلى البوت.</div></div><div class="c"><input class="inp ltr num" id="ch-id" type="number" value="${ch.chat_id || ""}" placeholder="-1001234567890" style="width:200px"></div></div>
+        <div class="row"><input class="inp ltr" id="ch-name" placeholder="@channelname أو t.me/channelname" style="max-width:300px" autocomplete="off" spellcheck="false"><button class="btn" data-act="ch-resolve">تحديد من الاسم</button></div><div id="ch-resolved" class="hint"></div>
+        <div class="hint">قناة خاصة؟ حوّل (Forward) أي منشور قديم منها إلى محادثة البوت، فيعرض لك المعرّف وزر اعتماد.</div>
+        <div id="ch-found" class="stack" style="gap:6px"></div>
+        <div id="ch-events" class="stack" style="gap:4px"></div><div class="row"><button class="btn" data-act="ch-refresh">${ic("refresh", "sm")}تحديث القنوات</button></div>
+        <div class="srow" style="padding:0;min-height:0;border:0"><div class="txtcol"><div class="t">تنفيذ فوري لتغريدات القناة ⚡</div><div class="d">مثل رابط الأدمن: حساباً بعد حساب دون التقيّد بالحدود اليومية.</div></div><div class="c">${sw(ch.instant, 'id="ch-instant"')}</div></div>
+        <div class="srow" style="padding:0;min-height:0;border:0"><div class="txtcol"><div class="t">الفحص الاحتياطي لـX</div><div class="d">شبكة أمان لما فات القناة (نشر على X فقط). يُفضَّل أن يكون نادراً لتستريح الحسابات.</div></div><div class="c"><div class="rng" id="ch-fb"><span>من</span><input class="inp sm num r0" type="number" min="1" value="${ch.fallback_interval_min[0]}"><span>إلى</span><input class="inp sm num r1" type="number" min="1" value="${ch.fallback_interval_min[1]}"><span class="unit">دقيقة</span></div></div></div>
+        <div class="srow" style="padding:0;min-height:0;border:0"><div class="txtcol"><div class="t">فحص المدير بعد منشور بلا رابط</div><div class="d">أول فحص بعد كم ثانية، ثم كم مرة يعيد ويفصل بينها كم ثانية، وأقصى عمر للتغريدة المقبولة.</div></div><div class="c"><span class="unit">بعد</span><input class="inp sm num" id="ch-first" type="number" min="0" value="${ch.first_check_s}"><span class="unit">ث · إعادة</span><input class="inp sm num" id="ch-retries" type="number" min="0" value="${ch.retries}"><span class="unit">× كل</span><input class="inp sm num" id="ch-every" type="number" min="5" value="${ch.retry_every_s}"><span class="unit">ث · عمرها ≤</span><input class="inp sm num" id="ch-age" type="number" min="1" value="${ch.max_age_min}"><span class="unit">د</span></div></div>
+      </div></div>
+      <div class="step"><div class="n" style="visibility:hidden">·</div><div class="body"><div class="row"><button class="btn accent" data-act="tg-save">حفظ</button></div></div></div></div>
+      <div class="h2">طريقة الاستخدام</div><div class="card pad muted" style="line-height:1.9">أرسل للبوت رابط أي تغريدة ← يجدول التفاعل فوراً ويردّ بعدد الحسابات والعمليات.<br>
+      <span class="ltr">/menu</span> ← قائمة بأزرار: الحالة، المحرك، الحسابات، التغريدات، الكلمات المفتاحية، قوالب التعليقات، الإعدادات، WARP.<br>
+      <span class="ltr">/all</span> + رابط ← تفاعل بكل الحسابات المفعّلة &nbsp;·&nbsp; <span class="ltr">/status</span> ← حالة التطبيق &nbsp;·&nbsp; نص بعد الرابط ← يُستخدم لتعليق مناسب للمحتوى.<br>
+      من البوت يمكنك تعديل معظم الإعدادات وإضافة/حذف الكلمات المفتاحية والقوالب وتفعيل الحسابات وتشغيل المحرك، ويصلك إشعار عند اكتمال التفاعل مع الرابط (يمكن إيقافه من إعدادات البوت). التوكن ومفاتيح API تُعدَّل من التطبيق فقط.</div>`);
+    this.update();
+  },
+  update() {
+    const st = S.state.telegram, chip = $("#tg-chip"); if (!chip) return;
+    chip.innerHTML = !st.enabled ? '<span class="chip">معطّل</span>' : st.state === "running" ? `<span class="chip ok">متصل · @${esc(st.username)}</span>` : st.state === "error" ? `<span class="chip err" title="${esc(st.error)}">خطأ: ${esc((st.error || "في الاتصال").slice(0, 60))}</span>` : '<span class="chip warn">جارٍ الاتصال…</span>';
+    $("#tg-admins").innerHTML = st.admins.length ? `<div class="lbl">الأدمن المربوطون</div>` + st.admins.map(id => `<div class="row"><span class="chip ok">${ic("check", "sm")}<span class="num">${id}</span></span><button class="btn subtle icon" data-act="tg-unlink" data-id="${id}" title="إلغاء الربط" aria-label="إلغاء الربط">${ic("x", "sm")}</button></div>`).join("") : '<div class="hint">لا يوجد أدمن مربوط بعد.</div>';
+    $("#s2").classList.toggle("done", st.admins.length > 0);
+    $("#s1").classList.toggle("done", st.configured);
+    api("GET", "/api/telegram/channels").then(list => {
+      const el = $("#ch-found"); if (!el) return;
+      el.innerHTML = list.length ? `<div class="lbl">قنوات رآها البوت</div>` + list.map(c => `<div class="row"><span class="chip info">${esc(c.title || c.username || "قناة")}</span><span class="num faint">${c.id}</span><span class="faint small">قبل ${c.age_s} ث</span><button class="btn" data-act="ch-pick" data-id="${c.id}">اعتماد</button></div>`).join("") : '<div class="hint">لم يرَ البوت أي قناة بعد (تأكد أنه أدمن فيها وانشر منشوراً).</div>';
+    }).catch(() => {});
+    api("GET", "/api/telegram/channel/events").then(list => {
+      const el = $("#ch-events"); if (!el) return;
+      el.innerHTML = `<div class="lbl">آخر منشورات وصلت البوت</div>` + (list.length ? list.map(e => `<div class="row" style="gap:8px;align-items:flex-start"><span class="faint small" style="min-width:70px">قبل ${e.age_s < 120 ? e.age_s + " ث" : Math.round(e.age_s / 60) + " د"}</span><span class="chip">${esc(e.title || e.chat)}</span><span class="small" style="flex:1">${esc(e.result)}</span></div>`).join("") : '<div class="hint">لم يصل البوت أي منشور قناة منذ تشغيل التطبيق. انشر منشوراً في القناة (والبوت أدمن فيها) ثم تابع هنا: إن لم يظهر شيء فالبوت لا يستقبل منشورات القناة.</div>');
+    }).catch(() => {});
+    const p = S.tg.code;
+    if (p) $("#tg-pair").innerHTML = `<div class="code num">${p}</div><div class="hint">أرسل للبوت: <b class="ltr">/pair ${p}</b> — الرمز صالح 10 دقائق ويُستخدم مرة واحدة.</div>`;
+  },
+};
+
+/* ---------- الإعدادات ---------- */
+PAGES.settings = {
+  async mount() {
+    S.dirty = false;
+    const tabs = SCHEMA.map(s => `<button role="tab" data-act="set-tab" data-id="${s.id}" aria-selected="${S.settingsTab === s.id}">${s.title}</button>`).join("");
+    view(head("الإعدادات", "كل خيارات التطبيق في مكان واحد") + `<div class="pivot" role="tablist">${tabs}</div><div id="set-body"></div>
+      <div class="savebar" id="savebar"><span class="chip warn">تغييرات غير محفوظة</span><span class="grow muted small">لن تُطبَّق إلا بعد الحفظ.</span><button class="btn" data-act="set-reset">تراجع</button><button class="btn accent" data-act="set-save">حفظ التغييرات</button></div>`);
+    this.tpl = null; this.tplOrig = null;
+    await this.paint();
+  },
+  stash() {  // حفظ قيم التبويب الحالي في المسودة قبل التبديل/الحفظ
+    const v = this.collect();
+    FLAT.forEach(f => { const el = $(`#set-body [data-p="${f.p}"]`); if (el) setPath(S.config, f.p, getPath(v, f.p)); });
+    const tpl = $("#tpl"); if (tpl) this.tpl = tpl.value;
+  },
+  async paint() {
+    const sec = SCHEMA.find(s => s.id === S.settingsTab) || SCHEMA[0];
+    $$(".pivot button").forEach(b => b.setAttribute("aria-selected", b.dataset.id === sec.id));
+    if (sec.id === "comments" && this.tpl == null) { try { this.tpl = (await api("GET", "/api/comments")).text; } catch (e) { this.tpl = ""; } this.tplOrig = this.tpl; }
+    $("#set-body").innerHTML = `<div class="stack">` + sec.groups.map(g => `<div><div class="h2">${g.title}</div><div class="card group">` +
+      (g.custom === "aitest" ? `<div class="srow block"><div class="d" style="margin:0">يستخدم القيم الظاهرة أعلاه (حتى قبل الحفظ). الصق نص تغريدة وسيولّد تعليقاً — وإن فشل ستظهر لك أسباب الفشل بوضوح.</div><textarea class="txt" id="ai-text" rows="2" placeholder="نص تغريدة للتجربة (اختياري)"></textarea><div class="row"><button class="btn accent" data-act="ai-test">${ic("flask", "sm")}اختبار التوليد</button><button class="btn" data-act="ai-diag" title="يفحص DNS والاتصال والتشفير والمفتاح والتوليد خطوة بخطوة">${ic("shield", "sm")}فحص الشبكة بالتفصيل</button></div><div id="ai-out" class="hint"></div><div id="ai-diag" class="stack" style="gap:6px"></div></div>`
+      : g.custom === "templates" ? `<div class="srow block"><div class="d" style="margin:0">تعليق في كل سطر (بحد أقصى 280 حرفاً). تُستخدم عند عدم توفر تعليق سياقي أو ذكاء اصطناعي.</div><textarea class="txt" id="tpl" rows="10" spellcheck="false" style="min-height:200px">${esc(this.tpl || "")}</textarea></div>`
+        : g.custom === "warptools" ? `<div class="srow"><div class="txtcol"><div class="t">حالة WARP</div><div class="d" id="warp-st">اضغط «فحص» لمعرفة الحالة والـ IP الحالي.</div></div><div class="c"><button class="btn" data-act="warp-status">${ic("refresh", "sm")}فحص</button></div></div>
+          <div class="srow"><div class="txtcol"><div class="t">تجهيز WARP</div><div class="d">تثبيت وتسجيل وتفعيل وضع البروكسي المحلي والاتصال (مرة واحدة).</div></div><div class="c"><button class="btn" data-act="warp-setup">تجهيز الآن</button></div></div>
+          <div class="srow"><div class="txtcol"><div class="t">تجربة التدوير</div><div class="d">يغيّر الـ IP الآن ويعرض العنوان قبل وبعد.</div></div><div class="c"><button class="btn" data-act="warp-rotate">${ic("refresh", "sm")}تدوير الآن</button></div></div>`
+        : g.fields.map(f => fieldRow(f, S.config)).join("")) + `</div></div>`).join("") + `</div>`;
+  },
+  collect() {
+    const out = {}, bad = [];
+    for (const el of $$("#set-body [data-p]")) {
+      const f = FLAT.find(x => x.p === el.dataset.p), v = readControl(el);
+      if ((Array.isArray(v) && v.some(x => x == null || x === "")) || (v == null && ["int", "float", "pct"].includes(f.t))) bad.push(f.label);
+      setPath(out, el.dataset.p, v);
+    }
+    if (bad.length) throw new Error("قيمة ناقصة أو غير صحيحة: " + bad[0]);
+    return out;
+  },
+};
+
+/* ---------- السجلات ---------- */
+PAGES.logs = {
+  mount() {
+    view(head("السجلات", "نشاط التطبيق لحظة بلحظة", `<div class="seg" role="group" aria-label="مستوى السجل">${[["all", "الكل"], ["warn", "تحذيرات وأخطاء"], ["err", "أخطاء"]].map(([k, l]) => `<button data-act="log-level" data-id="${k}" aria-pressed="${S.logLevel === k}">${l}</button>`).join("")}</div><button class="btn" data-act="log-refresh">${ic("refresh", "sm")}تحديث</button>`) + `<div class="card logs" id="logs"><div class="pad"><div class="skeleton" style="width:60%"></div></div></div>`);
+    this.load();
+  },
+  async load() {
+    let rows = []; try { rows = await api("GET", "/api/logs?n=400"); } catch (e) { return toast(e.message, "err"); }
+    const el = $("#logs"); if (!el) return;
+    const keep = {all: () => true, warn: r => ["WARNING", "ERROR", "CRITICAL"].includes(r.level), err: r => ["ERROR", "CRITICAL"].includes(r.level)}[S.logLevel];
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40 || !el.dataset.init;
+    const list = rows.filter(keep);
+    el.innerHTML = list.length ? list.map(r => `<div class="log ${r.level}"><span class="faint num">${esc(r.t)}</span><span class="lv ${r.level}">${esc(r.level)}</span><span class="faint">${esc(r.src)}</span><span class="m">${esc(r.msg)}</span></div>`).join("") : `<div class="empty">${ic("list")}<b>لا توجد سجلات</b>ستظهر هنا أحداث التشغيل.</div>`;
+    el.dataset.init = 1; if (atBottom) el.scrollTop = el.scrollHeight;
+  },
+  update() { this.load(); },
+};
+
+/* ============ التوجيه والتحديث ============ */
+async function go(page) {
+  if (!PAGES[page]) page = "home";
+  if (page === S.page && S.mounted) return;
+  if (S.page === "settings" && S.dirty && page !== "settings" && !(await confirmBox("تغييرات غير محفوظة", "لديك تغييرات لم تُحفظ في الإعدادات. هل تريد تجاهلها؟", "تجاهل"))) { location.hash = "#/settings"; return; }
+  S.page = page; S.dirty = false;
+  if (page === "telegram" || page === "settings") S.config = await api("GET", "/api/config").catch(() => S.config);
+  renderNav(); $("#main").scrollTop = 0; S.mounted = true; PAGES[page].mount();
+}
+async function refresh(full = false) {
+  const [st, acc] = await Promise.all([api("GET", "/api/state"), api("GET", "/api/accounts")]);
+  S.state = st; S.accounts = acc; renderNav();
+  const p = PAGES[S.page]; if (p?.update && S.page !== "logs") p.update();
+  if (full && S.page === "tweets") PAGES.tweets.load();
+}
+window.addEventListener("hashchange", () => go(location.hash.replace("#/", "")));
+setInterval(() => { if (!document.hidden && !S.loginOpen) { refresh().catch(() => {}); if (S.page === "logs") PAGES.logs.load(); if (S.page === "tweets") PAGES.tweets.load(); } }, 3000);
+
+/* ============ الأحداث ============ */
+const ACT = {
+  async "engine-start"(b) { busy(b, true); try { await api("POST", "/api/engine/start", {}); toast("بدأ المحرك"); await refresh(); } finally { busy(b, false); } },
+  async "engine-dry"(b) { await api("POST", "/api/engine/start", {dry_run: true}); toast("بدأ المحرك بوضع المحاكاة — لن يُنفَّذ أي تفاعل", "info"); await refresh(); },
+  async "engine-stop"() { await api("POST", "/api/engine/stop"); toast("طُلب الإيقاف — ستنتهي الجلسة الجارية أولاً", "info"); await refresh(); },
+  async "quick-tweet"(b) { const i = $("#q-url"); busy(b, true); try { const r = await api("POST", "/api/tweets", {url: i.value, fast: true}); i.value = ""; toast(r.status === "new" ? `جُدول التفاعل: ${r.accounts} حساب` : `حُوّلت العمليات المتبقية (${r.remaining}) إلى تنفيذ فوري`); await refresh(); } finally { busy(b, false); } },
+  async "tweet-add"(b) { busy(b, true); try { const r = await api("POST", "/api/tweets", {url: $("#t-url").value, text: $("#t-text").value, all: $("#t-all").getAttribute("aria-checked") === "true", fast: $("#t-fast").getAttribute("aria-checked") === "true"}); $("#t-url").value = ""; $("#t-text").value = ""; toast(r.status === "new" ? `جُدول التفاعل: ${r.accounts} حساب${r.skipped.length ? " — تُخطّيت: " + r.skipped.join(" ") : ""}` : `${r.status === "revived" ? "أُعيد تفعيلها" : "كانت مجدولة"} — حُوّلت العمليات المتبقية (${r.remaining}) إلى تنفيذ فوري`); await refresh(true); } finally { busy(b, false); } },
+  async "tweet-cancel"(b) { if (await confirmBox("إلغاء التغريدة", "لن تُنفَّذ العمليات المتبقية لهذه التغريدة.", "إلغاء التغريدة")) { await api("POST", "/api/tweets/cancel", {id: b.dataset.id}); toast("أُلغيت التغريدة"); await refresh(true); } },
+  async "tweet-stale"(b) { busy(b, true); try { const r = await api("POST", "/api/tweets/cancel", {stale: true}); toast(r.cancelled ? `أُلغيت ${r.cancelled} تغريدة قديمة` : "لا توجد تغريدات قديمة معلّقة", "info"); await refresh(true); } finally { busy(b, false); } },
+  "acc-add"() { accountDialog(null); },
+  "acc-edit"(b) { accountDialog(S.accounts.find(a => a.id === b.dataset.id)); },
+  async "acc-del"(b) {
+    const a = S.accounts.find(x => x.id === b.dataset.id);
+    if (await confirmBox("حذف الحساب", `سيُحذف @${a.handle} مع جلسته وبياناته المحفوظة. لا يمكن التراجع.`, "حذف")) { await api("DELETE", `/api/accounts/${a.id}`); toast("تم حذف الحساب"); await refresh(); }
+  },
+  async "acc-toggle"(b) { const on = b.getAttribute("aria-checked") === "true"; try { await api("PATCH", `/api/accounts/${b.dataset.id}`, {enabled: on}); await refresh(); } catch (e) { b.setAttribute("aria-checked", !on); throw e; } },
+  async "acc-login"(b) { const a = S.accounts.find(x => x.id === b.dataset.id); await api("POST", `/api/accounts/${a.id}/login`); loginDialog(a); },
+  async "tg-test"(b) {
+    busy(b, true); const out = $("#tg-test");
+    try { await api("POST", "/api/config", {telegram: {ca_bundle: $("#tg-ca").value.trim(), insecure_ssl: $("#tg-insecure").getAttribute("aria-checked") === "true"}}); const r = await api("POST", "/api/telegram/test", {token: $("#tg-token").value}); out.innerHTML = `<span class="chip ok">${ic("check", "sm")}متصل: @${esc(r.username)}</span>`; }
+    catch (e) { out.innerHTML = `<span class="err-t">${esc(e.message)}</span>`; } finally { busy(b, false); }
+  },
+  async "tg-summary"(b) { busy(b, true); try { await api("POST", "/api/telegram/summary"); toast("أُرسل الملخص إلى تيليجرام"); } finally { busy(b, false); } },
+  "ch-refresh"() { PAGES.telegram.update(); },
+  async "ch-resolve"(b) {
+    busy(b, true); const o = $("#ch-resolved");
+    try { const r = await api("POST", "/api/telegram/channel/resolve", {name: $("#ch-name").value}); $("#ch-id").value = r.id; o.innerHTML = `<span class="chip ok">${ic("check", "sm")}${esc(r.title)}</span> <span class="num">${r.id}</span> — اضغط حفظ`; }
+    catch (e) { o.innerHTML = `<span class="err-t">${esc(e.message)}</span>`; } finally { busy(b, false); }
+  },
+  "ch-pick"(b) { $("#ch-id").value = b.dataset.id; toast("اعتُمد المعرّف — اضغط حفظ", "info"); },
+  async "tg-pair"() { const r = await api("POST", "/api/telegram/pair"); S.tg.code = r.code; PAGES.telegram.update(); },
+  async "tg-unlink"(b) { if (await confirmBox("إلغاء الربط", "لن يتمكن هذا الأدمن من التحكم بالبوت بعد الآن.", "إلغاء الربط")) { await api("DELETE", `/api/telegram/admins/${b.dataset.id}`); toast("تم إلغاء الربط"); await refresh(); } },
+  async "tg-save"(b) {
+    const sp = $("#tg-spread"); busy(b, true);
+    try {
+      S.config = await api("POST", "/api/config", {telegram: {bot_token: $("#tg-token").value.trim(), ca_bundle: $("#tg-ca").value.trim(), insecure_ssl: $("#tg-insecure").getAttribute("aria-checked") === "true", enabled: $("#tg-en").getAttribute("aria-checked") === "true", instant: $("#tg-instant").getAttribute("aria-checked") === "true", notify: $("#tg-notify").getAttribute("aria-checked") === "true", daily_summary: {enabled: $("#tg-sum-en").getAttribute("aria-checked") === "true", time: $("#tg-sum-time").value || "00:30", timezone: ($("#tg-sum-tz").value || "Asia/Gaza").trim()}, action_mix: Object.fromEntries($$("#tg-mix input").map(i => [i.dataset.k, parseFloat(i.value) / 100])), action_delay_s: [parseFloat($(".r0", $("#tg-delay")).value), parseFloat($(".r1", $("#tg-delay")).value)], spread_hours: [parseFloat($(".r0", sp).value), parseFloat($(".r1", sp).value)],
+        channel: {enabled: $("#ch-en").getAttribute("aria-checked") === "true", chat_id: parseInt($("#ch-id").value || "0", 10), instant: $("#ch-instant").getAttribute("aria-checked") === "true", max_age_min: parseFloat($("#ch-age").value), first_check_s: parseFloat($("#ch-first").value), retry_every_s: parseFloat($("#ch-every").value), retries: parseFloat($("#ch-retries").value), fallback_interval_min: [parseFloat($(".r0", $("#ch-fb")).value), parseFloat($(".r1", $("#ch-fb")).value)]}}});
+      toast("تم حفظ إعدادات تيليجرام"); await refresh();
+    } finally { busy(b, false); }
+  },
+  "set-tab"(b) { PAGES.settings.stash(); S.settingsTab = b.dataset.id; PAGES.settings.paint(); },
+  async "set-save"(b) {
+    busy(b, true);
+    try {
+      PAGES.settings.stash();
+      S.config = await api("POST", "/api/config", S.config);
+      const P = PAGES.settings;
+      if (P.tpl != null && P.tpl !== P.tplOrig) { await api("POST", "/api/comments", {text: P.tpl}); P.tplOrig = P.tpl; }
+      S.dirty = false; $("#savebar").classList.remove("show"); toast("تم حفظ الإعدادات"); await refresh();
+    } finally { busy(b, false); }
+  },
+  async "set-reset"() { S.config = await api("GET", "/api/config"); PAGES.settings.tpl = null; PAGES.settings.tplOrig = null; S.dirty = false; $("#savebar").classList.remove("show"); await PAGES.settings.paint(); },
+  "log-level"(b) { S.logLevel = b.dataset.id; $$("[data-act=log-level]").forEach(x => x.setAttribute("aria-pressed", x === b)); PAGES.logs.load(); },
+  "log-refresh"() { PAGES.logs.load(); },
+  async "ai-test"(b) {
+    PAGES.settings.stash(); const a = S.config.comments.ai, o = $("#ai-out"); busy(b, true); o.textContent = "";
+    try {
+      const r = await api("POST", "/api/ai/test", {provider: a.provider, model: a.model, api_key: a.api_key, text: $("#ai-text").value});
+      o.innerHTML = `<span class="chip ok">${ic("check", "sm")}يعمل</span> &nbsp;<b>${esc(r.comment)}</b>`;
+    } catch (e) { o.innerHTML = `<span class="chip err">${ic("warn", "sm")}فشل</span> &nbsp;<span class="err-t">${esc(e.message)}</span>`; }
+    finally { busy(b, false); }
+  },
+  async "ai-diag"(b) {
+    PAGES.settings.stash(); const a = S.config.comments.ai, o = $("#ai-diag"); busy(b, true); o.innerHTML = '<div class="hint">جارٍ الفحص… قد يستغرق حتى دقيقة.</div>';
+    try {
+      const r = await api("POST", "/api/ai/diagnose", {provider: a.provider, model: a.model, api_key: a.api_key});
+      o.innerHTML = r.steps.map(s => `<div class="row" style="align-items:flex-start;gap:10px"><span class="chip ${s.ok ? (s.warn ? "warn" : "ok") : "err"}" style="min-width:150px;justify-content:center">${s.ok ? (s.warn ? "⚠" : "✓") : "✗"} ${esc(s.name)}</span><span class="num faint small" style="min-width:64px">${s.ms} ms</span><span class="small" style="flex:1;word-break:break-word">${esc(s.detail)}</span></div>`).join("")
+        + `<div class="infobar ${r.verdict.startsWith("كل شيء") ? "info" : "warn"}" style="margin-top:6px">${ic(r.verdict.startsWith("كل شيء") ? "check" : "warn")}<div class="grow"><b>الخلاصة</b>${esc(r.verdict)}</div></div>`;
+    } catch (e) { o.innerHTML = `<span class="err-t">${esc(e.message)}</span>`; } finally { busy(b, false); }
+  },
+  async "warp-status"(b) {
+    busy(b, true); const o = $("#warp-st");
+    try { const r = await api("GET", "/api/warp/status"); o.innerHTML = r.installed ? `${r.connected ? '<span class="chip ok">متصل</span>' : '<span class="chip warn">غير متصل</span>'} &nbsp;IP: <b class="ltr num">${esc(r.ip || "—")}</b>` : '<span class="chip err">غير مثبّت</span> — اضغط «تجهيز الآن» للتثبيت.'; } finally { busy(b, false); }
+  },
+  async "warp-setup"(b) { busy(b, true); try { const r = await api("POST", "/api/warp/setup"); toast(r.ready ? "WARP جاهز ومتصل" : "تعذّر تجهيز WARP — راجع السجلات", r.ready ? "ok" : "err"); } finally { busy(b, false); } },
+  async "warp-rotate"(b) { busy(b, true); try { const r = await api("POST", "/api/warp/rotate"); toast(r.ok ? `تم التدوير: ${r.before || "?"} ← ${r.after || "?"}` : "فشل التدوير — راجع السجلات", r.ok ? "ok" : "err", 6000); } finally { busy(b, false); } },
+};
+document.addEventListener("click", e => {
+  const b = e.target.closest("[data-act]"); if (!b || !ACT[b.dataset.act]) return;
+  if (b.classList.contains("sw") && b.dataset.act === "acc-toggle") { /* التبديل يتم في مستمع .sw أولاً */ }
+  guard(ACT[b.dataset.act])(b);
+});
+document.addEventListener("input", e => {
+  if (e.target.closest("#set-body") && !e.target.closest("[data-nodirty]")) markDirty();
+  if (e.target.matches('[data-p="comments.ai.api_key"]')) {  // اختيار المزوّد تلقائياً من بادئة المفتاح
+    const v = e.target.value.trim(), prov = v.startsWith("AIza") ? "gemini" : v.startsWith("gsk_") ? "groq" : v.startsWith("sk-") ? "openai" : null;
+    const sel = $('[data-p="comments.ai.provider"]'), model = $('[data-p="comments.ai.model"]');
+    if (prov && sel && sel.value !== prov) { sel.value = prov; if (prov !== "gemini" && model && /^gemini/i.test(model.value)) model.value = ""; toast("اختير المزوّد تلقائياً: " + sel.options[sel.selectedIndex].text, "info"); }
+  }
+});
+document.addEventListener("change", e => { if (e.target.closest("#set-body")) markDirty(); });
+function markDirty() { if (S.page !== "settings") return; S.dirty = true; $("#savebar")?.classList.add("show"); }
+window.addEventListener("beforeunload", e => { if (S.dirty) { e.preventDefault(); e.returnValue = ""; } });
+
+/* ============ الإقلاع ============ */
+(async function boot() {
+  try {
+    [S.config, S.state, S.accounts] = await Promise.all([api("GET", "/api/config"), api("GET", "/api/state"), api("GET", "/api/accounts")]);
+  } catch (e) { $("#main").innerHTML = `<div class="page"><div class="empty">${ic("warn")}<b>تعذّر تحميل التطبيق</b>${esc(e.message)}</div></div>`; return; }
+  go(location.hash.replace("#/", "") || "home");
+})();
+</script>
+</body>
+</html>
