@@ -390,6 +390,15 @@ const SCHEMA = [
       {p: "warmup.max_search_scrolls", t: "int", label: "أقصى تمريرات البحث", min: 0},
     ]},
   ]},
+  {id: "daily_post", title: "التغريدة اليومية", groups: [
+    {title: "تغريدة كريبتو بالذكاء الاصطناعي", fields: [
+      {p: "daily_post.enabled", t: "bool", label: "تفعيل التغريدة اليومية", desc: "كل حساب ينشر تغريدة كريبتو مولّدة بالذكاء الاصطناعي كل يوم أو يومين. يتطلب تفعيل الذكاء الاصطناعي ومفتاح API في تبويب التعليقات."},
+      {p: "daily_post.interval_days", t: "range", label: "الفاصل بين التغريدات", unit: "يوم"},
+      {p: "daily_post.use_trending", t: "bool", label: "هاشتاغات الترند", desc: "يقرأ ترند X ويستخدم وسوم الكريبتو الرائجة، وإلا يستخدم القائمة الاحتياطية."},
+      {p: "daily_post.hashtags_per_post", t: "range", label: "عدد الهاشتاغات", unit: "وسم"},
+      {p: "daily_post.fallback_hashtags", t: "lines", label: "هاشتاغات احتياطية", desc: "وسم في كل سطر، تُستخدم إن تعذّر جلب الترند."},
+    ]},
+  ]},
   {id: "comments", title: "التعليقات", groups: [
     {title: "توليد التعليقات", fields: [
       {p: "comments.contextual", t: "bool", label: "تعليقات سياقية", desc: "تعليق يناسب محتوى التغريدة بدل القوالب العامة."},

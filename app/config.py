@@ -93,6 +93,13 @@ DEFAULT_CONFIG = {
         "view_profiles": [1, 2],
         "max_search_scrolls": 3
     },
+    "daily_post": {
+        "enabled": False,
+        "interval_days": [1, 2],
+        "use_trending": True,
+        "hashtags_per_post": [1, 2],
+        "fallback_hashtags": ["#Bitcoin", "#BTC", "#Crypto", "#Ethereum", "#Altcoins", "#Solana", "#Web3"]
+    },
     "proxies": {
         "enabled": False,
         "list": [],

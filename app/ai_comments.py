@@ -359,18 +359,19 @@ def _extract_text(resp, provider):
         return None
 
 
-def _clean(text):
+def _clean(text, max_len=280):
     if not text:
         return None
     text = text.strip().strip('"').strip("'").strip("«»")
     text = text.replace("\n", " ").replace("\r", " ")
     text = " ".join(text.split())
-    text = text[:280]
+    text = text[:max_len]
     return text or None
 
 
 def generate_ai_comment(tweet_text, ai_cfg, net_cfg=None, raise_errors=False, ignore_interval=False, lang=None,
-                        timeout=REQUEST_TIMEOUT_S, single_model=False):
+                        timeout=REQUEST_TIMEOUT_S, single_model=False, system_prompt=None, user_msg=None,
+                        max_len=280, max_tokens=60):
     """توليد تعليق (إنجليزي غالباً مع $TICKER) من نص التغريدة عبر المزوّد المحدد.
 
     يرجع None عند أي خطأ (مع تسجيل السبب في السجلات)؛ raise_errors=True يرفع AIError لعرضه في الاختبار.
@@ -383,7 +384,7 @@ def generate_ai_comment(tweet_text, ai_cfg, net_cfg=None, raise_errors=False, ig
             raise AIError(msg)
         return None
 
-    if not tweet_text or not tweet_text.strip():
+    if not user_msg and (not tweet_text or not tweet_text.strip()):
         return fail("نص التغريدة فارغ - لا يمكن تحليلها (تعذّر قراءة النص من الصفحة)")
     api_key = clean_key(ai_cfg.get("api_key"))
     if not api_key:
@@ -409,14 +410,17 @@ def generate_ai_comment(tweet_text, ai_cfg, net_cfg=None, raise_errors=False, ig
     if provider == "gemini" and user_model.startswith(RETIRED_GEMINI):
         log.warning("النموذج {} متقاعد - سيُستخدم نموذج حديث تلقائياً (فرّغ حقل النموذج في الإعدادات)".format(user_model))
         user_model = ""
-    persona = random.choice(_PERSONAS)
-    user_msg = "Persona: {}.\n\nTweet:\n{}\n\nWrite only the comment.".format(persona, tweet_text[:500])
-    system = _SYSTEM_PROMPT
-    if lang == "en":
-        system += " IMPORTANT: the tweet is in English, so reply ONLY in English."
-    elif lang == "ar":
-        system += " IMPORTANT: the tweet is in Arabic, so reply ONLY in simple Arabic (no English sentences)."
-    system += " Never repeat common stock phrases; make the reply specific to this tweet."
+    if user_msg:       # توليد مخصّص (مثل تغريدة يومية): موجّه النظام والرسالة يأتيان من المستدعي
+        system = system_prompt or _SYSTEM_PROMPT
+    else:
+        persona = random.choice(_PERSONAS)
+        user_msg = "Persona: {}.\n\nTweet:\n{}\n\nWrite only the comment.".format(persona, tweet_text[:500])
+        system = _SYSTEM_PROMPT
+        if lang == "en":
+            system += " IMPORTANT: the tweet is in English, so reply ONLY in English."
+        elif lang == "ar":
+            system += " IMPORTANT: the tweet is in Arabic, so reply ONLY in simple Arabic (no English sentences)."
+        system += " Never repeat common stock phrases; make the reply specific to this tweet."
     ctx = net.ssl_context(net_cfg)
 
     try:
@@ -427,7 +431,7 @@ def generate_ai_comment(tweet_text, ai_cfg, net_cfg=None, raise_errors=False, ig
             resp = None
             for i, model in enumerate(models):
                 url = "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent".format(model)
-                gen = {"temperature": 0.9, "maxOutputTokens": 400}
+                gen = {"temperature": 0.9, "maxOutputTokens": max(400, max_tokens * 6)}
                 think = _thinking_cfg(model)
                 if think:
                     gen["thinkingConfig"] = think
@@ -464,7 +468,7 @@ def generate_ai_comment(tweet_text, ai_cfg, net_cfg=None, raise_errors=False, ig
                 "model": user_model or DEFAULT_MODELS.get(provider),
                 "messages": [{"role": "system", "content": system}, {"role": "user", "content": user_msg}],
                 "temperature": 0.9,
-                "max_tokens": 60,
+                "max_tokens": max_tokens,
             }
             resp = _call_api(url, {"Content-Type": "application/json", "Authorization": "Bearer " + api_key}, body, ctx, timeout=timeout)
     except AIError as e:
@@ -472,7 +476,7 @@ def generate_ai_comment(tweet_text, ai_cfg, net_cfg=None, raise_errors=False, ig
     except Exception as e:  # شبكة/شهادات/وقت
         return fail("{}: {}".format(type(e).__name__, str(e)[:160]))
 
-    text = _clean(_extract_text(resp, provider))
+    text = _clean(_extract_text(resp, provider), max_len)
     if not text:
         return fail("ردّ المزوّد فارغ أو محجوب")
     return text

@@ -20,6 +20,7 @@ from .config import (
     load_seen, load_state, locked_seen, save_state,
 )
 from .grow import crypto_activity
+from . import daily_post
 from .humanizer import (
     Human, is_rest_day, pick_daily_caps, pick_daily_follow_target,
     random_sessions, randint, randfloat,
@@ -118,6 +119,8 @@ def ensure_daily_plan(acc_id, cfg):
         "last_session_crash": prev.get("last_session_crash"),
         "last_session_end": None,
         "active_days": int(state.get("active_days", 0) or 0) + 1,
+        "next_post_ts": prev.get("next_post_ts"),
+        "posts": prev.get("posts", []),
         "followed_handles": state.get("followed_handles", []),
         "seen_users": state.get("seen_users", []),
     }
@@ -251,6 +254,12 @@ def _run_session(acc_id, cfg, accounts, dry_run=False):
         # 1) مهام المدير أولاً: لا تنتظر التصفح ولا يستهلك التصفح حصتها
         _run_due_manager_tasks(page, acc_id, cfg, state, human, acc=acc)
         save_state(acc_id, state)
+
+        # 1.5) تغريدة كريبتو يومية/كل يومين مولّدة بالذكاء الاصطناعي بهاشتاغات رائجة
+        try:
+            daily_post.maybe_post(page, acc_id, cfg, state, human)
+        except Exception as e:
+            log.warning(f"{acc_id} | خطأ في التغريدة اليومية: {e}")
 
         # 2) تصفح عشوائي وتفاعلات طبيعية
         _browse_and_interact(page, acc_id, cfg, state, human, session_secs, session_start, acc=acc)
