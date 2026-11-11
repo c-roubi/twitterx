@@ -133,31 +133,123 @@ def generate_post(cfg, tags):
     return "{} {}".format(text, tail)
 
 
+DIALOG_CANDIDATES = ['[role="dialog"][aria-modal="true"]', '[aria-modal="true"]', '[role="dialog"]']
+MODAL_SEND_CANDIDATES = ['[data-testid="tweetButton"]', 'button[data-testid="tweetButton"]']
+INLINE_SEND_CANDIDATES = ['[data-testid="tweetButtonInline"]', 'button[data-testid="tweetButtonInline"]']
+_ERROR_TOAST = ("already said", "something went wrong", "try again", "limit", "حدث خطأ", "سبق", "حاول")
+
+
+def _composer_scope(page):
+    """نطاق المحرر الصحيح: نافذة الإنشاء (dialog) إن وُجدت، وإلا محرر الرئيسية.
+
+    مهم: صفحة compose/post تفتح نافذة فوق الرئيسية، ومحرر الرئيسية (tweetTextarea_0 + tweetButtonInline)
+    يبقى موجوداً خلفها. البحث في الصفحة كلها كان يلتقط محرر الرئيسية وزرّه بدل محرر النافذة.
+    يرجع (نطاق، مرشحات زر النشر، اسم).
+    """
+    for sel in DIALOG_CANDIDATES:
+        try:
+            dlg = page.locator(sel).filter(has=page.locator(selectors.TEXTAREA)).last
+            if dlg.count() > 0 and dlg.is_visible():
+                return dlg, MODAL_SEND_CANDIDATES, "modal"
+        except Exception:
+            continue
+    return page, INLINE_SEND_CANDIDATES, "inline"
+
+
+def _send_button(scope, candidates, page, timeout_ms=5000):
+    """زر النشر داخل النطاق فقط، بانتظار تفعيله."""
+    deadline = time.time() + timeout_ms / 1000.0
+    btn = None
+    while time.time() < deadline:
+        btn = selectors.first(scope, candidates)
+        if btn is not None:
+            try:
+                if btn.is_enabled() and btn.get_attribute("aria-disabled") != "true":
+                    return btn, True
+            except Exception:
+                pass
+        page.wait_for_timeout(250)
+    return btn, False
+
+
+def _error_toast(page):
+    try:
+        for t in page.locator('[data-testid="toast"], [role="alert"]').all():
+            txt = (t.inner_text() or "").lower()
+            if any(w in txt for w in _ERROR_TOAST):
+                return txt.strip()[:80]
+    except Exception:
+        pass
+    return None
+
+
+def _sent(page, ta, scope_kind, timeout_ms=10000):
+    """تأكيد الإرسال: النافذة أُغلقت أو المحرر فرغ، ولا توجد رسالة خطأ من X."""
+    deadline = time.time() + timeout_ms / 1000.0
+    while time.time() < deadline:
+        err = _error_toast(page)
+        if err:
+            return False, "x-error: " + err
+        try:
+            gone = ta.count() == 0 or not ta.is_visible()
+            empty = not gone and not (ta.inner_text() or "").strip()
+        except Exception:
+            gone, empty = True, False
+        if gone or empty:
+            page.wait_for_timeout(800)          # مهلة قصيرة لظهور رسالة خطأ متأخرة
+            err = _error_toast(page)
+            return (False, "x-error: " + err) if err else (True, "posted")
+        page.wait_for_timeout(300)
+    return False, "unconfirmed"
+
+
 def post_tweet(page, text, human):
-    """نشر تغريدة جديدة من صفحة الإنشاء. يرجع (نجح، حالة)."""
+    """نشر تغريدة جديدة. يكتب في نافذة الإنشاء ويضغط زرها هي (لا محرر/زر الرئيسية خلفها). يرجع (نجح، حالة)."""
+    actions.dismiss_compose_dialog(page, human)
     ok, why = resilience.goto_with_retry(page, "https://x.com/compose/post", {})
     if not ok:
         return False, "open-failed"
     page.wait_for_timeout(2500)
     overlays.clear(page)
-    ta = selectors.first(page, selectors.TEXTAREA_CANDIDATES)
+    scope, send_candidates, kind = _composer_scope(page)
+    if kind == "inline" and "/home" not in (page.url or ""):
+        # لم تظهر النافذة: الرجوع لمحرر الرئيسية بدل الكتابة في مكان غير معروف
+        resilience.goto_with_retry(page, "https://x.com/home", {})
+        page.wait_for_timeout(2500)
+        overlays.clear(page)
+        scope, send_candidates, kind = _composer_scope(page)
+    ta = selectors.first(scope, selectors.TEXTAREA_CANDIDATES)
     if ta is None:
         return False, "no-textarea"
-    if not actions._type_text_verified(page, ta, text):
-        return False, "typing-failed"
-    send = actions._wait_send_enabled(page, timeout_ms=4000)
-    if send is None:
-        return False, "no-send-button"
     try:
-        send.click()
+        if not actions._type_text_verified(page, ta, text):
+            raise RuntimeError("typing")
     except Exception:
+        actions.dismiss_compose_dialog(page, human)
+        return False, "typing-failed"
+    human.pause(0.8, 2.0)
+    send, enabled = _send_button(scope, send_candidates, page)
+    status = None
+    if send is not None and enabled:
         try:
+            send.hover()
+            human.pause(0.3, 0.9)
+            send.click()
+        except Exception:
+            status = "click-failed"
+    else:
+        status = "no-send-button" if send is None else "send-disabled"
+    if status:                                   # بديل: Ctrl+Enter والتركيز داخل محرر النافذة
+        try:
+            ta.click()
             page.keyboard.press("Control+Enter")
         except Exception:
-            return False, "send-failed"
-    if actions._composer_cleared(page, ta, timeout_ms=8000) or "/compose/" not in (page.url or ""):
-        return True, "posted"
-    return False, "unconfirmed"
+            pass
+    ok, why = _sent(page, ta, kind)
+    if not ok:
+        log.warning("نشر التغريدة لم يتأكد ({}, {}{})".format(kind, why, ", " + status if status else ""))
+        actions.dismiss_compose_dialog(page, human)    # تجاهل المسودة (Discard) حتى لا تبقى معلقة
+    return ok, why
 
 
 def is_due(state, cfg):
