@@ -56,6 +56,10 @@ def _save(d):
         pass
 
 
+def _iso(d):
+    return isinstance(d, str) and len(d) == 10 and d[4] == "-" and d[7] == "-" and d.replace("-", "").isdigit()
+
+
 def record_state(acc_id, state, when=None):
     """يسجّل الفرق بين حالة الحساب الجديدة وآخر ما رأيناه. يرجع True إن سُجّل شيء."""
     if not isinstance(state, dict):
@@ -67,6 +71,8 @@ def record_state(acc_id, state, when=None):
     with _lock:
         d = _load()
         hw = d["hw"].get(acc_id)
+        if hw is not None and _iso(sdate) and _iso(hw.get("date")) and hw["date"] > sdate:
+            return False   # حالة يوم أقدم وصلت متأخرة: لا نُرجع خط الأساس فنعدّ النشاط مرتين
         first_seen = hw is None
         if hw is None or hw.get("date") != sdate:
             # أول مرة نرى الحساب: خط أساس (لا نحسب ما سبق نشر الدفتر). يوم جديد للحساب: العدّادات تبدأ من صفر.
@@ -75,6 +81,10 @@ def record_state(acc_id, state, when=None):
         changed = False
         rec = d["days"].setdefault(day, {"accounts": {}, "followed": []})
         acc = rec["accounts"].setdefault(acc_id, {k: 0 for k in KINDS})
+        rest = bool(state.get("rest_day"))
+        if acc.get("rest_day") != rest and sdate == day:
+            acc["rest_day"] = rest   # يوم الراحة كما كان في ذلك اليوم (للملخص)
+            changed = True
         for k in KINDS:
             cur = int(done.get(k, 0) or 0)
             inc = cur - int(hw.get(k, 0) or 0)

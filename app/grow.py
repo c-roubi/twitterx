@@ -148,10 +148,6 @@ def _follow_one(page, human, handle, cfg, state, acc_id):
     page.mouse.wheel(0, random.randint(200, 600))
     human.pause(1.5, 3.5)
 
-    if visit_only:
-        log.info(f"{acc_id} | زيارة فقط لـ @{handle} (بدون متابعة - حسب نسبة visit_only_chance)")
-        return None, "visit-only"
-
     if not profile_eligible(profile, cfg):
         short_reason, detailed_reason = explain_ineligible(profile, cfg)
         log.info(f"{acc_id} | تخطي @{handle}: غير مؤهل -> {detailed_reason}")
@@ -164,6 +160,11 @@ def _follow_one(page, human, handle, cfg, state, acc_id):
             except Exception:
                 pass
         return None, f"not-eligible:{short_reason}"
+
+    # «زيارة فقط» تُقرَّر بعد التأكد من الأهلية: المؤهل الذي زرناه يبقى في المخزن لمتابعة لاحقة
+    if visit_only:
+        log.info(f"{acc_id} | زيارة فقط لـ @{handle} (بدون متابعة - حسب نسبة visit_only_chance)")
+        return None, "visit-only"
 
     human.mouse_wander(page)
     res, msg = follow_user(page, human, handle)
@@ -196,13 +197,28 @@ def _search_candidates(page, acc_id, cfg, human, seen_users):
     return cands, "ok"
 
 
-def run_follow_pass(page, acc_id, cfg, state, human, max_follows):
+SEEN_USERS_MAX = 3000
+FOLLOWED_MAX = 5000
+
+
+def _remember(lst, item, cap):
+    """إضافة مع الحفاظ على ترتيب الإدراج وقصّ الأقدم (كان الترتيب أبجدياً فيُحذف عشوائياً)."""
+    if item in lst:
+        lst.remove(item)
+    lst.append(item)
+    if len(lst) > cap:
+        del lst[:len(lst) - cap]
+    return lst
+
+
+def run_follow_pass(page, acc_id, cfg, state, human, max_follows, should_stop=lambda: False):
     """متابعات بطيئة: من مخزن المرشّحين (المتفاعلين) أولاً، ثم حصاد للتعبئة، ثم بحث احتياطي."""
     f = cfg.get("follow", {})
     budget = follow_budget(state, cfg)
     if budget <= 0 or max_follows <= 0:
         return 0, "no-budget"
-    seen_users = set(state.get("seen_users", []) or [])
+    seen_order = list(dict.fromkeys(state.get("seen_users", []) or []))
+    seen_users = set(seen_order)
     exclude = seen_users | set(state.get("followed_handles", []) or [])
     hv = f.get("harvest", {})
     candidates = harvest.take_candidates(exclude=exclude, limit=40) if hv.get("enabled", True) else []
@@ -224,26 +240,29 @@ def run_follow_pass(page, acc_id, cfg, state, human, max_follows):
     for handle in candidates:
         if followed >= max_follows or follow_budget(state, cfg) <= 0:
             break
+        if should_stop():
+            log.info(f"{acc_id} | مهمة عاجلة - إيقاف جولة المتابعات")
+            break
         got, msg = _follow_one(page, human, handle, cfg, state, acc_id)
-        seen_users.add(handle)
+        if msg == "visit-only":
+            # مؤهل ولم يُتابع هذه المرة: يبقى في المخزن ولا يُعلَّم «مرئياً»
+            save_state(acc_id, state)
+            human.pause(max(20, int(lo_delay * 0.6)), hi_delay)
+            continue
         harvest.remove(handle)
+        _remember(seen_order, handle, SEEN_USERS_MAX)
         if got:
-            state.setdefault("followed_handles", []).append(handle)
+            _remember(state.setdefault("followed_handles", []), handle, FOLLOWED_MAX)
             state["done"]["follows"] += 1
             followed += 1
-            
-        seen_list = list(seen_users)
-        if len(seen_list) > 3000:
-            seen_list = seen_list[-3000:]
-        state["seen_users"] = sorted(seen_list)
-        
+        state["seen_users"] = seen_order
         save_state(acc_id, state)
         human.pause(max(20, int(lo_delay * 0.6)), hi_delay)
     log.info(f"{acc_id} | جولة المتابعات: +{followed} (إجمالي اليوم {state['done']['follows']})")
     return followed, "ok"
 
 
-def browse_crypto_search(page, acc_id, cfg, state, human, budget_s, start):
+def browse_crypto_search(page, acc_id, cfg, state, human, budget_s, start, should_stop=lambda: False):
     """تصفح أحدث تغريدات كريبتو (f=live) مع لايك خفيف ضمن حدود اليوم."""
     ok, gstatus = resilience.goto_with_retry(
         page, f"https://x.com/search?q={quote(pick_query(cfg))}&f=live", cfg
@@ -254,6 +273,9 @@ def browse_crypto_search(page, acc_id, cfg, state, human, budget_s, start):
     page.wait_for_timeout(3500)
     scrolls = 0
     while time.time() - start < budget_s:
+        if should_stop():
+            log.info(f"{acc_id} | مهمة عاجلة - إيقاف تصفح الكريبتو")
+            return
         human.pause(2.0, 6.0)
         page.mouse.wheel(0, random.randint(500, 1500))
         page.wait_for_timeout(1500)
@@ -291,19 +313,28 @@ def browse_crypto_search(page, acc_id, cfg, state, human, budget_s, start):
             break
 
 
-def crypto_activity(page, acc_id, cfg, state, human, budget_s):
-    """النشاط الكريبتو اليومي: تصفح بحث + متابعات بطيئة، ضمن ميزانية وقت."""
+def crypto_activity(page, acc_id, cfg, state, human, budget_s, should_stop=lambda: False):
+    """النشاط الكريبتو اليومي: تصفح بحث + متابعات بطيئة، ضمن ميزانية وقت.
+
+    should_stop: يُفحص بين الخطوات (مهمة عاجلة وصلت => نُنهي فوراً بدل إكمال حتى 15 دقيقة).
+    """
     f = cfg.get("follow", {})
     w = cfg.get("warmup", {})
     start = time.time()
     if w.get("browse_probability", 0.8) > random.random():
-        browse_crypto_search(page, acc_id, cfg, state, human, budget_s * 0.4, start)
+        browse_crypto_search(page, acc_id, cfg, state, human, budget_s * 0.4, start, should_stop=should_stop)
+    if should_stop():
+        return
+    follows_left = f.get("enabled", True) and follow_budget(state, cfg) > 0
+    if not follows_left:
+        return   # لا ميزانية متابعة اليوم => لا حاجة للحصاد (كان يستهلك وقت الجلسة بلا فائدة)
     hv = f.get("harvest", {})
     if hv.get("enabled", True) and harvest.pool_size() < int(hv.get("refill_below", 8)) * 4:
         try:
             harvest.run_harvest(page, acc_id, cfg, state, human, budget_s=min(120, budget_s * 0.3))
         except Exception as e:
             log.warning(f"{acc_id} | تعذّر الحصاد أثناء النشاط: {e}")
-    if f.get("enabled", True) and follow_budget(state, cfg) > 0:
-        per_session = f.get("per_session", [1, 3])
-        run_follow_pass(page, acc_id, cfg, state, human, randint(*per_session))
+    if should_stop():
+        return
+    per_session = f.get("per_session", [1, 3])
+    run_follow_pass(page, acc_id, cfg, state, human, randint(*per_session), should_stop=should_stop)

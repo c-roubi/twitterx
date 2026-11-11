@@ -29,8 +29,65 @@ from .logger import get_logger
 log = get_logger("routine")
 
 
+def _now():
+    """الوقت الحالي بمنطقة التقارير (افتراضياً غزة) - نفس المرجع الذي يستخدمه الملخص اليومي.
+
+    كانت الخطط تتبع ساعة الجهاز بينما الملخص يتبع غزة، فإن اختلفا جمع «يوم غزة» نشاط يومين من الخطط.
+    """
+    try:
+        from . import ledger, tz
+        return tz.now(ledger.tz_name())
+    except Exception:
+        return datetime.now()
+
+
 def _today():
-    return datetime.now().strftime("%Y-%m-%d")
+    return _now().strftime("%Y-%m-%d")
+
+
+RELOGIN_RECHECK_S = 30 * 60      # حساب معلَّم «يحتاج إعادة دخول» يُعاد فحصه كل 30 دقيقة بدل أن يعلق
+SESSION_MIN_GAP_S = 20 * 60      # أقل فاصل بين نهاية جلسة وبداية التالية
+WARMUP_RETRY_S = 30 * 60         # إعادة محاولة الإحماء الفاشل بعد 30 دقيقة
+WARMUP_MAX_FAILS = 3
+OPEN_MAX_ATTEMPTS = 5            # حد محاولات فتح تغريدة المدير قبل التخلي عنها لهذا الحساب
+
+
+def _hhmm_ts(hhmm, date_str):
+    """طابع زمني لوقت HH:MM في يوم date_str بمنطقة التقارير (للخطط القديمة التي بلا ts)."""
+    try:
+        h, m = map(int, str(hhmm).split(":"))
+        base = _now()
+        d = datetime.strptime(date_str, "%Y-%m-%d") if date_str else base
+        return base.replace(year=d.year, month=d.month, day=d.day, hour=h, minute=m,
+                            second=0, microsecond=0).timestamp()
+    except Exception:
+        return None
+
+
+def _session_ts(sess, state):
+    ts = sess.get("ts")
+    if ts:
+        return float(ts)
+    return _hhmm_ts(sess.get("start"), state.get("date"))
+
+
+def _relogin_blocked(state):
+    """هل نتخطى الحساب لأنه يحتاج إعادة دخول؟ (يُسمح بإعادة فحص كل RELOGIN_RECHECK_S)."""
+    if not state.get("needs_relogin"):
+        return False
+    last = float(state.get("relogin_checked_at") or 0)
+    return time.time() - last < RELOGIN_RECHECK_S
+
+
+def _mark_relogin(acc_id, state):
+    state["needs_relogin"] = True
+    state["relogin_checked_at"] = time.time()
+    save_state(acc_id, state)
+
+
+def _clear_relogin(state):
+    state["needs_relogin"] = False
+    state.pop("relogin_checked_at", None)
 
 
 def ensure_daily_plan(acc_id, cfg):
@@ -41,16 +98,24 @@ def ensure_daily_plan(acc_id, cfg):
     rest_day = is_rest_day(cfg, state)
     caps = pick_daily_caps(cfg, state, rest_day=rest_day)
     caps["follows"] = pick_daily_follow_target(cfg, state, rest_day=rest_day)
+    now = _now()
+    warmup_at = _random_warmup_time(cfg)
+    prev = state
     state = {
         "date": _today(),
         "caps": caps,
         "rest_day": rest_day,
         "done": {"likes": 0, "retweets": 0, "comments": 0, "follows": 0},
-        "sessions": random_sessions(cfg),
+        "sessions": random_sessions(cfg, now=now),
         "sessions_run": 0,
-        "warmup_at": _random_warmup_time(cfg),
+        "warmup_at": warmup_at,
+        "warmup_ts": _hhmm_ts(warmup_at, now.strftime("%Y-%m-%d")),
         "warmup_done": False,
-        "needs_relogin": False,
+        "warmup_fails": 0,
+        # حالة الدخول ومهلة الانهيار تنتقل لليوم الجديد (كانت تُمسح فتضيع مهلة الأمان ويُخفى حساب منتهي الجلسة)
+        "needs_relogin": bool(prev.get("needs_relogin")),
+        "relogin_checked_at": prev.get("relogin_checked_at"),
+        "last_session_crash": prev.get("last_session_crash"),
         "last_session_end": None,
         "active_days": int(state.get("active_days", 0) or 0) + 1,
         "followed_handles": state.get("followed_handles", []),
@@ -84,6 +149,13 @@ def _can_do(state, action):
 
 def _mark_done(state, action):
     state["done"][action] += 1
+
+
+def _mark_manager_done(state, action):
+    """عملية على تغريدة المدير: تُعدّ في done (للملخص) ويُرفع السقف بنفس القدر،
+    حتى لا تستهلك تفاعلات المدير حصة التصفح العادي لبقية اليوم."""
+    state["done"][action] = int(state["done"].get(action, 0)) + 1
+    state["caps"][action] = int(state["caps"].get(action, 0)) + 1
 
 
 _CAP_KEYS = {"like": "likes", "retweet": "retweets", "comment": "comments", "follow": "follows"}
@@ -126,11 +198,13 @@ def _release(acc_id):
 
 
 def run_session(acc_id, cfg, accounts, dry_run=False):
+    """ترجع True إن بدأت الجلسة فعلاً، False إن كان الحساب مشغولاً."""
     if not _acquire(acc_id):
         log.info(f"{acc_id} | مشغول بجلسة أخرى - تخطي")
-        return
+        return False
     try:
-        return _run_session(acc_id, cfg, accounts, dry_run)
+        _run_session(acc_id, cfg, accounts, dry_run)
+        return True
     finally:
         _release(acc_id)
 
@@ -164,31 +238,37 @@ def _run_session(acc_id, cfg, accounts, dry_run=False):
         page.wait_for_timeout(3000)
 
         if browser.is_login_wall(page) or not browser.is_logged_in(page):
-            state["needs_relogin"] = True
-            save_state(acc_id, state)
+            _mark_relogin(acc_id, state)
             log.warning(f"{acc_id} | الجلسة منتهية - تحتاج إعادة تسجيل دخول: python main.py login {acc_id}")
             return
+        _clear_relogin(state)
+        save_state(acc_id, state)
 
         minutes = cfg["behavior"].get("session_minutes", [15, 35])
         session_secs = randint(minutes[0], minutes[1]) * 60
         session_start = time.time()
 
-        # 1) تصفح عشوائي وتفاعلات طبيعية
+        # 1) مهام المدير أولاً: لا تنتظر التصفح ولا يستهلك التصفح حصتها
+        _run_due_manager_tasks(page, acc_id, cfg, state, human, acc=acc)
+        save_state(acc_id, state)
+
+        # 2) تصفح عشوائي وتفاعلات طبيعية
         _browse_and_interact(page, acc_id, cfg, state, human, session_secs, session_start, acc=acc)
         save_state(acc_id, state)
 
-        # 2) نشاط الكريبتو اليومي: تصفح بحث + متابعات بطيئة للمهتمين
+        # 3) نشاط الكريبتو اليومي: تصفح بحث + متابعات بطيئة للمهتمين (يتوقف فوراً عند وصول مهمة عاجلة)
         remaining = max(0, int(session_secs - (time.time() - session_start)))
-        if not monitor.priority_pending(acc_id):
-            crypto_activity(page, acc_id, cfg, state, human, max(120, min(remaining, 900)))
+        if not monitor.priority_pending(acc_id) and state.get("date") == _today():
+            crypto_activity(page, acc_id, cfg, state, human, max(120, min(remaining, 900)),
+                            should_stop=lambda: monitor.priority_pending(acc_id))
         save_state(acc_id, state)
 
-        # 3) تنفيذ مهام المدير المستحقة لهذا الحساب
+        # 4) مهام مدير استحقت أثناء الجلسة
         _run_due_manager_tasks(page, acc_id, cfg, state, human, acc=acc)
 
         state["sessions_run"] += 1
         state["last_session_end"] = datetime.now().isoformat(timespec="seconds")
-        state["needs_relogin"] = False
+        state["last_session_end_ts"] = time.time()
         save_state(acc_id, state)
         log.info(f"{acc_id} | نهاية الجلسة | لايك {state['done']['likes']} / ريتويت {state['done']['retweets']} / تعليق {state['done']['comments']}")
     except Exception as e:
@@ -248,30 +328,33 @@ def _run_warmup(acc_id, cfg, accounts, dry_run=False):
         ok_home, gs = resilience.goto_with_retry(page, "https://x.com/home", cfg)
         if not ok_home:
             log.warning(f"{acc_id} | تعذر فتح الصفحة الرئيسية أثناء الإحماء ({gs})")
+            _warmup_failed(acc_id, state, gs)
             return {"acc_id": acc_id, "status": "network-error"}
         page.wait_for_timeout(3000)
 
         if browser.is_login_wall(page) or not browser.is_logged_in(page):
-            state["needs_relogin"] = True
-            save_state(acc_id, state)
+            _mark_relogin(acc_id, state)
             log.warning(f"{acc_id} | الإحماء متوقف - تحتاج إعادة تسجيل دخول: python main.py login {acc_id}")
             return {"acc_id": acc_id, "status": "relogin"}
+        _clear_relogin(state)
 
         minutes = cfg.get("warmup", {}).get("session_minutes", [8, 15])
         budget_s = randint(minutes[0], minutes[1]) * 60
 
         scroll_home(page, human, steps=randint(1, 2))
         human.mouse_wander(page)
-        crypto_activity(page, acc_id, cfg, state, human, budget_s)
+        crypto_activity(page, acc_id, cfg, state, human, budget_s,
+                        should_stop=lambda: monitor.priority_pending(acc_id))
 
         state["last_session_end"] = datetime.now().isoformat(timespec="seconds")
-        state["needs_relogin"] = False
         state["warmup_done"] = True
+        state.pop("warmup_retry_at", None)
         save_state(acc_id, state)
         log.info(f"{acc_id} | نهاية الإحماء | لايك {state['done']['likes']} / متابعات {state['done']['follows']}")
         return {"acc_id": acc_id, "status": "ok"}
     except Exception as e:
         log.error(f"{acc_id} | خطأ في الإحماء: {e}")
+        _warmup_failed(acc_id, state, e)
         return {"acc_id": acc_id, "status": "error", "error": str(e)[:200]}
     finally:
         if ctx is not None:
@@ -287,19 +370,41 @@ def _run_warmup(acc_id, cfg, accounts, dry_run=False):
             pw = None
 
 
+def _warmup_failed(acc_id, state, why):
+    """إحماء فاشل: مهلة قبل إعادة المحاولة، وبعد WARMUP_MAX_FAILS يُعتبر منتهياً لليوم (بدل فتح متصفح كل دقيقة)."""
+    try:
+        state["warmup_fails"] = int(state.get("warmup_fails", 0) or 0) + 1
+        if state["warmup_fails"] >= WARMUP_MAX_FAILS:
+            state["warmup_done"] = True
+            log.warning(f"{acc_id} | فشل الإحماء {state['warmup_fails']} مرات ({str(why)[:80]}) - إلغاء إحماء اليوم")
+        else:
+            state["warmup_retry_at"] = time.time() + WARMUP_RETRY_S
+            log.warning(f"{acc_id} | فشل الإحماء ({str(why)[:80]}) - إعادة المحاولة بعد {WARMUP_RETRY_S // 60} دقيقة")
+        save_state(acc_id, state)
+    except Exception:
+        pass
+
+
 def warmup_due(state, cfg=None):
-    """هل حان موعد إحماء اليوم لهذا الحساب؟"""
+    """هل حان موعد إحماء اليوم لهذا الحساب؟ (لا إحماء في يوم الراحة ولا قبل انتهاء مهلة الفشل)."""
     if not state or not state.get("warmup_at"):
         return False
     if state.get("warmup_done"):
         return False
-    if state.get("needs_relogin"):
+    if state.get("rest_day"):
         return False
+    if state.get("needs_relogin"):
+        return False   # check_due_sessions يعيد فحص الدخول كل 30 دقيقة ويزيل العلامة
+    if time.time() < float(state.get("warmup_retry_at") or 0):
+        return False
+    ts = state.get("warmup_ts")
+    if ts:
+        return time.time() >= float(ts)
     try:
         h, m = map(int, state["warmup_at"].split(":"))
     except Exception:
         return False
-    now = datetime.now()
+    now = _now()
     return (now.hour, now.minute) >= (h, m)
 
 
@@ -312,8 +417,9 @@ def check_due_warmups(cfg, accounts, dry_run=False):
         state = ensure_daily_plan(acc_id, cfg)
         if warmup_due(state, cfg):
             res = run_warmup(acc_id, cfg, accounts, dry_run=dry_run)
-            results["warmups"] += 1
             results.setdefault("details", []).append(res)
+            if not (isinstance(res, dict) and res.get("skipped")):
+                results["warmups"] += 1
     return results
 
 
@@ -402,6 +508,9 @@ def _browse_and_interact(page, acc_id, cfg, state, human, session_secs, session_
     while time.time() - session_start < session_secs:
         if monitor.priority_pending(acc_id):
             log.info(f"{acc_id} | مهمة عاجلة مستحقة - إنهاء التصفح مبكراً")
+            break
+        if state.get("date") != _today():
+            log.info(f"{acc_id} | بدأ يوم جديد - إنهاء الجلسة (خطة اليوم الجديد تُنشأ في الدورة التالية)")
             break
         save_state(acc_id, state)
         if (not _can_do(state, "likes") and not _can_do(state, "retweets")
@@ -519,37 +628,51 @@ def _handle_action_failure(cfg, tid, acc_id, action, msg):
         log.warning(f"{acc_id} | {action} على {tid} فشل: {msg}")
 
 
+def _open_failed(cfg, task, acc_id, status):
+    """فشل فتح تغريدة المدير: يُحسب لكل عملية متبقية، وبعد OPEN_MAX_ATTEMPTS يُتخلّى عنها لهذا الحساب
+    (كانت المحاولة تتكرر في كل جلسة بلا حد)."""
+    monitor.record_tweet_open_attempt(task["tweet_id"])
+    for action in task["remaining"]:
+        monitor.record_action_attempt(task["tweet_id"], acc_id, action)
+        if _action_attempts(task["tweet_id"], acc_id, action) >= OPEN_MAX_ATTEMPTS:
+            monitor.give_up_action(task["tweet_id"], acc_id, action)
+            log.warning(f"{acc_id} | تعذّر فتح {task['tweet_id']} {OPEN_MAX_ATTEMPTS} مرات - تخطّي {action} نهائياً")
+
+
 def _run_due_manager_tasks(page, acc_id, cfg, state, human, acc=None, priority=False):
-    """تنفيذ كل مهام المدير المستحقة (مع معالجة الحذف وفشل العملية بالتخطي)."""
-    if state.get("rest_day") and not priority:
-        return
+    """تنفيذ كل مهام المدير المستحقة (مع معالجة الحذف وفشل العملية بالتخطي).
+
+    تغريدات المدير لا تتقيد بحصة اليوم ولا بيوم الراحة: هي سبب وجود الأداة. تُعدّ في done
+    ويُرفع السقف بنفس القدر، فلا تأكل حصة التصفح العادي.
+    """
     en_ratio = _account_en_ratio(acc)
     seen = load_seen()
     tasks = monitor.due_tasks_for(acc_id, seen, priority=priority)
     if not tasks:
-        return
+        return 0
+    executed = 0
     fast = cfg.get("telegram", {}).get("action_delay_s", [2, 6])
     if priority:
         import copy as _copy
         cfg = _copy.deepcopy(cfg)
         cfg.setdefault("comments", {}).setdefault("ai", {})["min_interval_s"] = 0
     for task in tasks:
+        if priority is False and monitor.priority_pending(acc_id):
+            log.info(f"{acc_id} | مهمة عاجلة وصلت - تأجيل باقي المهام العادية")
+            break
         ok, status = open_tweet_with_retry(page, task["url"], cfg)
         if not ok:
             if status == "deleted":
                 monitor.mark_tweet_deleted(task["tweet_id"])
                 log.warning(f"{acc_id} | تغريدة المدير {task['tweet_id']} محذوفة - أُزيلت من الجدول")
-            elif status == "login-wall":
-                log.warning(f"{acc_id} | جدار تسجيل دخول عند فتح {task['tweet_id']} - تخطي")
-                if priority:
-                    state["needs_relogin"] = True
-                    save_state(acc_id, state)
-            else:
-                monitor.record_tweet_open_attempt(task["tweet_id"])
-                log.warning(f"{acc_id} | تعذر فتح تغريدة المدير {task['tweet_id']}: {status}")
-            if priority and status != "deleted":
+                continue
+            # جدار دخول على صفحة تغريدة واحدة لا يعني أن جلسة الحساب انتهت (الدخول فُحص في بداية الجلسة)
+            log.warning(f"{acc_id} | تعذر فتح تغريدة المدير {task['tweet_id']}: {status}")
+            if priority:
                 for action in task["remaining"]:
                     _handle_action_failure(cfg, task["tweet_id"], acc_id, action, str(status))
+            else:
+                _open_failed(cfg, task, acc_id, status)
             continue
         if priority:
             human.pause(1.0, 3.0)
@@ -559,8 +682,6 @@ def _run_due_manager_tasks(page, acc_id, cfg, state, human, acc=None, priority=F
             human.pause(1.5, 4.0)
         for action in task["remaining"]:
             key = _cap_key(action)
-            if not priority and not _can_do(state, key):
-                continue
             if action == "like":
                 res, msg = like_tweet(page, human)
             elif action == "retweet":
@@ -589,8 +710,9 @@ def _run_due_manager_tasks(page, acc_id, cfg, state, human, acc=None, priority=F
                 continue
             if res:
                 monitor.mark_done(task["tweet_id"], acc_id, action)
-                _mark_done(state, key)
+                _mark_manager_done(state, key)
                 save_state(acc_id, state)
+                executed += 1
                 log.info(f"{acc_id} | ✓ {action} على تغريدة المدير {task['tweet_id']}")
             else:
                 _handle_action_failure(cfg, task["tweet_id"], acc_id, action, msg)
@@ -599,10 +721,11 @@ def _run_due_manager_tasks(page, acc_id, cfg, state, human, acc=None, priority=F
             else:
                 human.pause(randint(*cfg["behavior"]["min_action_delay_s"]),
                             randint(*cfg["behavior"]["max_action_delay_s"]))
+    return executed
 
 
-def run_priority_session(acc_id, cfg, accounts, dry_run=False):
-    """جلسة عاجلة قصيرة: تفتح الحساب وتنفّذ مهامه العاجلة فقط."""
+def run_priority_session(acc_id, cfg, accounts, dry_run=False, priority=True):
+    """جلسة قصيرة: تفتح الحساب، تتأكد من تسجيل الدخول، وتنفّذ مهامه فقط (عاجلة أو عادية مستحقة)."""
     if not _acquire(acc_id):
         return False
     pw = ctx = None
@@ -611,7 +734,7 @@ def run_priority_session(acc_id, cfg, accounts, dry_run=False):
         acc["id"] = acc_id
         state = ensure_daily_plan(acc_id, cfg)
         human = Human()
-        log.info(f"⚡ {acc_id} ({acc.get('handle','')}) | تنفيذ مهام عاجلة")
+        log.info(f"{'⚡' if priority else '▶'} {acc_id} ({acc.get('handle','')}) | تنفيذ مهام {'عاجلة' if priority else 'المدير'}")
         if dry_run:
             return True
         from playwright.sync_api import sync_playwright
@@ -620,11 +743,25 @@ def run_priority_session(acc_id, cfg, accounts, dry_run=False):
         pw = sync_playwright().start()
         _, ctx, page, _ = browser.launch_account(acc, cfg, pw=pw, owned_pw=False)
         human.page = page
-        _run_due_manager_tasks(page, acc_id, cfg, state, human, acc=acc, priority=True)
+        # تحقق الدخول قبل التنفيذ: جلسة منتهية كانت تُحرق كل المحاولات وتُعلَّم العمليات «فشل نهائي»
+        ok_home, gs = resilience.goto_with_retry(page, "https://x.com/home", cfg)
+        if not ok_home:
+            log.warning(f"{acc_id} | تعذّر فتح الرئيسية قبل المهام ({gs}) - إعادة لاحقاً")
+            return False
+        page.wait_for_timeout(2500)
+        if browser.is_login_wall(page) or not browser.is_logged_in(page):
+            _mark_relogin(acc_id, state)
+            log.warning(f"{acc_id} | الجلسة منتهية - المهام تنتظر إعادة الدخول: python main.py login {acc_id}")
+            return False
+        if state.get("needs_relogin"):
+            _clear_relogin(state)
+            save_state(acc_id, state)
+        _run_due_manager_tasks(page, acc_id, cfg, state, human, acc=acc, priority=priority)
+        state["last_task_session_ts"] = time.time()
         save_state(acc_id, state)
         return True
     except Exception as e:
-        log.error(f"{acc_id} | خطأ في الجلسة العاجلة: {e}")
+        log.error(f"{acc_id} | خطأ في جلسة المهام: {e}")
         return False
     finally:
         for closer in ((lambda: ctx.close()) if ctx is not None else None,
@@ -646,6 +783,8 @@ def check_priority_tasks(cfg, accounts, dry_run=False, should_stop=lambda: False
         if time.time() < _retry_after.get(acc_id, 0):
             continue
         if not monitor.due_tasks_for(acc_id, priority=True):
+            continue
+        if _relogin_blocked(load_state(acc_id)):
             continue
         if run_priority_session(acc_id, cfg, accounts, dry_run=dry_run):
             ran += 1
@@ -705,8 +844,33 @@ def _is_fatal_session_error(msg):
     ))
 
 
+def _next_session_due(state, now_ts=None):
+    """هل حان موعد الجلسة التالية (رقم sessions_run) فعلاً؟
+
+    كان الشرط يكتفي بأن *أي* جلسة فات موعدها، فتُشغَّل جلسات اليوم الثلاث متتالية بعد أول موعد
+    وتُستهلك حصة اليوم كلها صباحاً. الآن: جلسة واحدة لكل موعد، مع فاصل أدنى بعد الجلسة السابقة،
+    والمواعيد الفائتة (البرنامج كان مغلقاً) تُدمج في جلسة واحدة بدل تشغيلها كلها.
+    """
+    now_ts = now_ts or time.time()
+    sessions = state.get("sessions") or []
+    idx = int(state.get("sessions_run", 0) or 0)
+    if idx >= len(sessions):
+        return False
+    passed = [i for i, s in enumerate(sessions) if (_session_ts(s, state) or 0) <= now_ts]
+    if not passed or passed[-1] < idx:
+        return False
+    if passed[-1] > idx:
+        log.info(f"تخطّي {passed[-1] - idx} موعد جلسة فائت (يُدمج في جلسة واحدة)")
+        state["sessions_run"] = passed[-1]
+    last_end = float(state.get("last_session_end_ts") or 0)
+    return now_ts - last_end >= SESSION_MIN_GAP_S
+
+
 def check_due_sessions(cfg, accounts, dry_run=False):
-    """تشغيل جلسات الحسابات المستحقة + مهام المدير المستحقة."""
+    """تشغيل جلسات الحسابات المستحقة + مهام المدير المستحقة.
+
+    مهام مدير مستحقة بلا موعد جلسة => جلسة مهام قصيرة فقط (كانت تفتح جلسة تصفح كاملة 25-45 دقيقة).
+    """
     results = {"sessions": 0, "tasks": 0}
     for acc_id in enabled_accounts(accounts):
         state = ensure_daily_plan(acc_id, cfg)
@@ -714,17 +878,24 @@ def check_due_sessions(cfg, accounts, dry_run=False):
         if crash_at and time.time() - crash_at < _CRASH_COOLDOWN_S:
             log.warning(f"{acc_id} | الجلسة السابقة انهارت - إعادة محاولة بعد {int(_CRASH_COOLDOWN_S - (time.time() - crash_at))} ثانية")
             continue
+        if _relogin_blocked(state):
+            continue
         due_tasks = monitor.due_tasks_for(acc_id)
-        session_due = False
-        for s in state["sessions"]:
-            h, m = map(int, s["start"].split(":"))
-            now = datetime.now()
-            if (now.hour, now.minute) >= (h, m) and state["sessions_run"] < len(state["sessions"]):
-                session_due = True
-                break
-        if session_due or due_tasks:
-            run_session(acc_id, cfg, accounts, dry_run=dry_run)
-            results["sessions"] += 1
+        before = state.get("sessions_run")
+        session_due = _next_session_due(state)
+        if state.get("sessions_run") != before:
+            save_state(acc_id, state)
+        if state.get("needs_relogin") and not session_due and not dry_run:
+            # إعادة فحص دورية بجلسة قصيرة: إن عاد الدخول صالحاً تُزال العلامة فوراً وتُنفّذ المهام
+            log.info(f"{acc_id} | إعادة فحص تسجيل الدخول")
+            run_priority_session(acc_id, cfg, accounts, priority=False)
+            continue
+        if session_due:
+            if run_session(acc_id, cfg, accounts, dry_run=dry_run):
+                results["sessions"] += 1
+        elif due_tasks:
+            if run_priority_session(acc_id, cfg, accounts, dry_run=dry_run, priority=False):
+                results["tasks"] += 1
         elif dry_run:
             run_session(acc_id, cfg, accounts, dry_run=True)
             results["sessions"] += 1

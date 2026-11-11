@@ -78,9 +78,7 @@
       1,
       3
     ],
-    "rest_day_chance": 0.12,
-    "allow_follow": false,
-    "max_follows_per_day": 2
+    "rest_day_chance": 0.12
   },
   "follow": {
     "enabled": true,

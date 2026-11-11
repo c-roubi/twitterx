@@ -253,7 +253,9 @@ class AppService:
                 if not a.get("enabled", True):
                     continue
                 v = self.account_view(aid, a)
-                if v["has_session"] and not v["needs_relogin"]:
+                # الدخول محفوظ في بروفايل المتصفح نفسه؛ ملف sessions مجرد نسخة. أيٌّ منهما يكفي.
+                has_login = v["has_session"] or os.path.isdir(os.path.join(PROFILES_DIR, aid, "Default"))
+                if has_login and not v["needs_relogin"]:
                     ready[aid] = a
                 else:
                     skipped.append("@" + a.get("handle", aid))

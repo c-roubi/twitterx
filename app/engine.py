@@ -158,13 +158,13 @@ class Engine:
         for i in range(attempts):
             if self._stop.wait(max(0.0, ts + first + i * every - time.time())):
                 return
-            found = self._check_once(monitor)
+            found = self._check_once(monitor, ts)
             if found:
                 self._notify("🔎 وُجدت <b>{}</b> تغريدة جديدة للمدير وجُدول التفاعل معها.".format(len(found)))
                 return
         self._notify("ℹ️ لم أجد تغريدة جديدة لحساب المدير بعد منشور القناة (جرّبت {} مرات). إن نُشرت لاحقاً فسيلتقطها الفحص الدوري.".format(attempts))
 
-    def _check_once(self, monitor):
+    def _check_once(self, monitor, ts=None):
         cfg, accounts = load_config(), load_accounts()
         ch = cfg["telegram"]["channel"]
         if not cfg.get("manager_handle"):
@@ -207,7 +207,9 @@ class Engine:
             if held:
                 routine._release(held)
         self._last_fetch = time.time()
-        max_age_h = float(ch.get("max_age_min", 30)) / 60.0
+        # الحد يُقاس من لحظة منشور القناة لا من الآن: منشور متأخر لا يُسقط تغريدة المدير الحديثة
+        lag_h = max(0.0, time.time() - float(ts)) / 3600.0 if ts else 0.0
+        max_age_h = float(ch.get("max_age_min", 30)) / 60.0 + lag_h
         seen, found = load_seen(), []
         for t in tweets:
             tid = t["id"] if isinstance(t, dict) else t
@@ -216,6 +218,10 @@ class Engine:
                 continue
             age = monitor.tweet_age_hours(tid)
             if age is not None and age > max_age_h:
+                # أقدم من حد «الفوري» لكن ضمن حد المراقبة (filter_recent): تُجدول عادية بدل أن تضيع
+                # حتى الفحص الاحتياطي (60-90 دقيقة)
+                if monitor.schedule_for_tweet(tid, text, cfg, accounts):
+                    log.info("تغريدة {} أقدم من حد الفوري ({:.0f} دقيقة) - جُدولت عادية".format(tid, age * 60))
                 continue
             if self.schedule_cb:
                 entry = self.schedule_cb(tid, text, cfg, bool(ch.get("instant", True)))

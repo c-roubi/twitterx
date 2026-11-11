@@ -39,11 +39,25 @@ class Human:
 
     @staticmethod
     def _lognormal(lo, hi):
-        # توزيع مائل: غالباً قريب من الحد الأدنى مع ذيل طويل (سلوك بشري حقيقي)
-        mu = (lo + hi) / 2
-        sigma = (hi - lo) / 4
+        """تأخير مائل بين lo و hi: غالباً قريب من الوسط الأدنى مع ذيل طويل نحو hi.
+
+        الوسيط هو المتوسط الهندسي لـ lo و hi، والقيمة تُقصّ ضمن [lo, hi].
+        (النسخة القديمة كانت تمرر المتوسط الحسابي كـ mu لـ lognormvariate فتعطي دائماً hi*1.2.)
+        """
+        import math
+        lo, hi = float(lo), float(hi)
+        if hi < lo:
+            lo, hi = hi, lo
+        if hi <= 0:
+            return 0.0
+        if lo <= 0:
+            return random.uniform(0.0, hi)
+        if hi == lo:
+            return lo
+        mu = math.log(math.sqrt(lo * hi))
+        sigma = math.log(hi / lo) / 4.0
         v = random.lognormvariate(mu, sigma)
-        return max(lo * 0.8, min(v, hi * 1.2))
+        return max(lo, min(v, hi))
 
     def mouse_wander(self, page=None):
         """حركة مؤشر عشوائية صغيرة (8-22 خطوة) تعطي إحساسًا بشريًا أثناء التصفح."""
@@ -166,27 +180,33 @@ def pick_daily_caps(cfg, state=None, rest_day=False):
     }
 
 
-def random_sessions(cfg):
-    """توليد جلسات يومية: أوقات بداية عشوائية داخل ساعات النشاط."""
+def random_sessions(cfg, now=None):
+    """توليد جلسات يومية داخل ساعات النشاط، موزّعة على فترات متباعدة (لا جلستان متلاصقتان).
+
+    كل جلسة: {"start": "HH:MM", "minutes": n, "ts": طابع زمني مطلق}.
+    الطابع ts هو المرجع للاستحقاق (يصح حتى لو امتدت ساعات النشاط بعد منتصف الليل).
+    """
     b = cfg["behavior"]
+    now = now or datetime.now()
     start_h, start_m = map(int, b["active_hours"][0].split(":"))
     end_h, end_m = map(int, b["active_hours"][1].split(":"))
-    day_start = datetime.now().replace(hour=start_h, minute=start_m, second=0, microsecond=0)
-    day_end = datetime.now().replace(hour=end_h, minute=end_m, second=0, microsecond=0)
-    
-    # ✅ تم التعديل: حساب رياضي دقيق للعمل الليلي عبر منتصف الليل
+    day_start = now.replace(hour=start_h, minute=start_m, second=0, microsecond=0)
+    day_end = now.replace(hour=end_h, minute=end_m, second=0, microsecond=0)
     if day_end <= day_start:
         day_end = day_end + timedelta(days=1)
 
-    n = randint(*b["sessions_per_day"])
+    n = max(1, randint(*b["sessions_per_day"]))
+    span = (day_end - day_start).total_seconds()
+    slot = span / n
     sessions = []
-    for _ in range(n):
-        span = (day_end - day_start).total_seconds()
-        start = day_start + timedelta(seconds=randint(0, int(span)))
+    for i in range(n):
+        # كل جلسة في شريحتها من اليوم، مع هامش حتى لا تلتصق بالشريحة التالية
+        lo = int(i * slot)
+        hi = int(i * slot + slot * 0.7)
+        start = day_start + timedelta(seconds=randint(lo, max(lo, hi)))
         minutes = randint(*b["session_minutes"])
-        sessions.append({"start": start.strftime("%H:%M"), "minutes": minutes})
-    
-    sessions.sort(key=lambda s: s["start"])
+        sessions.append({"start": start.strftime("%H:%M"), "minutes": minutes, "ts": start.timestamp()})
+    sessions.sort(key=lambda s: s["ts"])
     return sessions
 
 

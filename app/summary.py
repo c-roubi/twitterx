@@ -52,7 +52,7 @@ def collect(day=None):
         counts = rec["accounts"].get(aid, {})
         row = {"id": aid, "handle": a.get("handle", aid), "enabled": a.get("enabled", True),
                **{k: int(counts.get(k, 0) or 0) for k in ledger.KINDS},
-               "rest_day": bool(load_state(aid).get("rest_day"))}
+               "rest_day": bool(counts.get("rest_day"))}   # من دفتر ذلك اليوم لا من حالة اليوم الحالي
         for k in totals:
             totals[k] += row[k]
         rows.append(row)
@@ -126,8 +126,9 @@ def format_html(d):
     tw = d["tweets"]
     if tw:
         live = [x for x in tw if not (x["deleted"] or x["cancelled"])]
+        # المنفّذ والمطلوب من نفس المجموعة (كان المطلوب يستثني الملغاة فيظهر «9 من 0»)
         ops_done = sum(x["done"] for x in tw)
-        ops_total = sum(x["total"] for x in live)
+        ops_total = sum(x["total"] if not (x["deleted"] or x["cancelled"]) else x["done"] for x in tw)
         failed = sum(x["failed"] for x in tw)
         skipped = len(tw) - len(live)
         lines += ["", "🗂 <b>التغريدات المجدولة: {}</b> ({} فورية ⚡{})".format(

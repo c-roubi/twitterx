@@ -3,6 +3,7 @@
 import functools
 import json
 import os
+import re
 import sys
 import threading
 
@@ -309,8 +310,23 @@ def load_state(acc_id):
         return {}
 
 
+_STATE_LOCK = threading.RLock()
+_ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
 def save_state(acc_id, state):
-    _atomic_save(state, state_path(acc_id))
+    """حفظ حالة الحساب.
+
+    حماية من الكتابة فوق خطة يوم أحدث: جلسة طويلة تحمل نسخة اليوم السابق في الذاكرة كانت
+    تحفظها بعد منتصف الليل فتمسح خطة اليوم الجديد ويعدّ الدفتر نفس النشاط مرتين.
+    """
+    with _STATE_LOCK:
+        new_date = (state or {}).get("date") or ""
+        if _ISO_DATE.match(new_date):
+            cur_date = load_state(acc_id).get("date") or ""
+            if _ISO_DATE.match(cur_date) and new_date < cur_date:
+                return False
+        _atomic_save(state, state_path(acc_id))
     try:  # دفتر النشاط اليومي (للملخص): لا يجوز أن يُفشل حفظ الحالة أبداً
         from . import ledger
         ledger.record_state(acc_id, state)

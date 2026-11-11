@@ -219,7 +219,7 @@ class PriorityTests(unittest.TestCase):
         waits = [c.args for c in human.pause.call_args_list]
         self.assertTrue(all(b <= 6 for a, b in waits), waits)  # تأخيرات قصيرة
 
-    def test_normal_still_respects_caps(self):
+    def test_normal_manager_tasks_ignore_caps_and_keep_browse_quota(self):
         from unittest import mock
         from app import routine
         self.monitor.schedule_for_tweet("444444444", "t", self.cfg, self.accounts)
@@ -233,7 +233,10 @@ class PriorityTests(unittest.TestCase):
              mock.patch.object(routine, "retweet_tweet", return_value=(True, "ok")) as rt, \
              mock.patch.object(routine, "save_state"):
             routine._run_due_manager_tasks(mock.MagicMock(), "p1", self.cfg, state, mock.MagicMock())
-        self.assertEqual((lk.call_count, rt.call_count), (0, 0))
+        # تغريدة المدير تُنفَّذ رغم امتلاء الحصة، ويُرفع السقف حتى لا تأكل حصة التصفح
+        self.assertEqual((lk.call_count, rt.call_count), (1, 1))
+        self.assertEqual((state["done"]["likes"], state["caps"]["likes"]), (7, 7))
+        self.assertEqual((state["done"]["retweets"], state["caps"]["retweets"]), (2, 2))
 
     def test_open_failure_gives_up_instead_of_looping(self):
         from unittest import mock

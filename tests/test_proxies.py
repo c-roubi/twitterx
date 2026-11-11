@@ -149,8 +149,8 @@ def test_warmup_due():
     check("يحتاج إعادة دخول -> غير مستحق",
           not warmup_due({"warmup_at": "00:00", "warmup_done": False, "needs_relogin": True}, None))
     check("صيغة خاطئة -> غير مستحق", not warmup_due({"warmup_at": "xyz", "warmup_done": False}, None))
-    from datetime import datetime
-    now = datetime.now()
+    from app.routine import _now   # الخطط تتبع منطقة التقارير لا ساعة الجهاز
+    now = _now()
     mins = now.hour * 60 + now.minute
     future = min(mins + 30, 23 * 60 + 59)
     later = f"{future // 60:02d}:{future % 60:02d}"
