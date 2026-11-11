@@ -142,6 +142,35 @@ class FollowTests(unittest.TestCase):
         hv.assert_not_called()
 
 
+class ManagerCommentOrderTests(unittest.TestCase):
+    def _cfg(self):
+        cfg = config.load_config()
+        cfg["comments"]["ai"]["enabled"] = True
+        return cfg
+
+    def test_manager_prefers_template_then_ai(self):
+        from app import comments
+        with mock.patch.object(comments, "_contextual_comment", return_value="template reply here"), \
+             mock.patch("app.ai_comments.generate_ai_comment", return_value="ai reply here") as ai:
+            t = comments.build_comment_for("btc breakout", cfg=self._cfg(), manager=True, reserve=False)
+        self.assertEqual(t, "template reply here")
+        ai.assert_not_called()
+
+    def test_manager_falls_back_to_ai(self):
+        from app import comments
+        with mock.patch.object(comments, "_contextual_comment", return_value=None), \
+             mock.patch("app.ai_comments.generate_ai_comment", return_value="ai reply about btc"):
+            t = comments.build_comment_for("btc breakout", cfg=self._cfg(), manager=True, reserve=False)
+        self.assertEqual(t, "ai reply about btc")
+
+    def test_other_tweets_keep_ai_first(self):
+        from app import comments
+        with mock.patch.object(comments, "_contextual_comment", return_value="template reply here"), \
+             mock.patch("app.ai_comments.generate_ai_comment", return_value="ai reply about btc"):
+            t = comments.build_comment_for("btc breakout", cfg=self._cfg(), reserve=False)
+        self.assertEqual(t, "ai reply about btc")
+
+
 class SummaryTests(unittest.TestCase):
     def test_cancelled_counts_consistent(self):
         d = {"date": "2026-11-07", "totals": {"likes": 0, "retweets": 0, "comments": 0, "follows": 0},

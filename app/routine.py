@@ -698,7 +698,7 @@ def _run_due_manager_tasks(page, acc_id, cfg, state, human, acc=None, priority=F
                     if tweet_text:
                         task["text"] = tweet_text
                         monitor.set_tweet_text(task["tweet_id"], tweet_text)
-                text = build_comment_for(tweet_text, used_texts=used, cfg=cfg, en_ratio=en_ratio, acc_id=acc_id)
+                text = build_comment_for(tweet_text, used_texts=used, cfg=cfg, en_ratio=en_ratio, acc_id=acc_id, manager=True)
                 if not text:
                     log.warning(f"{acc_id} | لا يوجد تعليق غير مكرر لـ {task['tweet_id']} - تخطّي التعليق")
                     monitor.give_up_action(task["tweet_id"], acc_id, "comment")

@@ -242,17 +242,33 @@ def _generic_comment(lang, blocked, cfg=None, en_ratio=None, force_unique=True):
     return None
 
 
-def build_comment_for(tweet_text, used_texts=(), cfg=None, force_unique=True, en_ratio=None, acc_id=None, reserve=True):
-    """تعليق مناسب لنص التغريدة، بلغتها، وغير مكرر/متشابه مع ما سبق. يرجع None إن نفدت الخيارات."""
+def build_comment_for(tweet_text, used_texts=(), cfg=None, force_unique=True, en_ratio=None, acc_id=None, reserve=True,
+                      manager=False):
+    """تعليق مناسب لنص التغريدة، بلغتها، وغير مكرر/متشابه مع ما سبق. يرجع None إن نفدت الخيارات.
+
+    manager=True (تغريدات المدير): القوالب السياقية أولاً، والذكاء الاصطناعي فقط إن لم يوجد قالب
+    مناسب لموضوع التغريدة. بقية التغريدات: الذكاء الاصطناعي أولاً (إن كان مفعّلاً) كما كان.
+    """
     cfg = cfg or load_config()
     comments_cfg = cfg.get("comments", {})
     lang = detect_lang(tweet_text) if comments_cfg.get("match_language", True) else None
     blocked = [norm_text(u) for u in (used_texts or ())] + _recent_blocked(acc_id)
     text = None
 
+    def _contextual():
+        if comments_cfg.get("contextual", True) and tweet_text and tweet_text.strip():
+            try:
+                return _contextual_comment(tweet_text, blocked, cfg, en_ratio, lang)
+            except Exception:
+                return None
+        return None
+
+    if manager:
+        text = _contextual()
+
     # 1) الذكاء الاصطناعي (اختياري)
     ai_cfg = comments_cfg.get("ai", {})
-    if ai_cfg.get("enabled"):
+    if not text and ai_cfg.get("enabled"):
         try:
             from .ai_comments import generate_ai_comment
 
@@ -268,11 +284,8 @@ def build_comment_for(tweet_text, used_texts=(), cfg=None, force_unique=True, en
             pass
 
     # 2) سياقي من موضوع التغريدة (كريبتو)
-    if not text and comments_cfg.get("contextual", True) and tweet_text and tweet_text.strip():
-        try:
-            text = _contextual_comment(tweet_text, blocked, cfg, en_ratio, lang)
-        except Exception:
-            text = None
+    if not text and not manager:
+        text = _contextual()
 
     # 3) عام بلغة مطابقة
     if not text:

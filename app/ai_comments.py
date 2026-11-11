@@ -54,6 +54,10 @@ _SYSTEM_PROMPT = (
     "and rarely in simple Arabic. When the tweet mentions a coin ticker, include it with "
     "a dollar sign (e.g. $EPIC) in most of your English replies. "
     "React positively, ask a smart question, or add a quick TA note. "
+    "The reply MUST be about something concrete that this specific tweet says "
+    "(its coin, event, chart level or question) - never a generic line that could fit any tweet. "
+    "Never invent prices, targets or gains, never claim you bought, sold or profited, "
+    "and never tell people to buy. "
     "Forbidden: hashtags (#), repeated emojis, mentioning the account owner, or quotes. "
     "Output only the comment."
 )
