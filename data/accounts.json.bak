@@ -1,0 +1,10 @@
+{
+  "acc_001": {
+    "username": "tony",
+    "handle": "account1",
+    "display_name": "",
+    "timezone": "Asia/Riyadh",
+    "enabled": true,
+    "notes": ""
+  }
+}

@@ -1,0 +1,99 @@
+{
+  "date": "2026-11-11",
+  "caps": {
+    "likes": 24,
+    "retweets": 3,
+    "comments": 3,
+    "follows": 10
+  },
+  "rest_day": false,
+  "done": {
+    "likes": 24,
+    "retweets": 3,
+    "comments": 3,
+    "follows": 8
+  },
+  "sessions": [
+    {
+      "start": "08:44",
+      "minutes": 38
+    },
+    {
+      "start": "18:16",
+      "minutes": 45
+    },
+    {
+      "start": "19:58",
+      "minutes": 32
+    }
+  ],
+  "sessions_run": 3,
+  "warmup_at": "22:24",
+  "warmup_done": false,
+  "needs_relogin": false,
+  "last_session_end": "2026-11-11T09:31:01",
+  "active_days": 10,
+  "followed_handles": [
+    "um6p0",
+    "Stphanef9a",
+    "AhmetDl71083067",
+    "XINGzcqe",
+    "tk5266490461642",
+    "Cherrful1234",
+    "JodanWeikfcw",
+    "Kkdbjoo5",
+    "BBK_Arena",
+    "wdnmdbbt",
+    "JohnSmithdrby5v",
+    "Coinsandtoken",
+    "nik_Kazuki",
+    "Ur_shaman",
+    "drbekrine",
+    "nikov_a",
+    "olivia2d_live",
+    "ashebara",
+    "web3oxxygist",
+    "haileylove2HODL",
+    "zoeblurry12"
+  ],
+  "seen_users": [
+    "AhmetDl71083067",
+    "AltcoinShrine",
+    "BBK_Arena",
+    "Cherrful1234",
+    "CherrySixx69",
+    "Coinsandtoken",
+    "ETH_Daily",
+    "EloriaShade",
+    "JodanWeikfcw",
+    "JohnSmithdrby5v",
+    "Kkdbjoo5",
+    "MetaMask",
+    "Nanl92h",
+    "QianW20237",
+    "Stphanef9a",
+    "TURGAYngl1",
+    "Ur_shaman",
+    "XINGzcqe",
+    "ashebara",
+    "drbekrine",
+    "elethereum",
+    "ethereum",
+    "ethereumfndn",
+    "haileylove2HODL",
+    "halehuage",
+    "nik_Kazuki",
+    "nikov_a",
+    "olivia2d_live",
+    "sk8ter_7en",
+    "theMarvelCrypto",
+    "tk5266490461642",
+    "um6p0",
+    "wdnmdbbt",
+    "web3oxxygist",
+    "yet7jq",
+    "zoeblurry12",
+    "zouyunchen",
+    "zxcvbnm098mnb"
+  ]
+}

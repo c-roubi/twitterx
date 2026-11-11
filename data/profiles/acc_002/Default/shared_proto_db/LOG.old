@@ -1,0 +1,6 @@
+2026/11/11-05:24:09.534 2210 Reusing MANIFEST C:\Users\Administrator\twitterx\data\profiles\acc_002\Default\shared_proto_db/MANIFEST-000001
+2026/11/11-05:24:09.534 2210 Recovering log #10
+2026/11/11-05:24:09.540 2210 Reusing old log C:\Users\Administrator\twitterx\data\profiles\acc_002\Default\shared_proto_db/000010.log 
+2026/11/11-05:24:09.617 226c Level-0 table #14: started
+2026/11/11-05:24:09.693 226c Level-0 table #14: 90580 bytes OK
+2026/11/11-05:24:09.727 226c Delete type=0 #10

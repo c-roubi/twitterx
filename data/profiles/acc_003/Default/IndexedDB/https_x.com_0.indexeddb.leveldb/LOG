@@ -1,0 +1,12 @@
+2026/11/11-11:29:13.994 255c Reusing MANIFEST C:\Users\Administrator\twitterx\data\profiles\acc_003\Default\IndexedDB\https_x.com_0.indexeddb.leveldb/MANIFEST-000001
+2026/11/11-11:29:13.995 255c Recovering log #15
+2026/11/11-11:29:14.002 255c Reusing old log C:\Users\Administrator\twitterx\data\profiles\acc_003\Default\IndexedDB\https_x.com_0.indexeddb.leveldb/000015.log 
+2026/11/11-11:34:25.295 255c Level-0 table #20: started
+2026/11/11-11:34:25.466 255c Level-0 table #20: 2819135 bytes OK
+2026/11/11-11:34:25.488 255c Delete type=0 #15
+2026/11/11-11:37:31.157 255c Compacting 1@1 + 1@2 files
+2026/11/11-11:37:31.189 255c Generated table #21@1: 65 keys, 15879 bytes
+2026/11/11-11:37:31.189 255c Compacted 1@1 + 1@2 files => 15879 bytes
+2026/11/11-11:37:31.194 255c compacted to: files[ 0 0 1 0 0 0 0 ]
+2026/11/11-11:37:31.207 255c Delete type=2 #17
+2026/11/11-11:37:31.207 255c Delete type=2 #20

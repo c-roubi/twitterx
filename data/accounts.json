@@ -1,0 +1,34 @@
+{
+  "acc_001": {
+    "username": "tony",
+    "handle": "khaledropy1",
+    "display_name": "",
+    "timezone": "Asia/Riyadh",
+    "enabled": true,
+    "notes": "recovered"
+  },
+  "acc_002": {
+    "username": "",
+    "handle": "aliy500",
+    "display_name": "",
+    "timezone": "Asia/Riyadh",
+    "enabled": true,
+    "notes": "recovered"
+  },
+  "acc_003": {
+    "username": "",
+    "handle": "Tonystrak61",
+    "display_name": "",
+    "timezone": "Asia/Riyadh",
+    "enabled": true,
+    "notes": "recovered"
+  },
+  "acc_004": {
+    "username": "",
+    "handle": "cryptoboss",
+    "display_name": "",
+    "timezone": "Asia/Riyadh",
+    "enabled": true,
+    "notes": "recovered"
+  }
+}

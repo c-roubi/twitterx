@@ -1,0 +1,212 @@
+{
+  "manager_handle": "cryptocanaan",
+  "monitor": {
+    "method": "account",
+    "interval_min": [
+      50,
+      120
+    ],
+    "max_tweet_age_hours": 12,
+    "use_account": "acc_001"
+  },
+  "resilience": {
+    "network_retries": 2,
+    "retry_base_delay_s": 5.0,
+    "action_max_attempts": 3,
+    "page_load_timeout_s": 60000,
+    "goto_timeout_s": 60000,
+    "monitor_fetch_retries": 2
+  },
+  "engagement": {
+    "accounts_per_tweet": [
+      20,
+      50
+    ],
+    "spread_hours": [
+      0.01,
+      0.02
+    ],
+    "action_mix": {
+      "like": 1.0,
+      "retweet": 1.0,
+      "comment": 1.0
+    },
+    "max_comments_per_tweet": 200
+  },
+  "comments": {
+    "contextual": true,
+    "match_language": true,
+    "en_ratio": 0.9,
+    "ai": {
+      "enabled": false,
+      "provider": "gemini",
+      "api_key": "AQ.Ab8RN6L5mRwU8l_3WmE8SIQ2QSyz9cY_4227dOIuMwgbE1okPQ",
+      "model": "gemini-1.5-flash",
+      "min_interval_s": 30
+    }
+  },
+  "behavior": {
+    "active_hours": [
+      "08:00",
+      "23:00"
+    ],
+    "max_likes_per_day": [
+      25,
+      45
+    ],
+    "max_retweets_per_day": [
+      2,
+      6
+    ],
+    "max_comments_per_day": [
+      1,
+      4
+    ],
+    "min_action_delay_s": [
+      15,
+      35
+    ],
+    "max_action_delay_s": [
+      45,
+      120
+    ],
+    "session_minutes": [
+      25,
+      45
+    ],
+    "sessions_per_day": [
+      1,
+      3
+    ],
+    "rest_day_chance": 0.12,
+    "allow_follow": false,
+    "max_follows_per_day": 2
+  },
+  "follow": {
+    "enabled": true,
+    "daily_target": [
+      5,
+      10
+    ],
+    "per_session": [
+      1,
+      3
+    ],
+    "delay_between_s": [
+      25,
+      80
+    ],
+    "ramp_days": 7,
+    "require_bio": false,
+    "min_followers": 30,
+    "max_followers": 6000,
+    "skip_verified": true,
+    "visit_only_chance": 0.25,
+    "harvest": {
+      "enabled": true,
+      "min_reposts": 20,
+      "targets_per_session": [
+        1,
+        2
+      ],
+      "per_target": 15,
+      "refill_below": 8,
+      "from_followers": true,
+      "include_quoters": true
+    },
+    "queries": [
+      "bitcoin",
+      "crypto",
+      "altcoins",
+      "ethereum",
+      "solana",
+      "$BTC",
+      "crypto trading",
+      "#crypto",
+      "diamond hands",
+      "altseason"
+    ]
+  },
+  "warmup": {
+    "enabled": true,
+    "session_minutes": [
+      8,
+      15
+    ],
+    "browse_probability": 0.8,
+    "view_profiles": [
+      1,
+      2
+    ],
+    "max_search_scrolls": 3
+  },
+  "proxies": {
+    "enabled": false,
+    "list": [],
+    "fallback_to_direct": true,
+    "test_timeout": 10,
+    "rotate": false
+  },
+  "telegram": {
+    "enabled": true,
+    "bot_token": "9062258390:AAGWSUufJoQAZ-R5lDkF26XSGAJpOYfHs04",
+    "admin_ids": [
+      6745575323
+    ],
+    "notify": true,
+    "spread_hours": [
+      0.1,
+      1.0
+    ],
+    "instant": true,
+    "action_mix": {
+      "like": 1.0,
+      "retweet": 1.0,
+      "comment": 1.0
+    },
+    "action_delay_s": [
+      2,
+      6
+    ],
+    "channel": {
+      "enabled": true,
+      "chat_id": -1002323915571,
+      "instant": true,
+      "max_age_min": 30,
+      "first_check_s": 30,
+      "retry_every_s": 60,
+      "retries": 3,
+      "fallback_interval_min": [
+        60,
+        90
+      ]
+    },
+    "daily_summary": {
+      "enabled": true,
+      "time": "00:30",
+      "timezone": "Asia/Gaza"
+    },
+    "ca_bundle": "",
+    "insecure_ssl": false
+  },
+  "ui": {
+    "autostart_engine": false
+  },
+  "warp": {
+    "enabled": false,
+    "accounts_per_ip": 5,
+    "isolate_proxy_mode": true,
+    "proxy_port": 40000,
+    "disconnect_wait_s": 2.5,
+    "connect_wait_s": 4.5,
+    "verify_retries": 3,
+    "auto_install": true,
+    "ensure_new_ip": true,
+    "max_ip_attempts": 3
+  },
+  "browser": {
+    "headless": false,
+    "slow_mo": 30,
+    "max_context_minutes": 20
+  }
+}

@@ -1,0 +1,1132 @@
+{
+  "1994760282065809633": {
+    "tweet_id": "1994760282065809633",
+    "url": "https://x.com/twitter/status/1994760282065809633",
+    "text": "مسابقة مهندس الكريبتو — 500$! \n\nجاهز تربح 100$؟ 👀🔥\n\nشروط المشاركة:\n\nتابع حسابي على تويتر:\n\n@engcryptoo\n\n\nhttps://\nx.com/engcryptoo\n\nتفاعل على هاي التويتة (لايك + كومنت).\n\nإعادة نشر (ريتويت).\n\nالجوائز:\n\n5 فائزين — كل واحد 100$\nالمجموع 500$\nوالسحب يتم عند وصول الحساب 1000 متابع.",
+    "detected_at": "2026-09-08T14:52:20",
+    "scheduled": true,
+    "queue": [
+      {
+        "account": "acc_001",
+        "actions": [
+          "like"
+        ],
+        "due": 1788873647.5193644,
+        "done": []
+      }
+    ],
+    "cancelled": true,
+    "cancelled_at": "2026-11-05T04:21:38"
+  },
+  "2004883408355557412": {
+    "tweet_id": "2004883408355557412",
+    "url": "https://x.com/twitter/status/2004883408355557412",
+    "text": "$BIFI \n تم تحقيق 65% من سعر دخولنا مبارك عليكم❤️\n\n#EPIK #ISLM #ONT #TRU $BOMB",
+    "detected_at": "2026-09-08T14:52:20",
+    "scheduled": true,
+    "queue": [
+      {
+        "account": "acc_001",
+        "actions": [
+          "like"
+        ],
+        "due": 1788872895.5810308,
+        "done": []
+      }
+    ],
+    "cancelled": true,
+    "cancelled_at": "2026-11-05T04:21:38"
+  },
+  "2004257433863245897": {
+    "tweet_id": "2004257433863245897",
+    "url": "https://x.com/twitter/status/2004257433863245897",
+    "text": "$SYLO \nتحقيق 40% ربح 🔥🔥",
+    "detected_at": "2026-09-08T14:52:20",
+    "scheduled": true,
+    "queue": [
+      {
+        "account": "acc_001",
+        "actions": [
+          "like"
+        ],
+        "due": 1788869545.8970153,
+        "done": []
+      }
+    ],
+    "cancelled": true,
+    "cancelled_at": "2026-11-05T04:21:38"
+  },
+  "2004138528163447267": {
+    "tweet_id": "2004138528163447267",
+    "url": "https://x.com/twitter/status/2004138528163447267",
+    "text": "$SYLO \nبدأت المضخة🔥",
+    "detected_at": "2026-09-08T14:52:20",
+    "scheduled": true,
+    "queue": [
+      {
+        "account": "acc_001",
+        "actions": [
+          "like"
+        ],
+        "due": 1788871299.537043,
+        "done": []
+      }
+    ],
+    "cancelled": true,
+    "cancelled_at": "2026-11-05T04:21:38"
+  },
+  "2004137642649395548": {
+    "tweet_id": "2004137642649395548",
+    "url": "https://x.com/twitter/status/2004137642649395548",
+    "text": "$SYLO 🔥🔥",
+    "detected_at": "2026-09-08T14:52:20",
+    "scheduled": true,
+    "queue": [
+      {
+        "account": "acc_001",
+        "actions": [
+          "like"
+        ],
+        "due": 1788870088.4457846,
+        "done": []
+      }
+    ],
+    "cancelled": true,
+    "cancelled_at": "2026-11-05T04:21:38"
+  },
+  "2000107022315139577": {
+    "tweet_id": "2000107022315139577",
+    "url": "https://x.com/twitter/status/2000107022315139577",
+    "text": "$BIFI",
+    "detected_at": "2026-09-12T13:03:28",
+    "scheduled": true,
+    "queue": [
+      {
+        "account": "acc_001",
+        "actions": [
+          "like"
+        ],
+        "due": 1789216899.5521863,
+        "done": []
+      }
+    ],
+    "cancelled": true,
+    "cancelled_at": "2026-11-05T04:21:38"
+  },
+  "2112515434163703879": {
+    "tweet_id": "2112515434163703879",
+    "url": "https://x.com/twitter/status/2112515434163703879",
+    "text": "$BOS \nThe downtrend was broken and successfully retested, stabilizing above it.\nThe coin has great potential.\nWe will see a strong pump.",
+    "detected_at": "2026-10-20T15:05:26",
+    "scheduled": true,
+    "queue": [
+      {
+        "account": "acc_001",
+        "actions": [
+          "like"
+        ],
+        "due": 1792499393.747439,
+        "done": []
+      }
+    ],
+    "cancelled": true,
+    "cancelled_at": "2026-11-05T04:21:38"
+  },
+  "2118732644993126788": {
+    "tweet_id": "2118732644993126788",
+    "url": "https://x.com/twitter/status/2118732644993126788",
+    "text": "$MOVR\n \nI expect a major upward surge",
+    "detected_at": "2026-11-06T07:53:06",
+    "scheduled": true,
+    "source": "manager",
+    "priority": true,
+    "notify_chat": 6745575323,
+    "skipped": [],
+    "queue": [
+      {
+        "account": "acc_001",
+        "actions": [
+          "like"
+        ],
+        "due": 1793980543.3881884,
+        "done": [
+          "like"
+        ]
+      },
+      {
+        "account": "acc_003",
+        "actions": [
+          "like"
+        ],
+        "due": 1793980543.3881884,
+        "done": [
+          "like"
+        ]
+      },
+      {
+        "account": "acc_004",
+        "actions": [
+          "like",
+          "retweet",
+          "comment"
+        ],
+        "due": 1793980543.3881884,
+        "done": [
+          "like",
+          "retweet",
+          "comment"
+        ]
+      },
+      {
+        "account": "acc_002",
+        "actions": [
+          "like"
+        ],
+        "due": 1793980543.3881884,
+        "done": [
+          "like"
+        ]
+      }
+    ],
+    "comments_used": [
+      "Nice call on $MOVR, watching closely"
+    ],
+    "completed_at": "2026-11-06T07:57:43"
+  },
+  "2118999201732272480": {
+    "tweet_id": "2118999201732272480",
+    "url": "https://x.com/twitter/status/2118999201732272480",
+    "text": "$NAVI\n \nAbout to take off .\nA new upward trend will begin .",
+    "detected_at": "2026-11-07T01:30:32",
+    "scheduled": true,
+    "source": "channel",
+    "priority": true,
+    "notify_chat": null,
+    "skipped": [],
+    "queue": [
+      {
+        "account": "acc_004",
+        "actions": [
+          "like",
+          "retweet",
+          "comment"
+        ],
+        "due": 1794043832.654158,
+        "done": [
+          "like",
+          "retweet",
+          "comment"
+        ]
+      },
+      {
+        "account": "acc_003",
+        "actions": [
+          "like",
+          "retweet",
+          "comment"
+        ],
+        "due": 1794043832.654158,
+        "done": [],
+        "attempts": {
+          "like": 3,
+          "retweet": 3,
+          "comment": 3
+        },
+        "failed": [
+          "like",
+          "retweet",
+          "comment"
+        ]
+      },
+      {
+        "account": "acc_002",
+        "actions": [
+          "like",
+          "retweet",
+          "comment"
+        ],
+        "due": 1794043832.654158,
+        "done": [
+          "like",
+          "retweet",
+          "comment"
+        ]
+      },
+      {
+        "account": "acc_001",
+        "actions": [
+          "like",
+          "retweet",
+          "comment"
+        ],
+        "due": 1794043832.654158,
+        "done": [
+          "like",
+          "retweet",
+          "comment"
+        ]
+      }
+    ],
+    "comments_used": [
+      "Looks like $NAVI is finally clearing resistance.",
+      "Volume looks prime for $NAVI to break out.",
+      "What is the next resistance level for $NAVI?"
+    ],
+    "cancelled": true,
+    "cancelled_at": "2026-11-07T01:46:12"
+  },
+  "2119346302920147219": {
+    "tweet_id": "2119346302920147219",
+    "url": "https://x.com/twitter/status/2119346302920147219",
+    "text": "$XMN \nForming an upward trend .\nPreserving this area pushes us towards a large pump .",
+    "detected_at": "2026-11-08T00:29:03",
+    "scheduled": true,
+    "source": "channel",
+    "priority": true,
+    "notify_chat": null,
+    "skipped": [],
+    "queue": [
+      {
+        "account": "acc_004",
+        "actions": [
+          "like",
+          "retweet",
+          "comment"
+        ],
+        "due": 1794126543.0744815,
+        "done": [
+          "like",
+          "retweet",
+          "comment"
+        ]
+      },
+      {
+        "account": "acc_002",
+        "actions": [
+          "like",
+          "retweet",
+          "comment"
+        ],
+        "due": 1794126543.0744815,
+        "done": [
+          "like",
+          "retweet",
+          "comment"
+        ]
+      },
+      {
+        "account": "acc_003",
+        "actions": [
+          "like",
+          "retweet",
+          "comment"
+        ],
+        "due": 1794126543.0744815,
+        "done": [],
+        "attempts": {
+          "like": 3,
+          "retweet": 3,
+          "comment": 3
+        },
+        "failed": [
+          "like",
+          "retweet",
+          "comment"
+        ]
+      },
+      {
+        "account": "acc_001",
+        "actions": [
+          "like",
+          "retweet",
+          "comment"
+        ],
+        "due": 1794126543.0744815,
+        "done": [
+          "like",
+          "retweet",
+          "comment"
+        ]
+      }
+    ],
+    "comments_used": [
+      "Does $XMN have enough volume to break resistance?",
+      "Looks like $XMN is ready to break resistance.",
+      "Looks like a solid support flip for $XMN."
+    ],
+    "cancelled": true,
+    "cancelled_at": "2026-11-08T00:49:59"
+  },
+  "2119351071646634314": {
+    "tweet_id": "2119351071646634314",
+    "url": "https://x.com/twitter/status/2119351071646634314",
+    "text": "$XMN \nLook at the chart.\nit will tell you where the price is headed.",
+    "detected_at": "2026-11-08T00:50:12",
+    "scheduled": true,
+    "source": "telegram",
+    "priority": true,
+    "notify_chat": 6745575323,
+    "skipped": [],
+    "queue": [
+      {
+        "account": "acc_001",
+        "actions": [
+          "like",
+          "retweet",
+          "comment"
+        ],
+        "due": 1794127812.3503063,
+        "done": [
+          "like",
+          "retweet",
+          "comment"
+        ]
+      },
+      {
+        "account": "acc_003",
+        "actions": [
+          "like",
+          "retweet",
+          "comment"
+        ],
+        "due": 1794127812.3503063,
+        "done": [
+          "like",
+          "retweet",
+          "comment"
+        ]
+      },
+      {
+        "account": "acc_002",
+        "actions": [
+          "like",
+          "retweet",
+          "comment"
+        ],
+        "due": 1794127812.3503063,
+        "done": [
+          "like",
+          "retweet",
+          "comment"
+        ]
+      },
+      {
+        "account": "acc_004",
+        "actions": [
+          "like",
+          "retweet",
+          "comment"
+        ],
+        "due": 1794127812.3503063,
+        "done": [
+          "like",
+          "retweet",
+          "comment"
+        ]
+      }
+    ],
+    "comments_used": [
+      "The RSI is hitting oversold levels on $XMN.",
+      "Is $XMN testing that multi-month trendline support?",
+      "The RSI on $XMN looks ready for a breakout.",
+      "Added $XMN to the watchlist"
+    ],
+    "completed_at": "2026-11-08T00:53:50"
+  },
+  "2119513131877601454": {
+    "tweet_id": "2119513131877601454",
+    "url": "https://x.com/twitter/status/2119513131877601454",
+    "text": "$NAVI\n \nOn fire",
+    "detected_at": "2026-11-08T11:33:02",
+    "scheduled": true,
+    "source": "channel",
+    "priority": true,
+    "notify_chat": null,
+    "skipped": [],
+    "queue": [
+      {
+        "account": "acc_001",
+        "actions": [
+          "like",
+          "retweet",
+          "comment"
+        ],
+        "due": 1794166382.9564476,
+        "done": [
+          "like",
+          "retweet",
+          "comment"
+        ]
+      },
+      {
+        "account": "acc_003",
+        "actions": [
+          "like",
+          "retweet",
+          "comment"
+        ],
+        "due": 1794166382.9564476,
+        "done": [
+          "like",
+          "retweet",
+          "comment"
+        ]
+      },
+      {
+        "account": "acc_002",
+        "actions": [
+          "like",
+          "retweet",
+          "comment"
+        ],
+        "due": 1794166382.9564476,
+        "done": [
+          "like",
+          "retweet",
+          "comment"
+        ]
+      },
+      {
+        "account": "acc_004",
+        "actions": [
+          "like",
+          "retweet",
+          "comment"
+        ],
+        "due": 1794166382.9564476,
+        "done": [
+          "like",
+          "retweet",
+          "comment"
+        ]
+      }
+    ],
+    "comments_used": [
+      "$NAVI has real potential 💎",
+      "Is $NAVI testing resistance at the daily high?",
+      "Holding strong, any target for the next resistance?",
+      "Can $NAVI reclaim the previous resistance?"
+    ],
+    "completed_at": "2026-11-08T11:48:37"
+  },
+  "2119824713086095737": {
+    "tweet_id": "2119824713086095737",
+    "url": "https://x.com/twitter/status/2119824713086095737",
+    "text": "$NAVI\n \nTP1  \n52% profits",
+    "detected_at": "2026-11-09T08:10:03",
+    "scheduled": true,
+    "source": "channel",
+    "priority": true,
+    "notify_chat": null,
+    "skipped": [],
+    "queue": [
+      {
+        "account": "acc_003",
+        "actions": [
+          "like",
+          "retweet",
+          "comment"
+        ],
+        "due": 1794240603.0385344,
+        "done": [],
+        "attempts": {
+          "like": 3,
+          "retweet": 3,
+          "comment": 3
+        },
+        "failed": [
+          "like",
+          "retweet",
+          "comment"
+        ]
+      },
+      {
+        "account": "acc_001",
+        "actions": [
+          "like",
+          "retweet",
+          "comment"
+        ],
+        "due": 1794240603.0385344,
+        "done": [
+          "like",
+          "retweet",
+          "comment"
+        ]
+      },
+      {
+        "account": "acc_004",
+        "actions": [
+          "like",
+          "retweet",
+          "comment"
+        ],
+        "due": 1794240603.0385344,
+        "done": [
+          "like",
+          "retweet",
+          "comment"
+        ]
+      },
+      {
+        "account": "acc_002",
+        "actions": [
+          "like",
+          "retweet",
+          "comment"
+        ],
+        "due": 1794240603.0385344,
+        "done": [
+          "like",
+          "retweet",
+          "comment"
+        ]
+      }
+    ],
+    "comments_used": [
+      "Nice move on $NAVI, looking for re-entry?",
+      "Is the RSI hitting overbought levels on the 4H?",
+      "Any signs of a breakout on the 4H RSI for $NAVI?"
+    ]
+  },
+  "2120076991118426353": {
+    "tweet_id": "2120076991118426353",
+    "url": "https://x.com/twitter/status/2120076991118426353",
+    "text": "$MHA \nIt looks like it's poised for a huge rise",
+    "detected_at": "2026-11-10T00:52:58",
+    "scheduled": true,
+    "source": "channel",
+    "priority": true,
+    "notify_chat": null,
+    "skipped": [],
+    "queue": [
+      {
+        "account": "acc_001",
+        "actions": [
+          "like",
+          "retweet",
+          "comment"
+        ],
+        "due": 1794300778.8218777,
+        "done": [
+          "like",
+          "retweet",
+          "comment"
+        ]
+      },
+      {
+        "account": "acc_003",
+        "actions": [
+          "like",
+          "retweet",
+          "comment"
+        ],
+        "due": 1794300778.8218777,
+        "done": [
+          "like",
+          "retweet",
+          "comment"
+        ]
+      },
+      {
+        "account": "acc_002",
+        "actions": [
+          "like",
+          "retweet",
+          "comment"
+        ],
+        "due": 1794300778.8218777,
+        "done": [
+          "like",
+          "retweet",
+          "comment"
+        ]
+      },
+      {
+        "account": "acc_004",
+        "actions": [
+          "like",
+          "retweet",
+          "comment"
+        ],
+        "due": 1794300778.8218777,
+        "done": [
+          "like",
+          "retweet",
+          "comment"
+        ]
+      }
+    ],
+    "comments_used": [
+      "$MHA keeps climbing, love to see it",
+      "$MHA is looking so bullish right now 🚀",
+      "$MHA to the moon 🚀 here we go",
+      "$MHA keeps breaking higher, love to see it 🙏"
+    ],
+    "completed_at": "2026-11-10T00:56:19"
+  },
+  "2120088396051701914": {
+    "tweet_id": "2120088396051701914",
+    "url": "https://x.com/twitter/status/2120088396051701914",
+    "text": "$MHA \nAccording to my research, there will be no token unlocks until March 2027.\nThis is good for the pump .",
+    "detected_at": "2026-11-10T01:37:49",
+    "scheduled": true,
+    "source": "channel",
+    "priority": true,
+    "notify_chat": null,
+    "skipped": [],
+    "queue": [
+      {
+        "account": "acc_002",
+        "actions": [
+          "like",
+          "retweet",
+          "comment"
+        ],
+        "due": 1794303469.9168901,
+        "done": [
+          "like",
+          "retweet",
+          "comment"
+        ]
+      },
+      {
+        "account": "acc_004",
+        "actions": [
+          "like",
+          "retweet",
+          "comment"
+        ],
+        "due": 1794303469.9168901,
+        "done": [
+          "like",
+          "retweet",
+          "comment"
+        ]
+      },
+      {
+        "account": "acc_001",
+        "actions": [
+          "like",
+          "retweet",
+          "comment"
+        ],
+        "due": 1794303469.9168901,
+        "done": [
+          "like",
+          "retweet",
+          "comment"
+        ]
+      },
+      {
+        "account": "acc_003",
+        "actions": [
+          "like",
+          "retweet",
+          "comment"
+        ],
+        "due": 1794303469.9168901,
+        "done": [
+          "like",
+          "retweet",
+          "comment"
+        ]
+      }
+    ],
+    "comments_used": [
+      "$MHA set up perfectly for a move ❤️",
+      "Pump incoming, get ready 💪",
+      "$MHA about to rip 🔥",
+      "Get ready for $MHA 🚀 let's ride 👏"
+    ],
+    "completed_at": "2026-11-10T01:41:06"
+  },
+  "2120244439377416426": {
+    "tweet_id": "2120244439377416426",
+    "url": "https://x.com/twitter/status/2120244439377416426",
+    "text": "$MHA \nTP1  \n30% profits",
+    "detected_at": "2026-11-10T11:59:18",
+    "scheduled": true,
+    "source": "channel",
+    "priority": true,
+    "notify_chat": null,
+    "skipped": [],
+    "queue": [
+      {
+        "account": "acc_003",
+        "actions": [
+          "like",
+          "retweet",
+          "comment"
+        ],
+        "due": 1794340758.7909813,
+        "done": [
+          "like",
+          "retweet",
+          "comment"
+        ]
+      },
+      {
+        "account": "acc_004",
+        "actions": [
+          "like",
+          "retweet",
+          "comment"
+        ],
+        "due": 1794340758.7909813,
+        "done": [
+          "like",
+          "retweet",
+          "comment"
+        ]
+      },
+      {
+        "account": "acc_002",
+        "actions": [
+          "like",
+          "retweet",
+          "comment"
+        ],
+        "due": 1794340758.7909813,
+        "done": [
+          "like",
+          "retweet",
+          "comment"
+        ]
+      },
+      {
+        "account": "acc_001",
+        "actions": [
+          "like",
+          "retweet",
+          "comment"
+        ],
+        "due": 1794340758.7909813,
+        "done": [
+          "like",
+          "retweet",
+          "comment"
+        ]
+      }
+    ],
+    "comments_used": [
+      "$MHA hitting targets as expected 🤑",
+      "$MHA leading the alt rally charge",
+      "$MHA hitting targets nicely 🤑",
+      "Targets on $MHA hit, great call."
+    ],
+    "completed_at": "2026-11-10T12:03:04"
+  },
+  "2120247477840294303": {
+    "tweet_id": "2120247477840294303",
+    "url": "https://x.com/twitter/status/2120247477840294303",
+    "text": "$EPIC \nI see in it an opportunity to rebound strongly and achieve the targets.",
+    "detected_at": "2026-11-10T12:10:56",
+    "scheduled": true,
+    "source": "channel",
+    "priority": true,
+    "notify_chat": null,
+    "skipped": [],
+    "queue": [
+      {
+        "account": "acc_004",
+        "actions": [
+          "like",
+          "retweet",
+          "comment"
+        ],
+        "due": 1794341456.8597696,
+        "done": [
+          "like",
+          "retweet",
+          "comment"
+        ]
+      },
+      {
+        "account": "acc_003",
+        "actions": [
+          "like",
+          "retweet",
+          "comment"
+        ],
+        "due": 1794341456.8597696,
+        "done": [
+          "like",
+          "retweet",
+          "comment"
+        ]
+      },
+      {
+        "account": "acc_002",
+        "actions": [
+          "like",
+          "retweet",
+          "comment"
+        ],
+        "due": 1794341456.8597696,
+        "done": [
+          "like",
+          "retweet",
+          "comment"
+        ]
+      },
+      {
+        "account": "acc_001",
+        "actions": [
+          "like",
+          "retweet",
+          "comment"
+        ],
+        "due": 1794341456.8597696,
+        "done": [
+          "like",
+          "retweet",
+          "comment"
+        ]
+      }
+    ],
+    "comments_used": [
+      "Nice call on $EPIC, following",
+      "$EPIC is a solid pick 👀!",
+      "$EPIC is my favorite right now",
+      "$EPIC delivering gains as promised 🔥"
+    ],
+    "completed_at": "2026-11-10T12:14:17"
+  },
+  "2120255936681988127": {
+    "tweet_id": "2120255936681988127",
+    "url": "https://x.com/twitter/status/2120255936681988127",
+    "text": "$MHA \nWe are the top gainers",
+    "detected_at": "2026-11-10T12:44:20",
+    "scheduled": true,
+    "source": "channel",
+    "priority": true,
+    "notify_chat": null,
+    "skipped": [],
+    "queue": [
+      {
+        "account": "acc_004",
+        "actions": [
+          "like",
+          "retweet",
+          "comment"
+        ],
+        "due": 1794343460.8931205,
+        "done": [
+          "like",
+          "retweet",
+          "comment"
+        ]
+      },
+      {
+        "account": "acc_003",
+        "actions": [
+          "like",
+          "retweet",
+          "comment"
+        ],
+        "due": 1794343460.8931205,
+        "done": [
+          "like",
+          "retweet",
+          "comment"
+        ]
+      },
+      {
+        "account": "acc_001",
+        "actions": [
+          "like",
+          "retweet",
+          "comment"
+        ],
+        "due": 1794343460.8931205,
+        "done": [
+          "like",
+          "retweet",
+          "comment"
+        ]
+      },
+      {
+        "account": "acc_002",
+        "actions": [
+          "like",
+          "retweet",
+          "comment"
+        ],
+        "due": 1794343460.8931205,
+        "done": [
+          "like",
+          "retweet",
+          "comment"
+        ]
+      }
+    ],
+    "comments_used": [
+      "$MHA looks promising 💎 ✨",
+      "Diversifying into alts is the play",
+      "$MHA moving nicely with the alts",
+      "This one looks promising"
+    ],
+    "completed_at": "2026-11-10T12:47:48"
+  },
+  "2120477715807498524": {
+    "tweet_id": "2120477715807498524",
+    "url": "https://x.com/twitter/status/2120477715807498524",
+    "text": "$LYN \nI bought it.\nI expect it to start pumping.",
+    "detected_at": "2026-11-11T03:25:50",
+    "scheduled": true,
+    "source": "channel",
+    "priority": true,
+    "notify_chat": null,
+    "skipped": [],
+    "queue": [
+      {
+        "account": "acc_004",
+        "actions": [
+          "like",
+          "retweet",
+          "comment"
+        ],
+        "due": 1794396350.8098783,
+        "done": [
+          "like",
+          "retweet",
+          "comment"
+        ]
+      },
+      {
+        "account": "acc_002",
+        "actions": [
+          "like",
+          "retweet",
+          "comment"
+        ],
+        "due": 1794396350.8098783,
+        "done": [
+          "like"
+        ],
+        "attempts": {
+          "retweet": 3,
+          "comment": 3
+        },
+        "failed": [
+          "retweet",
+          "comment"
+        ]
+      },
+      {
+        "account": "acc_001",
+        "actions": [
+          "like",
+          "retweet",
+          "comment"
+        ],
+        "due": 1794396350.8098783,
+        "done": [
+          "like",
+          "retweet",
+          "comment"
+        ]
+      },
+      {
+        "account": "acc_003",
+        "actions": [
+          "like",
+          "retweet",
+          "comment"
+        ],
+        "due": 1794396350.8098783,
+        "done": [
+          "like",
+          "retweet",
+          "comment"
+        ]
+      }
+    ],
+    "comments_used": [
+      "$LYN is one to watch 👀",
+      "Appreciate the clear levels here",
+      "Good insight, appreciate the update"
+    ]
+  },
+  "2120506629548351725": {
+    "tweet_id": "2120506629548351725",
+    "url": "https://x.com/twitter/status/2120506629548351725",
+    "text": "$EPIC \nStart moving",
+    "detected_at": "2026-11-11T05:20:32",
+    "scheduled": true,
+    "source": "channel",
+    "priority": true,
+    "notify_chat": null,
+    "skipped": [],
+    "queue": [
+      {
+        "account": "acc_001",
+        "actions": [
+          "like",
+          "retweet",
+          "comment"
+        ],
+        "due": 1794403232.7589784,
+        "done": [
+          "like",
+          "retweet",
+          "comment"
+        ]
+      },
+      {
+        "account": "acc_003",
+        "actions": [
+          "like",
+          "retweet",
+          "comment"
+        ],
+        "due": 1794403232.7589784,
+        "done": [
+          "like",
+          "retweet",
+          "comment"
+        ]
+      },
+      {
+        "account": "acc_002",
+        "actions": [
+          "like",
+          "retweet",
+          "comment"
+        ],
+        "due": 1794403232.7589784,
+        "done": [],
+        "attempts": {
+          "like": 3,
+          "retweet": 3,
+          "comment": 3
+        },
+        "failed": [
+          "like",
+          "retweet",
+          "comment"
+        ]
+      },
+      {
+        "account": "acc_004",
+        "actions": [
+          "like",
+          "retweet",
+          "comment"
+        ],
+        "due": 1794403232.7589784,
+        "done": [
+          "like",
+          "retweet",
+          "comment"
+        ]
+      }
+    ],
+    "comments_used": [
+      "Alts are heating up right now",
+      "Useful info as always",
+      "What a find 💎"
+    ]
+  }
+}
