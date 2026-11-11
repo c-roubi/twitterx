@@ -11,3 +11,4 @@ data/ai_state.json
 data/tg_offset.json
 data/follow_pool.json
 data/daily_ledger.json
+data/backups/
